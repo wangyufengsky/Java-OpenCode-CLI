@@ -115,6 +115,33 @@ public class GitReportOrchestrator {
         log.info("Git report synthesis-only orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
+    public void runSingleAuthor(GitReportProperties properties, String authorKey) throws Exception {
+        if (authorKey == null || authorKey.isBlank()) {
+            throw new IllegalArgumentException("authorKey is required for git-report author rerun");
+        }
+        Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
+        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
+        Map<String, Object> summary = readMap(out.resolve("summary.json"));
+        Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
+        Map<String, Object> target = listOfMaps(indexInputs.get("tasks")).stream()
+                .filter(task -> authorKey.equals(task.get("author_key")))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("author task not found in index_inputs.json: " + authorKey));
+        log.info("Git report single-author rerun started: authorKey={}, author={}, out={}, repo={}",
+                target.get("author_key"),
+                target.get("author"),
+                out,
+                properties.getPaths().getRepo().toAbsolutePath().normalize());
+        AuthorTaskResult result = authorCallable(properties, out, target, server).call();
+        if (!result.success()) {
+            throw new IllegalStateException("author task failed: " + result.authorKey() + " (" + result.author() + "), status=" + result.statusPath() + ", error=" + result.error());
+        }
+        validateExistingAuthorOutputs(indexInputs);
+        Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
+        runSynthesis(properties, out, qualityScores, server);
+        log.info("Git report single-author rerun completed: authorKey={}, finalReport={}", authorKey, out.resolve("code-contribution-report.md"));
+    }
+
     private void validateExistingAuthorOutputs(Map<String, Object> indexInputs) {
         List<String> failures = new ArrayList<>();
         for (Map<String, Object> task : listOfMaps(indexInputs.get("tasks"))) {

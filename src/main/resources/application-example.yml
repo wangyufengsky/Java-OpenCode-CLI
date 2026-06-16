@@ -1,44 +1,24 @@
-git-report:
+opencode-runner:
   enabled: true
-
-  project:
-    id: "upfs-production"
-    name: "UPFS Production"
-    run-id:
-
-  paths:
-    repo: "D:/workspace/upfs-production"
-    out: "D:/reports/git-code-contribution/2026-06-15"
-    opencode-bin: "opencode"
-
-  git:
-    since: "2026-06-01"
-    until: "2026-06-15"
-    revision: "HEAD"
-    include-merges: false
-    author-map:
-    include: []
-    exclude:
-      - "target/**"
-      - "*.lock"
-
+  active-chain: "git-code-contribution-report"
+  mode: "full"
+  run-date:
+  config-dir: "classpath:chains"
+  rerun:
+    # git-code-contribution-report: author | synthesis
+    # smartesb: transaction | index
+    type:
+    id:
   opencode:
     # Java 会先检查 server-url；不可用且 manage-server=true 时自动执行:
     #   opencode serve --port 4096
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    opencode-bin: "opencode"
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
     model: ""
-    worker-message: "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。"
-    synthesis-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
-
-  runtime:
-    # full: 重新统计并执行个人报告 + 总报告；synthesis-only: 使用现有个人报告补跑总报告
-    mode: "full"
-    resume: true
-    fail-fast: true

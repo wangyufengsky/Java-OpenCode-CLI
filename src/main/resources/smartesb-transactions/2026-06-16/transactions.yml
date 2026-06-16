@@ -1,0 +1,4 @@
+date: "2026-06-16"
+transactions:
+  - name: "CaRolloutRepeal"
+    description: "转账撤销/冲正"

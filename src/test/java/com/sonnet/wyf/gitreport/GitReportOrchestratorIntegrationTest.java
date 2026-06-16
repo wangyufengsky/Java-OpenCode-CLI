@@ -163,6 +163,73 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
     }
 
+    @Test
+    void rerunSingleAuthorUsesExistingPreparationAndRunsSynthesisAfterTargetAuthorOnly() throws Exception {
+        Path repo = tempDir.resolve("repo-rerun-author");
+        Path out = tempDir.resolve("out-rerun-author");
+        Files.createDirectories(repo);
+        Files.createDirectories(out.resolve("details"));
+        Files.createDirectories(out.resolve("reports/author-001-alice"));
+        Files.createDirectories(out.resolve("reports/author-002-bob"));
+        Path aliceDetail = out.resolve("details/author-001-alice.json");
+        Path bobDetail = out.resolve("details/author-002-bob.json");
+        Path aliceReport = out.resolve("reports/author-001-alice/person-report.md");
+        Path aliceQuality = out.resolve("reports/author-001-alice/quality-summary.json");
+        Path bobReport = out.resolve("reports/author-002-bob/person-report.md");
+        Path bobQuality = out.resolve("reports/author-002-bob/quality-summary.json");
+        Files.writeString(aliceReport, GitReportConstants.AUTHOR_REPORT_MARKER + "\n");
+        Files.writeString(aliceQuality, GitReportConstants.QUALITY_SUMMARY_MARKER + "\n");
+        Files.writeString(bobReport, "Bob 个人报告\n");
+        objectMapper.writeValue(bobQuality.toFile(), Map.of(
+                "author", "Bob <bob@example.com>",
+                "status", "completed",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "无"
+        ));
+        writeAuthorDetail(aliceDetail, "Alice <alice@example.com>", aliceReport, aliceQuality);
+        writeAuthorDetail(bobDetail, "Bob <bob@example.com>", bobReport, bobQuality);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("summary.json").toFile(), Map.of(
+                "ranking", List.of(
+                        Map.of("author_key", "author-001-alice", "author", "Alice <alice@example.com>", "rank", 1, "base_workload_score", 100.0),
+                        Map.of("author_key", "author-002-bob", "author", "Bob <bob@example.com>", "rank", 2, "base_workload_score", 80.0)
+                )
+        ));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("index_inputs.json").toFile(), Map.of(
+                "final_report", out.resolve("code-contribution-report.md").toString(),
+                "tasks", List.of(
+                        Map.of("author_key", "author-001-alice", "author", "Alice <alice@example.com>", "rank", 1, "detail_json", aliceDetail.toString(), "report_md", aliceReport.toString(), "quality_summary_json", aliceQuality.toString()),
+                        Map.of("author_key", "author-002-bob", "author", "Bob <bob@example.com>", "rank", 2, "detail_json", bobDetail.toString(), "report_md", bobReport.toString(), "quality_summary_json", bobQuality.toString())
+                )
+        ));
+        Files.writeString(out.resolve("code-contribution-report.md"), GitReportConstants.REPORT_MARKER + "\n");
+        startFakeOpenCodeServer();
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
+        GitReportPreparation preparation = new GitReportPreparation(null, null) {
+            @Override
+            public void prepare(GitReportProperties ignored) {
+                throw new AssertionError("preparation must not run for single-author rerun");
+            }
+        };
+
+        orchestrator(preparation).runSingleAuthor(properties, "author-001-alice");
+
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json: " + aliceDetail));
+        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json: " + bobDetail));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
+        assertThat(out.resolve("quality-scores.json")).exists();
+        assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
+        assertThat(bobReport).hasContent("Bob 个人报告\n");
+    }
+
     private GitReportOrchestrator orchestrator() {
         return orchestrator(new GitReportPreparation(
                 new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
@@ -262,6 +329,19 @@ class GitReportOrchestratorIntegrationTest {
         Path indexInputsPath = Path.of(extractPath(prompt, "index_inputs_json:"));
         JsonNode indexInputs = objectMapper.readTree(indexInputsPath.toFile());
         Files.writeString(Path.of(indexInputs.path("final_report").asText()), "最终中文总报告\n");
+    }
+
+    private void writeAuthorDetail(Path detailPath, String author, Path personReport, Path qualitySummary) throws IOException {
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(detailPath.toFile(), Map.of(
+                "author", author,
+                "output", Map.of(
+                        "person_report_md", personReport.toString(),
+                        "quality_summary_json", qualitySummary.toString(),
+                        "report_marker", GitReportConstants.AUTHOR_REPORT_MARKER,
+                        "quality_summary_marker", GitReportConstants.QUALITY_SUMMARY_MARKER
+                ),
+                "execution_worklist", List.of()
+        ));
     }
 
     private String extractPath(String prompt, String prefix) {

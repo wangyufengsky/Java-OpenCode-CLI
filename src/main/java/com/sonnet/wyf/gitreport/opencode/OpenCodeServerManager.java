@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.opencode;
 
 import com.sonnet.wyf.gitreport.GitReportProperties;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
+import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,20 +28,29 @@ public class OpenCodeServerManager {
     }
 
     public synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws Exception {
-        URI serverUrl = URI.create(properties.getOpencode().getServerUrl());
+        OpenCodeSettings settings = new OpenCodeSettings();
+        settings.setServerUrl(properties.getOpencode().getServerUrl());
+        settings.setManageServer(properties.getOpencode().isManageServer());
+        settings.setServerStartTimeoutSeconds(properties.getOpencode().getServerStartTimeoutSeconds());
+        settings.setOpencodeBin(properties.getPaths().getOpencodeBin());
+        return ensureReady(settings, out);
+    }
+
+    public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) throws Exception {
+        URI serverUrl = URI.create(settings.getServerUrl());
         if (client.isHealthy(serverUrl)) {
             log.info("Reusing healthy OpenCode Server: {}", serverUrl);
             return new OpenCodeServerHandle(serverUrl, false);
         }
-        if (!properties.getOpencode().isManageServer()) {
-            throw new IllegalStateException("OpenCode Server is not healthy at " + serverUrl + " and git-report.opencode.manage-server=false. Start `opencode serve` or enable server management.");
+        if (!settings.isManageServer()) {
+            throw new IllegalStateException("OpenCode Server is not healthy at " + serverUrl + " and opencode manage-server=false. Start `opencode serve` or enable server management.");
         }
         if (ownedProcess != null && ownedProcess.isAlive() && serverUrl.equals(ownedServerUrl)) {
-            waitForHealth(serverUrl, properties.getOpencode().getServerStartTimeoutSeconds());
+            waitForHealth(serverUrl, settings.getServerStartTimeoutSeconds());
             return new OpenCodeServerHandle(serverUrl, true);
         }
-        startServer(properties, out, serverUrl);
-        waitForHealth(serverUrl, properties.getOpencode().getServerStartTimeoutSeconds());
+        startServer(settings, out, serverUrl);
+        waitForHealth(serverUrl, settings.getServerStartTimeoutSeconds());
         return new OpenCodeServerHandle(serverUrl, true);
     }
 
@@ -60,10 +70,10 @@ public class OpenCodeServerManager {
         ownedServerUrl = null;
     }
 
-    private void startServer(GitReportProperties properties, Path out, URI serverUrl) throws IOException {
-        String opencodeBin = properties.getPaths().getOpencodeBin();
+    private void startServer(OpenCodeSettings settings, Path out, URI serverUrl) throws IOException {
+        String opencodeBin = settings.getOpencodeBin();
         if (opencodeBin == null || opencodeBin.isBlank()) {
-            throw new IllegalArgumentException("git-report.paths.opencode-bin is required when git-report.opencode.manage-server=true");
+            throw new IllegalArgumentException("opencode-bin is required when manage-server=true");
         }
         int port = serverUrl.getPort();
         if (port <= 0) {

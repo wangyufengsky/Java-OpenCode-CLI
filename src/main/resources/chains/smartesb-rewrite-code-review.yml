@@ -1,0 +1,14 @@
+out: "D:/review-output/smartesb-rewrite-review"
+local-out:
+transaction-plan-dir: "src/main/resources/smartesb-transactions"
+old-project: "D:/upfs/qianzhi/upfs-cloud-xc"
+new-project: "D:/upfs-nl-json"
+legacy-index: "D:/upfs-nl-json/doc/index.md"
+doc-root: "D:/upfs-nl-json/doc/docment"
+old-8583-doc:
+json-doc:
+mapping-doc:
+reconstructed-design:
+batch-size: 5
+worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单交易审查任务，只输出 DONE 或 BLOCKED。"
+synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。"
