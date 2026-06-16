@@ -10,10 +10,14 @@ import com.sonnet.wyf.gitreport.core.GitReportConstants;
 public class FileScopeFilter {
     private final List<String> includes;
     private final List<String> excludes;
+    private final List<Pattern> includePatterns;
+    private final List<Pattern> excludePatterns;
 
     private FileScopeFilter(List<String> includes, List<String> excludes) {
         this.includes = includes;
         this.excludes = excludes;
+        this.includePatterns = compilePatterns(includes);
+        this.excludePatterns = compilePatterns(excludes);
     }
 
     public static FileScopeFilter withUserPatterns(List<String> userIncludes, List<String> userExcludes) {
@@ -29,7 +33,7 @@ public class FileScopeFilter {
     }
 
     public boolean isCounted(String path) {
-        return matchesAny(path, includes) && !matchesAny(path, excludes);
+        return matchesAny(path, includePatterns) && !matchesAny(path, excludePatterns);
     }
 
     private static List<String> merge(List<String> defaults, List<String> user) {
@@ -40,11 +44,16 @@ public class FileScopeFilter {
         return new ArrayList<>(values);
     }
 
-    private static boolean matchesAny(String path, List<String> patterns) {
+    private static List<Pattern> compilePatterns(List<String> patterns) {
+        return patterns.stream()
+                .map(pattern -> Pattern.compile(globToRegex(pattern.replace('\\', '/'))))
+                .toList();
+    }
+
+    private static boolean matchesAny(String path, List<Pattern> patterns) {
         String normalized = path.replace('\\', '/');
         String basename = normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
-        for (String pattern : patterns) {
-            Pattern regex = Pattern.compile(globToRegex(pattern.replace('\\', '/')));
+        for (Pattern regex : patterns) {
             if (regex.matcher(normalized).matches() || regex.matcher(basename).matches()) {
                 return true;
             }

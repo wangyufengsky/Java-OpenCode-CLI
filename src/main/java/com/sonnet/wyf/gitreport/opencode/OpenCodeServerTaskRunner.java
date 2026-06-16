@@ -1,30 +1,26 @@
 package com.sonnet.wyf.gitreport.opencode;
 
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.TaskScheduler;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Locale;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class OpenCodeServerTaskRunner {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerTaskRunner.class);
 
     private final OpenCodeServerClient client;
-    private final TaskScheduler taskScheduler;
+    private final ScheduledProbeWaiter scheduledProbeWaiter;
 
-    public OpenCodeServerTaskRunner(OpenCodeServerClient client, TaskScheduler taskScheduler) {
+    public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this.client = client;
-        this.taskScheduler = taskScheduler;
+        this.scheduledProbeWaiter = scheduledProbeWaiter;
     }
 
     public OpenCodeRunResult runUntil(
@@ -38,7 +34,7 @@ public class OpenCodeServerTaskRunner {
             CompletionProbe completionProbe,
             int pollMillis,
             int timeoutMinutes
-    ) throws IOException, InterruptedException {
+    ) throws Exception {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
@@ -46,14 +42,13 @@ public class OpenCodeServerTaskRunner {
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
         client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, model);
         AtomicReference<String> lastState = new AtomicReference<>("unknown");
-        OpenCodeRunResult initialResult = pollOnce(server, repo, runDir, completionProbe, session, lastState);
-        if (initialResult != null) {
-            return initialResult;
-        }
-        if (timeoutMinutes <= 0) {
-            return abortTimedOut(server, repo, session, lastState.get());
-        }
-        return awaitScheduledCompletion(server, repo, runDir, completionProbe, pollMillis, timeoutMinutes, session, lastState);
+        return scheduledProbeWaiter.waitFor(
+                () -> pollOnce(server, repo, runDir, completionProbe, session, lastState),
+                result -> result != null,
+                () -> abortTimedOut(server, repo, session, lastState.get()),
+                Duration.ofMinutes(timeoutMinutes),
+                Duration.ofMillis(Math.max(50, pollMillis))
+        );
     }
 
     private String composeMessage(String message, String prompt) {
@@ -70,68 +65,6 @@ public class OpenCodeServerTaskRunner {
             throw exception;
         } catch (Exception exception) {
             throw new IOException("completion probe failed for runDir=" + runDir + ": " + exception.getMessage(), exception);
-        }
-    }
-
-    private OpenCodeRunResult awaitScheduledCompletion(
-            OpenCodeServerHandle server,
-            Path repo,
-            Path runDir,
-            CompletionProbe completionProbe,
-            int pollMillis,
-            int timeoutMinutes,
-            OpenCodeSession session,
-            AtomicReference<String> lastState
-    ) throws IOException, InterruptedException {
-        CompletableFuture<OpenCodeRunResult> completion = new CompletableFuture<>();
-        int intervalMillis = Math.max(50, pollMillis);
-        ScheduledFuture<?> pollFuture = taskScheduler.scheduleAtFixedRate(
-                () -> completeFromPoll(server, repo, runDir, completionProbe, session, lastState, completion),
-                Duration.ofMillis(intervalMillis)
-        );
-        ScheduledFuture<?> timeoutFuture = taskScheduler.schedule(
-                () -> completion.complete(abortTimedOut(server, repo, session, lastState.get())),
-                Instant.now().plus(Duration.ofMinutes(timeoutMinutes))
-        );
-        try {
-            return completion.get();
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw exception;
-        } catch (ExecutionException exception) {
-            Throwable cause = exception.getCause();
-            if (cause instanceof IOException ioException) {
-                throw ioException;
-            }
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new IOException("scheduled OpenCode session polling failed", cause);
-        } finally {
-            pollFuture.cancel(false);
-            timeoutFuture.cancel(false);
-        }
-    }
-
-    private void completeFromPoll(
-            OpenCodeServerHandle server,
-            Path repo,
-            Path runDir,
-            CompletionProbe completionProbe,
-            OpenCodeSession session,
-            AtomicReference<String> lastState,
-            CompletableFuture<OpenCodeRunResult> completion
-    ) {
-        if (completion.isDone()) {
-            return;
-        }
-        try {
-            OpenCodeRunResult result = pollOnce(server, repo, runDir, completionProbe, session, lastState);
-            if (result != null) {
-                completion.complete(result);
-            }
-        } catch (Exception exception) {
-            completion.completeExceptionally(exception);
         }
     }
 

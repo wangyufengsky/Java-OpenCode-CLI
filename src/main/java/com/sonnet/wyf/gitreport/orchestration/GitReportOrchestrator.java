@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
 import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
@@ -15,20 +16,19 @@ import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
 import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
@@ -41,6 +41,8 @@ public class GitReportOrchestrator {
     private final AuthorOutputValidator outputValidator;
     private final QualityScoresWriter qualityScoresWriter;
     private final RunStatusRepository statusRepository;
+    private final ScheduledProbeWaiter outputWaiter;
+    private final AsyncTaskExecutor authorTaskExecutor;
 
     public GitReportOrchestrator(
             GitReportPreparation preparation,
@@ -50,7 +52,9 @@ public class GitReportOrchestrator {
             OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             QualityScoresWriter qualityScoresWriter,
-            RunStatusRepository statusRepository
+            RunStatusRepository statusRepository,
+            ScheduledProbeWaiter outputWaiter,
+            AsyncTaskExecutor authorTaskExecutor
     ) {
         this.preparation = preparation;
         this.objectMapper = objectMapper;
@@ -60,6 +64,8 @@ public class GitReportOrchestrator {
         this.outputValidator = outputValidator;
         this.qualityScoresWriter = qualityScoresWriter;
         this.statusRepository = statusRepository;
+        this.outputWaiter = outputWaiter;
+        this.authorTaskExecutor = authorTaskExecutor;
     }
 
     public void run(GitReportProperties properties) throws Exception {
@@ -128,32 +134,27 @@ public class GitReportOrchestrator {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
         int concurrency = Math.max(1, Math.min(properties.getOpencode().getConcurrency(), properties.getOpencode().getMaxConcurrency()));
         log.info("Starting author tasks: taskCount={}, concurrency={}", tasks.size(), concurrency);
-        ExecutorService executor = Executors.newFixedThreadPool(concurrency);
-        try {
-            List<Future<AuthorTaskResult>> futures = new ArrayList<>();
-            for (Map<String, Object> task : tasks) {
-                futures.add(executor.submit(authorCallable(properties, out, task, server)));
-            }
-            List<AuthorTaskResult> failures = new ArrayList<>();
-            for (Future<AuthorTaskResult> future : futures) {
-                AuthorTaskResult result = future.get();
-                if (!result.success()) {
-                    failures.add(result);
-                }
-            }
-            if (!failures.isEmpty()) {
-                String summary = failures.stream()
-                        .map(result -> result.authorKey() + " (" + result.author() + "), status=" + result.statusPath() + ", error=" + result.error())
-                        .reduce((left, right) -> left + "; " + right)
-                        .orElse("");
-                String firstReason = failures.get(0).error();
-                log.error("AUTHOR_FAILURE_SUMMARY firstReason=\"{}\" failedCount={} failures={}", firstReason, failures.size(), summary);
-                throw new IllegalStateException("author task failed: " + summary);
-            }
-            log.info("All author tasks completed successfully");
-        } finally {
-            executor.shutdown();
+        List<Future<AuthorTaskResult>> futures = new ArrayList<>();
+        for (Map<String, Object> task : tasks) {
+            futures.add(authorTaskExecutor.submit(authorCallable(properties, out, task, server)));
         }
+        List<AuthorTaskResult> failures = new ArrayList<>();
+        for (Future<AuthorTaskResult> future : futures) {
+            AuthorTaskResult result = future.get();
+            if (!result.success()) {
+                failures.add(result);
+            }
+        }
+        if (!failures.isEmpty()) {
+            String summary = failures.stream()
+                    .map(result -> result.authorKey() + " (" + result.author() + "), status=" + result.statusPath() + ", error=" + result.error())
+                    .reduce((left, right) -> left + "; " + right)
+                    .orElse("");
+            String firstReason = failures.get(0).error();
+            log.error("AUTHOR_FAILURE_SUMMARY firstReason=\"{}\" failedCount={} failures={}", firstReason, failures.size(), summary);
+            throw new IllegalStateException("author task failed: " + summary);
+        }
+        log.info("All author tasks completed successfully");
     }
 
     private Callable<AuthorTaskResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
@@ -230,14 +231,14 @@ public class GitReportOrchestrator {
         };
     }
 
-    private AuthorValidationResult waitForAuthorOutputs(Path reportMd, Path qualitySummaryJson, int outputWaitSeconds) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(0, outputWaitSeconds));
-        AuthorValidationResult last = outputValidator.validate(reportMd, qualitySummaryJson);
-        while (!last.ok() && System.nanoTime() < deadline) {
-            TimeUnit.SECONDS.sleep(2);
-            last = outputValidator.validate(reportMd, qualitySummaryJson);
-        }
-        return last;
+    private AuthorValidationResult waitForAuthorOutputs(Path reportMd, Path qualitySummaryJson, int outputWaitSeconds) throws Exception {
+        return outputWaiter.waitFor(
+                () -> outputValidator.validate(reportMd, qualitySummaryJson),
+                AuthorValidationResult::ok,
+                () -> outputValidator.validate(reportMd, qualitySummaryJson),
+                Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
+                Duration.ofSeconds(2)
+        );
     }
 
     private String sanitizeOpenCodeError(Exception exception) {
@@ -296,14 +297,14 @@ public class GitReportOrchestrator {
         log.info("Synthesis completed: finalReport={}", finalReport);
     }
 
-    private boolean waitForFinalReport(Path finalReport, int outputWaitSeconds) throws IOException, InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(0, outputWaitSeconds));
-        boolean ok = finalReportReady(finalReport);
-        while (!ok && System.nanoTime() < deadline) {
-            TimeUnit.SECONDS.sleep(2);
-            ok = finalReportReady(finalReport);
-        }
-        return ok;
+    private boolean waitForFinalReport(Path finalReport, int outputWaitSeconds) throws Exception {
+        return outputWaiter.waitFor(
+                () -> finalReportReady(finalReport),
+                Boolean::booleanValue,
+                () -> false,
+                Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
+                Duration.ofSeconds(2)
+        );
     }
 
     private boolean finalReportReady(Path finalReport) throws IOException {

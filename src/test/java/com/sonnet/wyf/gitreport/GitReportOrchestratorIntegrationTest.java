@@ -3,6 +3,7 @@ package com.sonnet.wyf.gitreport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
@@ -23,6 +24,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
@@ -43,6 +46,7 @@ class GitReportOrchestratorIntegrationTest {
     private final List<String> prompts = new ArrayList<>();
     private HttpServer server;
     private ThreadPoolTaskScheduler taskScheduler;
+    private ThreadPoolTaskExecutor authorTaskExecutor;
 
     @TempDir
     Path tempDir;
@@ -54,6 +58,9 @@ class GitReportOrchestratorIntegrationTest {
         }
         if (taskScheduler != null) {
             taskScheduler.shutdown();
+        }
+        if (authorTaskExecutor != null) {
+            authorTaskExecutor.shutdown();
         }
     }
 
@@ -157,29 +164,54 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     private GitReportOrchestrator orchestrator() {
-        return orchestrator(new GitReportPreparation(new GitStatsCollector(new CommandExecutor(), new CommentLineCounter()), new ReportPreparationWriter(objectMapper)));
+        return orchestrator(new GitReportPreparation(
+                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
+                new ReportPreparationWriter(objectMapper)
+        ));
     }
 
     private GitReportOrchestrator orchestrator(GitReportPreparation preparation) {
         OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+        ScheduledProbeWaiter scheduledProbeWaiter = scheduledProbeWaiter();
         return new GitReportOrchestrator(
                 preparation,
                 objectMapper,
-                new PromptBuilder(),
-                new OpenCodeServerManager(client),
-                new OpenCodeServerTaskRunner(client, taskScheduler()),
+                new PromptBuilder(new DefaultResourceLoader()),
+                new OpenCodeServerManager(client, scheduledProbeWaiter),
+                new OpenCodeServerTaskRunner(client, scheduledProbeWaiter),
                 new AuthorOutputValidator(objectMapper),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
-                new RunStatusRepository(objectMapper)
+                new RunStatusRepository(objectMapper),
+                scheduledProbeWaiter,
+                authorTaskExecutor()
         );
     }
 
     private ThreadPoolTaskScheduler taskScheduler() {
+        if (taskScheduler != null) {
+            return taskScheduler;
+        }
         taskScheduler = new ThreadPoolTaskScheduler();
         taskScheduler.setThreadNamePrefix("test-opencode-session-poll-");
         taskScheduler.setPoolSize(2);
         taskScheduler.initialize();
         return taskScheduler;
+    }
+
+    private ScheduledProbeWaiter scheduledProbeWaiter() {
+        return new ScheduledProbeWaiter(taskScheduler());
+    }
+
+    private ThreadPoolTaskExecutor authorTaskExecutor() {
+        if (authorTaskExecutor != null) {
+            return authorTaskExecutor;
+        }
+        authorTaskExecutor = new ThreadPoolTaskExecutor();
+        authorTaskExecutor.setThreadNamePrefix("test-author-task-");
+        authorTaskExecutor.setCorePoolSize(2);
+        authorTaskExecutor.setMaxPoolSize(2);
+        authorTaskExecutor.initialize();
+        return authorTaskExecutor;
     }
 
     private void startFakeOpenCodeServer() throws IOException {

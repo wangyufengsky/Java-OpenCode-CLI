@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
@@ -55,7 +56,7 @@ class OpenCodeServerTaskRunnerTest {
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, "persisted prompt");
-        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), taskScheduler());
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
         OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
 
         OpenCodeRunResult result = runner.runUntil(
@@ -92,7 +93,7 @@ class OpenCodeServerTaskRunnerTest {
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, "never completes");
-        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), taskScheduler());
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
         OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), true);
 
         OpenCodeRunResult result = runner.runUntil(
@@ -118,7 +119,7 @@ class OpenCodeServerTaskRunnerTest {
         Path source = Path.of("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
         String code = Files.readString(source);
 
-        assertThat(code).contains("TaskScheduler");
+        assertThat(code).contains("ScheduledProbeWaiter");
         assertThat(code).doesNotContain("TimeUnit.MILLISECONDS.sleep");
         assertThat(code).doesNotContain("Thread.sleep");
     }
@@ -131,10 +132,17 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     private ThreadPoolTaskScheduler taskScheduler() {
+        if (taskScheduler != null) {
+            return taskScheduler;
+        }
         taskScheduler = new ThreadPoolTaskScheduler();
         taskScheduler.setThreadNamePrefix("test-opencode-session-poll-");
         taskScheduler.setPoolSize(2);
         taskScheduler.initialize();
         return taskScheduler;
+    }
+
+    private ScheduledProbeWaiter scheduledProbeWaiter() {
+        return new ScheduledProbeWaiter(taskScheduler());
     }
 }

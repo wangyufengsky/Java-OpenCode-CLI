@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
@@ -8,19 +9,21 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OpenCodeServerManagerTest {
     private HttpServer server;
+    private ThreadPoolTaskScheduler taskScheduler;
 
     @TempDir
     Path tempDir;
@@ -30,6 +33,9 @@ class OpenCodeServerManagerTest {
         if (server != null) {
             server.stop(0);
         }
+        if (taskScheduler != null) {
+            taskScheduler.shutdown();
+        }
     }
 
     @Test
@@ -38,7 +44,7 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = properties("http://127.0.0.1:" + server.getAddress().getPort());
         properties.getPaths().setOpencodeBin(tempDir.resolve("must-not-run").toString());
 
-        OpenCodeServerManager manager = new OpenCodeServerManager(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerManager manager = manager();
 
         OpenCodeServerHandle handle = manager.ensureReady(properties, tempDir.resolve("out"));
 
@@ -51,7 +57,7 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = properties("http://127.0.0.1:9");
         properties.getOpencode().setManageServer(false);
 
-        OpenCodeServerManager manager = new OpenCodeServerManager(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerManager manager = manager();
 
         assertThatThrownBy(() -> manager.ensureReady(properties, tempDir.resolve("out")))
                 .isInstanceOf(IllegalStateException.class)
@@ -82,7 +88,7 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = properties("http://127.0.0.1:" + port);
         properties.getPaths().setOpencodeBin(fakeOpencode.toString());
         properties.getOpencode().setServerStartTimeoutSeconds(5);
-        OpenCodeServerManager manager = new OpenCodeServerManager(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerManager manager = manager();
 
         OpenCodeServerHandle handle = manager.ensureReady(properties, tempDir.resolve("out"));
 
@@ -105,7 +111,7 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = properties("http://127.0.0.1:" + port);
         properties.getPaths().setOpencodeBin(fakeOpencode.toString());
         properties.getOpencode().setServerStartTimeoutSeconds(1);
-        OpenCodeServerManager manager = new OpenCodeServerManager(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerManager manager = manager();
 
         assertThatThrownBy(() -> manager.ensureReady(properties, tempDir.resolve("out")))
                 .isInstanceOf(IllegalStateException.class)
@@ -116,6 +122,25 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = new GitReportProperties();
         properties.getOpencode().setServerUrl(serverUrl);
         return properties;
+    }
+
+    private OpenCodeServerManager manager() {
+        return new OpenCodeServerManager(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+    }
+
+    private ScheduledProbeWaiter scheduledProbeWaiter() {
+        return new ScheduledProbeWaiter(taskScheduler());
+    }
+
+    private ThreadPoolTaskScheduler taskScheduler() {
+        if (taskScheduler != null) {
+            return taskScheduler;
+        }
+        taskScheduler = new ThreadPoolTaskScheduler();
+        taskScheduler.setThreadNamePrefix("test-opencode-server-health-");
+        taskScheduler.setPoolSize(2);
+        taskScheduler.initialize();
+        return taskScheduler;
     }
 
     private HttpServer healthyServer() throws IOException {
@@ -148,13 +173,13 @@ class OpenCodeServerManagerTest {
     }
 
     private void waitForContent(Path path, String expected) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (System.nanoTime() < deadline) {
-            if (Files.exists(path) && Files.readString(path).contains(expected)) {
-                return;
-            }
-            TimeUnit.MILLISECONDS.sleep(20);
-        }
-        assertThat(path).hasContent(expected);
+        boolean found = scheduledProbeWaiter().waitFor(
+                () -> Files.exists(path) && Files.readString(path).contains(expected),
+                Boolean::booleanValue,
+                () -> false,
+                Duration.ofSeconds(2),
+                Duration.ofMillis(20)
+        );
+        assertThat(found).isTrue();
     }
 }

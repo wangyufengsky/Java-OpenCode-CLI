@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.opencode;
 
 import com.sonnet.wyf.gitreport.GitReportProperties;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -15,14 +17,16 @@ public class OpenCodeServerManager {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerManager.class);
 
     private final OpenCodeServerClient client;
+    private final ScheduledProbeWaiter scheduledProbeWaiter;
     private Process ownedProcess;
     private URI ownedServerUrl;
 
-    public OpenCodeServerManager(OpenCodeServerClient client) {
+    public OpenCodeServerManager(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this.client = client;
+        this.scheduledProbeWaiter = scheduledProbeWaiter;
     }
 
-    public synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws IOException, InterruptedException {
+    public synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws Exception {
         URI serverUrl = URI.create(properties.getOpencode().getServerUrl());
         if (client.isHealthy(serverUrl)) {
             log.info("Reusing healthy OpenCode Server: {}", serverUrl);
@@ -76,17 +80,25 @@ public class OpenCodeServerManager {
         ownedServerUrl = serverUrl;
     }
 
-    private void waitForHealth(URI serverUrl, int timeoutSeconds) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, timeoutSeconds));
-        while (System.nanoTime() < deadline) {
-            if (client.isHealthy(serverUrl)) {
-                log.info("OpenCode Server is healthy: {}", serverUrl);
-                return;
-            }
-            if (ownedProcess != null && !ownedProcess.isAlive()) {
-                throw new IllegalStateException("OpenCode Server process exited before becoming healthy: " + serverUrl + ", exitCode=" + ownedProcess.exitValue());
-            }
-            TimeUnit.MILLISECONDS.sleep(250);
+    private void waitForHealth(URI serverUrl, int timeoutSeconds) throws Exception {
+        boolean healthy = scheduledProbeWaiter.waitFor(
+                () -> {
+                    if (client.isHealthy(serverUrl)) {
+                        return true;
+                    }
+                    if (ownedProcess != null && !ownedProcess.isAlive()) {
+                        throw new IllegalStateException("OpenCode Server process exited before becoming healthy: " + serverUrl + ", exitCode=" + ownedProcess.exitValue());
+                    }
+                    return false;
+                },
+                Boolean::booleanValue,
+                () -> false,
+                Duration.ofSeconds(Math.max(1, timeoutSeconds)),
+                Duration.ofMillis(250)
+        );
+        if (healthy) {
+            log.info("OpenCode Server is healthy: {}", serverUrl);
+            return;
         }
         Process process = ownedProcess;
         if (process != null && process.isAlive()) {

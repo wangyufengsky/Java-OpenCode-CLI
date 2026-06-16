@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport;
 
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +25,7 @@ class PromptPackContractTest {
 
     @Test
     void promptBuilderLoadsClasspathResourcesAndEmbedsTemplates() throws Exception {
-        PromptBuilder builder = new PromptBuilder();
+        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
 
         String prompt = builder.buildWorkerPrompt(Path.of("D:/out/details/author-001.json"));
 

@@ -6,8 +6,14 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
+
 public class PromptBuilder {
-    public PromptBuilder() {
+    private final ResourceLoader resourceLoader;
+
+    public PromptBuilder(ResourceLoader resourceLoader) {
+        this.resourceLoader = resourceLoader;
     }
 
     public String buildWorkerPrompt(Path detailJson) {
@@ -33,12 +39,14 @@ public class PromptBuilder {
     }
 
     private String readResource(String path) {
-        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-        try (InputStream inputStream = classLoader.getResourceAsStream(path)) {
-            if (inputStream == null) {
+        Resource resource = resourceLoader.getResource("classpath:" + path);
+        try {
+            if (!resource.exists()) {
                 throw new IllegalStateException("resource missing: " + path);
             }
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            try (InputStream inputStream = resource.getInputStream()) {
+                return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            }
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
         }

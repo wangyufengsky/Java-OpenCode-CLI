@@ -22,12 +22,19 @@ import java.util.Set;
 public class GitStatsCollector {
     private final CommandExecutor commandExecutor;
     private final CommentLineCounter commentLineCounter;
-    private final WorkloadScoreCalculator scoreCalculator = new WorkloadScoreCalculator();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final WorkloadScoreCalculator scoreCalculator;
+    private final ObjectMapper objectMapper;
 
-    public GitStatsCollector(CommandExecutor commandExecutor, CommentLineCounter commentLineCounter) {
+    public GitStatsCollector(
+            CommandExecutor commandExecutor,
+            CommentLineCounter commentLineCounter,
+            WorkloadScoreCalculator scoreCalculator,
+            ObjectMapper objectMapper
+    ) {
         this.commandExecutor = commandExecutor;
         this.commentLineCounter = commentLineCounter;
+        this.scoreCalculator = scoreCalculator;
+        this.objectMapper = objectMapper;
     }
 
     Map<String, Object> collect(GitReportProperties properties) throws Exception {

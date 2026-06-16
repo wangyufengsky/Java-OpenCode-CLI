@@ -8,6 +8,7 @@ import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
+import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,7 +52,7 @@ class GitReportPreparationIntegrationTest {
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
         GitReportPreparation preparation = new GitReportPreparation(
-                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter()),
+                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
                 new ReportPreparationWriter(objectMapper)
         );
         preparation.prepare(properties);
