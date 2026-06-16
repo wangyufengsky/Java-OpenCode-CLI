@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenCodeServerTaskRunnerTest {
     private HttpServer server;
     private boolean abortCalled;
+    private ThreadPoolTaskScheduler taskScheduler;
 
     @TempDir
     Path tempDir;
@@ -30,6 +32,9 @@ class OpenCodeServerTaskRunnerTest {
     void stopServer() {
         if (server != null) {
             server.stop(0);
+        }
+        if (taskScheduler != null) {
+            taskScheduler.shutdown();
         }
     }
 
@@ -50,7 +55,7 @@ class OpenCodeServerTaskRunnerTest {
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, "persisted prompt");
-        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), taskScheduler());
         OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
 
         OpenCodeRunResult result = runner.runUntil(
@@ -87,7 +92,7 @@ class OpenCodeServerTaskRunnerTest {
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, "never completes");
-        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()));
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), taskScheduler());
         OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), true);
 
         OpenCodeRunResult result = runner.runUntil(
@@ -108,10 +113,28 @@ class OpenCodeServerTaskRunnerTest {
         assertThat(abortCalled).isTrue();
     }
 
+    @Test
+    void pollingUsesSpringTaskSchedulerInsteadOfThreadSleep() throws Exception {
+        Path source = Path.of("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
+        String code = Files.readString(source);
+
+        assertThat(code).contains("TaskScheduler");
+        assertThat(code).doesNotContain("TimeUnit.MILLISECONDS.sleep");
+        assertThat(code).doesNotContain("Thread.sleep");
+    }
+
     private void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();
+    }
+
+    private ThreadPoolTaskScheduler taskScheduler() {
+        taskScheduler = new ThreadPoolTaskScheduler();
+        taskScheduler.setThreadNamePrefix("test-opencode-session-poll-");
+        taskScheduler.setPoolSize(2);
+        taskScheduler.initialize();
+        return taskScheduler;
     }
 }

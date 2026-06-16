@@ -14,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -86,7 +87,7 @@ class OpenCodeServerManagerTest {
         OpenCodeServerHandle handle = manager.ensureReady(properties, tempDir.resolve("out"));
 
         assertThat(handle.ownedByJava()).isTrue();
-        assertThat(tempDir.resolve("out/runs/opencode-server/stdout.log")).hasContent("started");
+        waitForContent(tempDir.resolve("out/runs/opencode-server/stdout.log"), "started");
 
         manager.shutdown();
         healthThread.join();
@@ -144,5 +145,16 @@ class OpenCodeServerManagerTest {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
         }
+    }
+
+    private void waitForContent(Path path, String expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            if (Files.exists(path) && Files.readString(path).contains(expected)) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(20);
+        }
+        assertThat(path).hasContent(expected);
     }
 }

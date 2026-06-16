@@ -24,6 +24,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.Locale;
 
@@ -57,9 +59,18 @@ public class GitReportApplication {
         return new OpenCodeServerManager(openCodeServerClient);
     }
 
+    @Bean(destroyMethod = "shutdown")
+    ThreadPoolTaskScheduler openCodeTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setThreadNamePrefix("opencode-session-poll-");
+        scheduler.setPoolSize(4);
+        scheduler.initialize();
+        return scheduler;
+    }
+
     @Bean
-    OpenCodeServerTaskRunner openCodeServerTaskRunner(OpenCodeServerClient openCodeServerClient) {
-        return new OpenCodeServerTaskRunner(openCodeServerClient);
+    OpenCodeServerTaskRunner openCodeServerTaskRunner(OpenCodeServerClient openCodeServerClient, TaskScheduler openCodeTaskScheduler) {
+        return new OpenCodeServerTaskRunner(openCodeServerClient, openCodeTaskScheduler);
     }
 
     @Bean

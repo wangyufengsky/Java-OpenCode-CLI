@@ -23,6 +23,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -41,6 +42,7 @@ class GitReportOrchestratorIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<String> prompts = new ArrayList<>();
     private HttpServer server;
+    private ThreadPoolTaskScheduler taskScheduler;
 
     @TempDir
     Path tempDir;
@@ -49,6 +51,9 @@ class GitReportOrchestratorIntegrationTest {
     void stopServer() {
         if (server != null) {
             server.stop(0);
+        }
+        if (taskScheduler != null) {
+            taskScheduler.shutdown();
         }
     }
 
@@ -162,11 +167,19 @@ class GitReportOrchestratorIntegrationTest {
                 objectMapper,
                 new PromptBuilder(),
                 new OpenCodeServerManager(client),
-                new OpenCodeServerTaskRunner(client),
+                new OpenCodeServerTaskRunner(client, taskScheduler()),
                 new AuthorOutputValidator(objectMapper),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new RunStatusRepository(objectMapper)
         );
+    }
+
+    private ThreadPoolTaskScheduler taskScheduler() {
+        taskScheduler = new ThreadPoolTaskScheduler();
+        taskScheduler.setThreadNamePrefix("test-opencode-session-poll-");
+        taskScheduler.setPoolSize(2);
+        taskScheduler.initialize();
+        return taskScheduler;
     }
 
     private void startFakeOpenCodeServer() throws IOException {
