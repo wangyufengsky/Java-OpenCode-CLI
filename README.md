@@ -62,6 +62,7 @@ opencode-runner:
     server-start-timeout-seconds: 30
     request-timeout-seconds: 60
     opencode-bin: "opencode"
+    session-model: ""
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
@@ -81,6 +82,7 @@ opencode-runner:
 - `rerun.type`：补跑类型。
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
+- `opencode.session-model`：可选，创建 OpenCode session 时显式指定模型，格式 `provider/model`。内网自定义 provider 建议配置，例如 `spdb-new-api/minimax-m2.7`。
 - `opencode.request-timeout-seconds`：单次调用 OpenCode Server API 的 HTTP 超时，例如创建 session、提交 prompt；和整个任务的 `timeout-minutes` 不是同一个超时。
 - `opencode.environment`：Java 托管启动 `opencode serve` 时注入的环境变量。内网/离线环境默认设置 `OPENCODE_DISABLE_MODELS_FETCH=true`，避免 OpenCode 创建 session 时联网拉取 `models.dev`。
 
@@ -280,7 +282,15 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-OpenCode 1.17 的 `/api/session/{id}/prompt` 不接收 `model` 字段。Runner 使用 OpenCode Server 侧的当前默认模型；需要换模型时，先在本机 OpenCode 中切换并确认 `opencode serve` 使用同一套配置。
+OpenCode 1.17 的 `/api/session` 接收 `model` 字段，但 `/api/session/{id}/prompt` 不接收 `model` 字段。Runner 只会在创建 session 时按 `opencode.session-model` 传入模型，不会在 prompt 请求里传模型。
+
+内网自定义 provider 推荐显式配置：
+
+```yaml
+opencode-runner:
+  opencode:
+    session-model: "spdb-new-api/minimax-m2.7"
+```
 
 ### 内网/离线模型目录
 

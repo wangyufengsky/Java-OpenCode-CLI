@@ -14,6 +14,7 @@ public class OpenCodeSettings {
     private int maxRetries = 1;
     private int maxConcurrency = 6;
     private String opencodeBin = "opencode";
+    private String sessionModel = "";
     private Map<String, String> environment = defaultEnvironment();
 
     private static Map<String, String> defaultEnvironment() {
@@ -100,6 +101,14 @@ public class OpenCodeSettings {
 
     public void setOpencodeBin(String opencodeBin) {
         this.opencodeBin = opencodeBin;
+    }
+
+    public String getSessionModel() {
+        return sessionModel;
+    }
+
+    public void setSessionModel(String sessionModel) {
+        this.sessionModel = sessionModel;
     }
 
     public Map<String, String> getEnvironment() {

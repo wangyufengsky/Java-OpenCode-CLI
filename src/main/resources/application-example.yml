@@ -17,6 +17,9 @@ opencode-runner:
     server-start-timeout-seconds: 30
     request-timeout-seconds: 60
     opencode-bin: "opencode"
+    # 可选。OpenCode 1.17 的 /api/session 允许指定 model；格式 provider/model。
+    # 内网自定义 provider 建议显式配置，避免 OpenCode 创建 session 时解析默认模型。
+    session-model: ""
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30

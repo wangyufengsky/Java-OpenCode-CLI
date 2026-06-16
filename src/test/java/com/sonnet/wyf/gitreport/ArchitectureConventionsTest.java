@@ -48,9 +48,11 @@ class ArchitectureConventionsTest {
         assertThat(client).contains("/message?order=asc&limit=100");
         assertThat(client).doesNotContain("prompt_async");
         assertThat(client).doesNotContain("x-opencode-directory");
-        assertThat(client).doesNotContain("body.put(\"model\"");
-        assertThat(application).doesNotContain("model:");
-        assertThat(example).doesNotContain("model:");
+        assertThat(client).contains("result.put(\"providerID\"");
+        assertThat(client).contains("result.put(\"id\"");
+        assertThat(client).doesNotContain("modelID");
+        assertThat(application).doesNotContain("\n    model:");
+        assertThat(example).doesNotContain("\n    model:");
     }
 
     @Test

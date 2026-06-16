@@ -57,6 +57,7 @@ public class GitReportWorkflowChain implements WorkflowChain {
         properties.getOpencode().setOutputWaitSeconds(settings.getOutputWaitSeconds());
         properties.getOpencode().setMaxRetries(settings.getMaxRetries());
         properties.getOpencode().setMaxConcurrency(settings.getMaxConcurrency());
+        properties.getOpencode().setSessionModel(settings.getSessionModel());
         properties.getOpencode().setEnvironment(settings.getEnvironment());
         properties.getPaths().setOpencodeBin(settings.getOpencodeBin());
     }

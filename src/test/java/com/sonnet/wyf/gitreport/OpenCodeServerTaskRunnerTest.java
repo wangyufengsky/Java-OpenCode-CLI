@@ -75,6 +75,7 @@ class OpenCodeServerTaskRunnerTest {
                 "worker message",
                 tempDir.resolve("run"),
                 () -> Files.exists(output),
+                "",
                 60,
                 50,
                 1
@@ -116,6 +117,7 @@ class OpenCodeServerTaskRunnerTest {
                 "worker message",
                 tempDir.resolve("run"),
                 () -> false,
+                "",
                 60,
                 50,
                 0
@@ -159,6 +161,7 @@ class OpenCodeServerTaskRunnerTest {
                 "worker message",
                 runDir,
                 () -> statusRequests.get() >= 2,
+                "",
                 60,
                 50,
                 1

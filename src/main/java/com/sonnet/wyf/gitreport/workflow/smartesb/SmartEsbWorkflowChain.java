@@ -123,6 +123,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                     properties.getWorkerMessage(),
                     runDir,
                     () -> summaryValidator.validate(summaryJson).ok(),
+                    request.openCode().getSessionModel(),
                     request.openCode().getRequestTimeoutSeconds(),
                     OPENCODE_POLL_MILLIS,
                     request.openCode().getTimeoutMinutes()
@@ -169,6 +170,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 properties.getWorkerMessage(),
                 runDir,
                 () -> summaryValidator.validate(summaryJson).ok(),
+                request.openCode().getSessionModel(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
@@ -203,6 +205,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 properties.getSynthesisMessage(),
                 runDir,
                 () -> topLevelReady(indexMd, summaryMd),
+                request.openCode().getSessionModel(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()

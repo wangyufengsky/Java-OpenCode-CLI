@@ -46,7 +46,9 @@ class OpenCodeServerClientTest {
             requests.add(exchange.getRequestMethod()
                     + " " + exchange.getRequestURI().getPath()
                     + " directory=" + json.at("/location/directory").asText()
-                    + " hasModel=" + json.has("model"));
+                    + " modelProvider=" + json.at("/model/providerID").asText()
+                    + " modelId=" + json.at("/model/id").asText()
+                    + " hasLegacyModelId=" + json.at("/model/modelID").isTextual());
             respond(exchange, 200, "{\"data\":{\"id\":\"session-1\"}}");
         });
         server.createContext("/api/session/session-1/prompt", exchange -> {
@@ -77,13 +79,13 @@ class OpenCodeServerClientTest {
         OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
 
         assertThat(client.isHealthy(serverUrl)).isTrue();
-        OpenCodeSession session = client.createSession(serverUrl, tempDir, "git-report-author", 60);
+        OpenCodeSession session = client.createSession(serverUrl, tempDir, "git-report-author", "spdb-new-api/minimax-m2.7", 60);
         client.sendPromptAsync(serverUrl, tempDir, session.id(), "hello prompt");
         assertThat(client.getSessionStatus(serverUrl, tempDir, session.id())).isEqualTo("idle");
         assertThat(client.abortSession(serverUrl, tempDir, session.id())).isFalse();
 
         assertThat(requests).containsExactly(
-                "POST /api/session directory=" + tempDir + " hasModel=false",
+                "POST /api/session directory=" + tempDir + " modelProvider=spdb-new-api modelId=minimax-m2.7 hasLegacyModelId=false",
                 "POST /api/session/session-1/prompt text=hello prompt delivery=queue resume=true",
                 "GET /api/session/session-1/message query=order=asc&limit=100"
         );

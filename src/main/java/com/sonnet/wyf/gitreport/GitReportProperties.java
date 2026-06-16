@@ -175,6 +175,7 @@ public class GitReportProperties {
         private int maxConcurrency = 6;
         private String workerMessage = "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。";
         private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。";
+        private String sessionModel = "";
         private Map<String, String> environment = defaultEnvironment();
 
         private static Map<String, String> defaultEnvironment() {
@@ -253,6 +254,14 @@ public class GitReportProperties {
 
         public void setMaxConcurrency(int maxConcurrency) {
             this.maxConcurrency = maxConcurrency;
+        }
+
+        public String getSessionModel() {
+            return sessionModel;
+        }
+
+        public void setSessionModel(String sessionModel) {
+            this.sessionModel = sessionModel;
         }
 
         public Map<String, String> getEnvironment() {

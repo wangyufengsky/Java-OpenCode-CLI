@@ -48,19 +48,26 @@ public class OpenCodeServerClient {
     }
 
     public OpenCodeSession createSession(URI serverUrl, Path repo, String title) throws IOException, InterruptedException {
-        return createSession(serverUrl, repo, title, 60);
+        return createSession(serverUrl, repo, title, "", 60);
     }
 
     public OpenCodeSession createSession(URI serverUrl, Path repo, String title, int requestTimeoutSeconds) throws IOException, InterruptedException {
+        return createSession(serverUrl, repo, title, "", requestTimeoutSeconds);
+    }
+
+    public OpenCodeSession createSession(URI serverUrl, Path repo, String title, String sessionModel, int requestTimeoutSeconds) throws IOException, InterruptedException {
         String directory = repo.toAbsolutePath().normalize().toString();
         Map<String, Object> location = new LinkedHashMap<>();
         location.put("directory", directory);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("location", location);
+        if (sessionModel != null && !sessionModel.isBlank()) {
+            body.put("model", modelObject(sessionModel));
+        }
         String requestBody = objectMapper.writeValueAsString(body);
         URI endpoint = resolve(serverUrl, "/api/session");
-        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, timeoutSeconds={}, body={}",
-                endpoint, directory, title, requestTimeoutSeconds, requestBody);
+        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, sessionModel={}, timeoutSeconds={}, body={}",
+                endpoint, directory, title, sessionModel, requestTimeoutSeconds, requestBody);
         HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/api/session"))
                 .timeout(requestTimeout(requestTimeoutSeconds))
                 .header("content-type", "application/json")
@@ -84,6 +91,18 @@ public class OpenCodeServerClient {
         log.info("OpenCode API create session completed: sessionId={}, elapsedMs={}",
                 id, Duration.between(started, Instant.now()).toMillis());
         return new OpenCodeSession(id);
+    }
+
+    private Map<String, Object> modelObject(String model) {
+        String trimmed = model.trim();
+        int slash = trimmed.indexOf('/');
+        if (slash <= 0 || slash == trimmed.length() - 1) {
+            throw new IllegalArgumentException("opencode session-model must use provider/model format when set: " + model);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("providerID", trimmed.substring(0, slash));
+        result.put("id", trimmed.substring(slash + 1));
+        return result;
     }
 
     public void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text) throws IOException, InterruptedException {
