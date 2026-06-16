@@ -43,14 +43,15 @@ class ArchitectureConventionsTest {
         String application = read("src/main/resources/application.yml");
         String example = read("src/main/resources/application-example.yml");
 
-        assertThat(client).contains("/api/session");
-        assertThat(client).contains("/prompt");
-        assertThat(client).contains("/message?order=asc&limit=100");
-        assertThat(client).doesNotContain("prompt_async");
+        assertThat(client).contains("/session");
+        assertThat(client).contains("directory=");
+        assertThat(client).contains("/prompt_async");
+        assertThat(client).contains("/message");
+        assertThat(client).doesNotContain("/api/session");
         assertThat(client).doesNotContain("x-opencode-directory");
         assertThat(client).contains("result.put(\"providerID\"");
         assertThat(client).contains("result.put(\"id\"");
-        assertThat(client).doesNotContain("modelID");
+        assertThat(client).contains("result.put(\"modelID\"");
         assertThat(application).doesNotContain("\n    model:");
         assertThat(example).doesNotContain("\n    model:");
     }

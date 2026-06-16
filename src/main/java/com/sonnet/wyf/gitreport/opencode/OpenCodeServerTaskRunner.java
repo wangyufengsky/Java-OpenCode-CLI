@@ -52,7 +52,7 @@ public class OpenCodeServerTaskRunner {
         RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
         monitor.write("created", "unknown", false, false);
-        client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, requestTimeoutSeconds);
+        client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, sessionModel, requestTimeoutSeconds);
         AtomicReference<String> lastState = new AtomicReference<>("submitted");
         monitor.write("running", lastState.get(), false, false);
         return scheduledProbeWaiter.waitFor(

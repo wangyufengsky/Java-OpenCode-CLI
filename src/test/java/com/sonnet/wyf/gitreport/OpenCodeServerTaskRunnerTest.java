@@ -43,22 +43,19 @@ class OpenCodeServerTaskRunnerTest {
     void sendsPersistedPromptToSessionAndCompletesByOutputProbe() throws Exception {
         Path output = tempDir.resolve("done.txt");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"task-session\"}}"));
-        server.createContext("/api/session/task-session/prompt", exchange -> {
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"task-session\"}"));
+        server.createContext("/session/task-session/prompt_async", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             if (body.contains("worker message") && body.contains("persisted prompt")) {
                 Files.writeString(output, "done");
             }
-            respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"task-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}");
+            respond(exchange, 204, "");
         });
-        server.createContext("/api/session/task-session/message", exchange -> respond(exchange, 200, """
-                {
-                  "data": [
+        server.createContext("/session/task-session/message", exchange -> respond(exchange, 200, """
+                [
                     {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
                     {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
-                  ],
-                  "cursor": {"previous": null, "next": null}
-                }
+                ]
                 """));
         server.start();
 
@@ -91,16 +88,13 @@ class OpenCodeServerTaskRunnerTest {
     @Test
     void recordsTimeoutWithoutAbortWhenUsingOpenCodeV2Api() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"timeout-session\"}}"));
-        server.createContext("/api/session/timeout-session/prompt", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"timeout-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}"));
-        server.createContext("/api/session/timeout-session/message", exchange -> respond(exchange, 200, """
-                {
-                  "data": [
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"timeout-session\"}"));
+        server.createContext("/session/timeout-session/prompt_async", exchange -> respond(exchange, 204, ""));
+        server.createContext("/session/timeout-session/message", exchange -> respond(exchange, 200, """
+                [
                     {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
                     {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
-                  ],
-                  "cursor": {"previous": null, "next": null}
-                }
+                ]
                 """));
         server.start();
 
@@ -131,18 +125,15 @@ class OpenCodeServerTaskRunnerTest {
     void writesSessionStatusHeartbeatWhilePolling() throws Exception {
         AtomicInteger statusRequests = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"heartbeat-session\"}}"));
-        server.createContext("/api/session/heartbeat-session/prompt", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"heartbeat-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}"));
-        server.createContext("/api/session/heartbeat-session/message", exchange -> {
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"heartbeat-session\"}"));
+        server.createContext("/session/heartbeat-session/prompt_async", exchange -> respond(exchange, 204, ""));
+        server.createContext("/session/heartbeat-session/message", exchange -> {
             statusRequests.incrementAndGet();
             respond(exchange, 200, """
-                    {
-                      "data": [
+                    [
                         {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
                         {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
-                      ],
-                      "cursor": {"previous": null, "next": null}
-                    }
+                    ]
                     """);
         });
         server.start();
@@ -187,6 +178,11 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     private void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body) throws IOException {
+        if (status == 204) {
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+            return;
+        }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);

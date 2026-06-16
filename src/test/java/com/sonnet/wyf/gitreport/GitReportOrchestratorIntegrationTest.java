@@ -287,27 +287,24 @@ class GitReportOrchestratorIntegrationTest {
         AtomicInteger ids = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"session-" + ids.incrementAndGet() + "\"}}"));
-        server.createContext("/api/session/", exchange -> {
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
-                if (path.endsWith("/prompt")) {
+                if (path.endsWith("/prompt_async")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-                    String prompt = objectMapper.readTree(body).at("/prompt/text").asText();
+                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
                     prompts.add(prompt);
                     writeFakeOpenCodeOutput(prompt);
-                    respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"session-1\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}");
+                    respond(exchange, 204, "");
                     return;
                 }
-                if (path.matches("/api/session/[^/]+/message")) {
+                if (path.matches("/session/[^/]+/message")) {
                     respond(exchange, 200, """
-                            {
-                              "data": [
+                            [
                                 {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
                                 {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
-                              ],
-                              "cursor": {"previous": null, "next": null}
-                            }
+                            ]
                             """);
                     return;
                 }
@@ -370,6 +367,11 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {
+        if (status == 204) {
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+            return;
+        }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);

@@ -282,7 +282,7 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-OpenCode 1.17 的 `/api/session` 接收 `model` 字段，但 `/api/session/{id}/prompt` 不接收 `model` 字段。Runner 只会在创建 session 时按 `opencode.session-model` 传入模型，不会在 prompt 请求里传模型。
+OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 会在创建 session 时按 `opencode.session-model` 写入模型，并在 prompt 请求中继续带同一个模型；创建 session 的模型字段为 `model.providerID` + `model.id`，prompt 请求的模型字段为 `model.providerID` + `model.modelID`。
 
 内网自定义 provider 推荐显式配置：
 
@@ -294,7 +294,7 @@ opencode-runner:
 
 ### 内网/离线模型目录
 
-OpenCode 1.17 会维护模型目录缓存，`opencode models --refresh` 会从 `models.dev` 拉取模型元数据。内网或离线环境无法访问 `models.dev` 时，`/api/session` 可能在创建 session 时卡住并在 `runs/opencode-server/stderr.log` 中出现：
+OpenCode 1.17 会维护模型目录缓存，`opencode models --refresh` 会从 `models.dev` 拉取模型元数据。内网或离线环境无法访问 `models.dev` 时，`/session` 可能在创建 session 时卡住并在 `runs/opencode-server/stderr.log` 或 OpenCode 自身日志中出现：
 
 ```text
 service=models.dev error=Unable to connect ... Failed to fetch models.dev
