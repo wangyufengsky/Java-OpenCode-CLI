@@ -32,6 +32,7 @@ import java.util.concurrent.Future;
 
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
+    private static final int OPENCODE_POLL_MILLIS = 10_000;
 
     private final GitReportPreparation preparation;
     private final ObjectMapper objectMapper;
@@ -40,6 +41,7 @@ public class GitReportOrchestrator {
     private final OpenCodeServerTaskRunner taskRunner;
     private final AuthorOutputValidator outputValidator;
     private final QualityScoresWriter qualityScoresWriter;
+    private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
     private final ScheduledProbeWaiter outputWaiter;
     private final AsyncTaskExecutor authorTaskExecutor;
@@ -52,6 +54,7 @@ public class GitReportOrchestrator {
             OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             QualityScoresWriter qualityScoresWriter,
+            SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
             ScheduledProbeWaiter outputWaiter,
             AsyncTaskExecutor authorTaskExecutor
@@ -63,6 +66,7 @@ public class GitReportOrchestrator {
         this.taskRunner = taskRunner;
         this.outputValidator = outputValidator;
         this.qualityScoresWriter = qualityScoresWriter;
+        this.synthesisInputWriter = synthesisInputWriter;
         this.statusRepository = statusRepository;
         this.outputWaiter = outputWaiter;
         this.authorTaskExecutor = authorTaskExecutor;
@@ -214,7 +218,7 @@ public class GitReportOrchestrator {
                             properties.getOpencode().getModel(),
                             runDir,
                             () -> outputValidator.validate(reportMd, qualitySummaryJson).ok(),
-                            2_000,
+                            OPENCODE_POLL_MILLIS,
                             properties.getOpencode().getTimeoutMinutes()
                     );
                     timedOut = runResult.timedOut();
@@ -277,15 +281,22 @@ public class GitReportOrchestrator {
         Files.createDirectories(runDir);
         Path finalReport = out.resolve("code-contribution-report.md");
         Files.writeString(finalReport, GitReportConstants.REPORT_MARKER + "\n");
-        Path promptFile = runDir.resolve("synthesis-prompt.md");
-        String prompt = promptBuilder.buildSynthesisPrompt(
-                out.resolve("summary.json"),
-                out.resolve("index_inputs.json"),
-                qualityScores
+        Map<String, Object> summary = readMap(out.resolve("summary.json"));
+        Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
+        Map<String, Object> qualityScoreInputs = readMap(qualityScores);
+        Path synthesisInputs = synthesisInputWriter.write(
+                runDir.resolve("synthesis-inputs.json"),
+                summary,
+                indexInputs,
+                qualityScoreInputs,
+                properties.getSynthesisInput()
         );
+        Path promptFile = runDir.resolve("synthesis-prompt.md");
+        String prompt = promptBuilder.buildSynthesisPrompt(synthesisInputs);
         Files.writeString(promptFile, prompt);
-        log.info("Starting synthesis task: prompt={}, qualityScores={}, finalReport={}",
+        log.info("Starting synthesis task: prompt={}, synthesisInputs={}, qualityScores={}, finalReport={}",
                 promptFile,
+                synthesisInputs,
                 qualityScores,
                 out.resolve("code-contribution-report.md"));
         OpenCodeRunResult result = taskRunner.runUntil(
@@ -297,7 +308,7 @@ public class GitReportOrchestrator {
                 properties.getOpencode().getModel(),
                 runDir,
                 () -> finalReportReady(finalReport),
-                2_000,
+                OPENCODE_POLL_MILLIS,
                 properties.getOpencode().getTimeoutMinutes()
         );
         boolean ok = waitForFinalReport(finalReport, properties.getOpencode().getOutputWaitSeconds());
@@ -311,6 +322,7 @@ public class GitReportOrchestrator {
         status.put("aborted", result.aborted());
         status.put("serverState", result.serverState());
         status.put("finalReportOk", ok);
+        status.put("synthesisInputs", synthesisInputs.toString());
         status.put("finishedAt", OffsetDateTime.now().toString());
         statusRepository.write(runDir.resolve("status.json"), status);
         if (!ok) {

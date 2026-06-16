@@ -1,5 +1,6 @@
 package com.sonnet.wyf.gitreport.opencode;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +10,14 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class OpenCodeServerTaskRunner {
@@ -17,6 +25,7 @@ public class OpenCodeServerTaskRunner {
 
     private final OpenCodeServerClient client;
     private final ScheduledProbeWaiter scheduledProbeWaiter;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this.client = client;
@@ -39,13 +48,16 @@ public class OpenCodeServerTaskRunner {
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
         OpenCodeSession session = client.createSession(server.serverUrl(), repo, title);
+        RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
+        monitor.write("created", "unknown", false, false);
         client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, model);
+        monitor.write("running", "unknown", false, false);
         AtomicReference<String> lastState = new AtomicReference<>("unknown");
         return scheduledProbeWaiter.waitFor(
-                () -> pollOnce(server, repo, runDir, completionProbe, session, lastState),
+                () -> pollOnce(server, repo, runDir, completionProbe, session, lastState, monitor),
                 result -> result != null,
-                () -> abortTimedOut(server, repo, session, lastState.get()),
+                () -> abortTimedOut(server, repo, session, lastState.get(), monitor),
                 Duration.ofMinutes(timeoutMinutes),
                 Duration.ofMillis(Math.max(50, pollMillis))
         );
@@ -74,24 +86,32 @@ public class OpenCodeServerTaskRunner {
             Path runDir,
             CompletionProbe completionProbe,
             OpenCodeSession session,
-            AtomicReference<String> lastState
+            AtomicReference<String> lastState,
+            RunMonitor monitor
     ) throws IOException {
         if (isComplete(completionProbe, runDir)) {
+            monitor.write("completed_by_output", lastState.get(), false, false);
             return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, true, false, lastState.get());
         }
         String state = readSessionState(server.serverUrl(), repo, session.id(), lastState.get());
         lastState.set(state);
+        int pollCount = monitor.recordPoll(state);
+        monitor.write("running", state, false, false);
+        monitor.logHeartbeat(state, pollCount);
         if (isTerminalFailure(state)) {
+            monitor.write("server_terminal_failure", state, false, false);
             return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, state);
         }
         if (isTerminalSuccess(state)) {
+            monitor.write("server_terminal_success", state, false, false);
             return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, state);
         }
         return null;
     }
 
-    private OpenCodeRunResult abortTimedOut(OpenCodeServerHandle server, Path repo, OpenCodeSession session, String lastState) {
+    private OpenCodeRunResult abortTimedOut(OpenCodeServerHandle server, Path repo, OpenCodeSession session, String lastState, RunMonitor monitor) {
         boolean aborted = client.abortSession(server.serverUrl(), repo, session.id());
+        monitor.writeQuietly("timeout", lastState, true, aborted);
         return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), true, false, aborted, lastState);
     }
 
@@ -113,5 +133,79 @@ public class OpenCodeServerTaskRunner {
     private boolean isTerminalFailure(String state) {
         String normalized = state == null ? "" : state.toLowerCase(Locale.ROOT);
         return normalized.equals("failed") || normalized.equals("error") || normalized.equals("aborted") || normalized.equals("canceled") || normalized.equals("cancelled");
+    }
+
+    private class RunMonitor {
+        private final OpenCodeServerHandle server;
+        private final String title;
+        private final Path promptFile;
+        private final Path runDir;
+        private final String sessionId;
+        private final Instant startedAt = Instant.now();
+        private final AtomicInteger pollCount = new AtomicInteger();
+        private final AtomicReference<String> lastLoggedState = new AtomicReference<>("unknown");
+        private final int logEveryPolls;
+
+        private RunMonitor(OpenCodeServerHandle server, String title, Path promptFile, Path runDir, String sessionId, int pollMillis) {
+            this.server = server;
+            this.title = title;
+            this.promptFile = promptFile;
+            this.runDir = runDir;
+            this.sessionId = sessionId;
+            this.logEveryPolls = Math.max(1, 60_000 / Math.max(50, pollMillis));
+        }
+
+        private int recordPoll(String state) {
+            return pollCount.incrementAndGet();
+        }
+
+        private void logHeartbeat(String state, int currentPollCount) {
+            String previous = lastLoggedState.getAndSet(state);
+            if (!Objects.equals(previous, state) || currentPollCount % logEveryPolls == 0) {
+                log.info("OpenCode session heartbeat: sessionId={}, title={}, serverState={}, pollCount={}, elapsedSeconds={}, runDir={}",
+                        sessionId,
+                        title,
+                        state,
+                        currentPollCount,
+                        elapsedSeconds(),
+                        runDir);
+            }
+        }
+
+        private void write(String phase, String serverState, boolean timedOut, boolean aborted) {
+            try {
+                Files.createDirectories(runDir);
+                objectMapper.writerWithDefaultPrettyPrinter().writeValue(runDir.resolve("session-status.json").toFile(), status(phase, serverState, timedOut, aborted));
+            } catch (IOException exception) {
+                log.warn("Unable to write OpenCode session status: sessionId={}, runDir={}, reason={}", sessionId, runDir, exception.getMessage());
+            }
+        }
+
+        private void writeQuietly(String phase, String serverState, boolean timedOut, boolean aborted) {
+            write(phase, serverState, timedOut, aborted);
+        }
+
+        private Map<String, Object> status(String phase, String serverState, boolean timedOut, boolean aborted) {
+            Map<String, Object> status = new LinkedHashMap<>();
+            status.put("phase", phase);
+            status.put("sessionId", sessionId);
+            status.put("title", title);
+            status.put("serverUrl", server.serverUrl().toString());
+            status.put("serverOwnedByJava", server.ownedByJava());
+            status.put("serverState", serverState);
+            status.put("pollCount", pollCount.get());
+            status.put("timedOut", timedOut);
+            status.put("aborted", aborted);
+            status.put("runDir", runDir.toString());
+            status.put("promptFile", promptFile.toString());
+            status.put("startedAt", OffsetDateTime.ofInstant(startedAt, ZoneOffset.systemDefault()).toString());
+            status.put("updatedAt", OffsetDateTime.now().toString());
+            status.put("elapsedSeconds", elapsedSeconds());
+            return status;
+        }
+
+        private long elapsedSeconds() {
+            return Duration.between(startedAt, Instant.now()).toSeconds();
+        }
     }
 }

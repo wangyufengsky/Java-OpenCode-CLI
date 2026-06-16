@@ -6,6 +6,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.orchestration.RunStatusRepository;
+import com.sonnet.wyf.gitreport.orchestration.SynthesisInputWriter;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
@@ -27,6 +28,11 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
+    SynthesisInputWriter synthesisInputWriter(ObjectMapper objectMapper) {
+        return new SynthesisInputWriter(objectMapper);
+    }
+
+    @Bean
     GitReportOrchestrator gitReportOrchestrator(
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
@@ -35,6 +41,7 @@ public class OrchestrationConfiguration {
             OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             QualityScoresWriter qualityScoresWriter,
+            SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
             ScheduledProbeWaiter outputWaiter,
             AsyncTaskExecutor authorTaskExecutor
@@ -47,6 +54,7 @@ public class OrchestrationConfiguration {
                 taskRunner,
                 outputValidator,
                 qualityScoresWriter,
+                synthesisInputWriter,
                 statusRepository,
                 outputWaiter,
                 authorTaskExecutor

@@ -9,6 +9,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.orchestration.RunStatusRepository;
+import com.sonnet.wyf.gitreport.orchestration.SynthesisInputWriter;
 import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
 import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
@@ -98,7 +99,7 @@ class GitReportOrchestratorIntegrationTest {
         JsonNode synthesisStatus = objectMapper.readTree(out.resolve("runs/synthesis/status.json").toFile());
         assertThat(synthesisStatus.path("sessionId").asText()).isNotBlank();
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
-        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
     }
 
     @Test
@@ -158,7 +159,7 @@ class GitReportOrchestratorIntegrationTest {
         orchestrator(preparation).runSynthesisOnly(properties);
 
         assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
-        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
         assertThat(out.resolve("quality-scores.json")).exists();
         assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
     }
@@ -224,7 +225,7 @@ class GitReportOrchestratorIntegrationTest {
 
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json: " + aliceDetail));
         assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json: " + bobDetail));
-        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
         assertThat(out.resolve("quality-scores.json")).exists();
         assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
         assertThat(bobReport).hasContent("Bob 个人报告\n");
@@ -248,6 +249,7 @@ class GitReportOrchestratorIntegrationTest {
                 new OpenCodeServerTaskRunner(client, scheduledProbeWaiter),
                 new AuthorOutputValidator(objectMapper),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
+                new SynthesisInputWriter(objectMapper),
                 new RunStatusRepository(objectMapper),
                 scheduledProbeWaiter,
                 authorTaskExecutor()
@@ -326,9 +328,9 @@ class GitReportOrchestratorIntegrationTest {
             ));
             return;
         }
-        Path indexInputsPath = Path.of(extractPath(prompt, "index_inputs_json:"));
-        JsonNode indexInputs = objectMapper.readTree(indexInputsPath.toFile());
-        Files.writeString(Path.of(indexInputs.path("final_report").asText()), "最终中文总报告\n");
+        Path synthesisInputsPath = Path.of(extractPath(prompt, "synthesis_inputs_json:"));
+        JsonNode synthesisInputs = objectMapper.readTree(synthesisInputsPath.toFile());
+        Files.writeString(Path.of(synthesisInputs.path("final_report").asText()), "最终中文总报告\n");
     }
 
     private void writeAuthorDetail(Path detailPath, String author, Path personReport, Path qualitySummary) throws IOException {

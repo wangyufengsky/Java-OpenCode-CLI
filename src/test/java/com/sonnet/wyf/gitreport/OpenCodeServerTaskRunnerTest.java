@@ -18,6 +18,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -112,6 +113,46 @@ class OpenCodeServerTaskRunnerTest {
         assertThat(result.timedOut()).isTrue();
         assertThat(result.aborted()).isTrue();
         assertThat(abortCalled).isTrue();
+    }
+
+    @Test
+    void writesSessionStatusHeartbeatWhilePolling() throws Exception {
+        AtomicInteger statusRequests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"heartbeat-session\"}"));
+        server.createContext("/session/heartbeat-session/prompt_async", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/session/heartbeat-session", exchange -> {
+            statusRequests.incrementAndGet();
+            respond(exchange, 200, "{\"status\":\"busy\"}");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("worker-prompt.md");
+        Path runDir = tempDir.resolve("heartbeat-run");
+        Files.writeString(promptFile, "poll for heartbeat");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "heartbeat-title",
+                promptFile,
+                "worker message",
+                null,
+                runDir,
+                () -> statusRequests.get() >= 2,
+                50,
+                1
+        );
+
+        assertThat(result.completedByOutput()).isTrue();
+        String status = Files.readString(runDir.resolve("session-status.json"));
+        assertThat(status).contains("\"sessionId\" : \"heartbeat-session\"");
+        assertThat(status).contains("\"title\" : \"heartbeat-title\"");
+        assertThat(status).contains("\"phase\" : \"completed_by_output\"");
+        assertThat(status).contains("\"serverState\" : \"busy\"");
+        assertThat(status).contains("\"pollCount\" : 2");
     }
 
     @Test

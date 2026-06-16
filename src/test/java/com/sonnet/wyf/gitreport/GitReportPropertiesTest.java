@@ -30,6 +30,10 @@ class GitReportPropertiesTest {
                         "git-report.opencode.server-url=http://127.0.0.1:4097",
                         "git-report.opencode.manage-server=false",
                         "git-report.opencode.server-start-timeout-seconds=12",
+                        "git-report.synthesis-input.person-report-excerpt-chars=8192",
+                        "git-report.synthesis-input.snippets-per-author=5",
+                        "git-report.synthesis-input.snippets-total=30",
+                        "git-report.synthesis-input.snippet-lines=20",
                         "git-report.runtime.mode=synthesis-only"
                 )
                 .run(context -> {
@@ -52,6 +56,10 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
                     assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(6);
+                    assertThat(properties.getSynthesisInput().getPersonReportExcerptChars()).isEqualTo(8192);
+                    assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
+                    assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);
+                    assertThat(properties.getSynthesisInput().getSnippetLines()).isEqualTo(20);
                     assertThat(properties.getRuntime().getMode()).isEqualTo("synthesis-only");
                 });
     }

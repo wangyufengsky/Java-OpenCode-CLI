@@ -26,13 +26,11 @@ public class PromptBuilder {
                 + "\n```\n";
     }
 
-    public String buildSynthesisPrompt(Path summaryJson, Path indexInputsJson, Path qualityScoresJson) {
+    public String buildSynthesisPrompt(Path synthesisInputsJson) {
         String prompt = readResource("git-report-prompt-pack/prompts/synthesize-report.md");
         String template = readResource("git-report-prompt-pack/templates/code-contribution-report.md");
         return prompt + "\n\n## 路径载荷\n\n```text\n"
-                + "summary_json: " + summaryJson + "\n"
-                + "index_inputs_json: " + indexInputsJson + "\n"
-                + "quality_scores_json: " + qualityScoresJson + "\n"
+                + "synthesis_inputs_json: " + synthesisInputsJson + "\n"
                 + "```\n\n## 总报告模板\n\n```markdown\n"
                 + template
                 + "\n```\n";

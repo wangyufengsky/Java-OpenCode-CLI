@@ -57,11 +57,7 @@
 workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 100), 2)
 ```
 
-`quality_adjustment_percent` 来自主 agent 对每个人 `quality-summary.json.findings[]` 执行统一评分脚本后的结果，取值范围限制在 `[-30, 30]`。子 agent 手写分数无效。质量调整只作为工作量排序的辅助修正，不代表绩效评价。
-
-```powershell
-python <path-to-this-skill>\scripts\git_code_contribution_report.py score-quality <quality-summary.json>
-```
+`quality_adjustment_percent` 来自 Java 调度器对每个人 `quality-summary.json.findings[]` 执行统一评分后的结果，取值范围限制在 `[-30, 30]`。子 agent 手写分数无效。质量调整只作为工作量排序的辅助修正，不代表绩效评价。
 
 ## 4. 个人报告链接
 
@@ -87,7 +83,7 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 - `去注释新增行`、`去注释删除行` 会过滤明显注释行和空行，但不保证等同于严格语法解析。
 - `最终工作量分` 只用于报告排序辅助，不代表绩效评价。
 - `基础工作量分` 由脚本按提交数、文件修改次数、去注释新增/删除行计算。
-- `质量调整` 来自主 agent 调用统一评分脚本后的结果，最多调整基础分的正负 30%。
+- `质量调整` 来自 Java 调度器统一评分后的结果，最多调整基础分的正负 30%。
 - `最终工作量分` 是总报告排名使用的 `workload_score`。
 
 ## 7. 风险与偏差

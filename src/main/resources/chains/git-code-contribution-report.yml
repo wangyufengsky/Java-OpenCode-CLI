@@ -23,6 +23,12 @@ opencode:
   worker-message: "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。"
   synthesis-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
 
+synthesis-input:
+  person-report-excerpt-chars: 8192
+  snippets-per-author: 5
+  snippets-total: 30
+  snippet-lines: 20
+
 runtime:
   resume: true
   fail-fast: true

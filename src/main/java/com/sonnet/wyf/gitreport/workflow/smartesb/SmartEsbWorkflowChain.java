@@ -24,6 +24,7 @@ import java.util.Map;
 public class SmartEsbWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-rewrite-code-review";
     private static final Logger log = LoggerFactory.getLogger(SmartEsbWorkflowChain.class);
+    private static final int OPENCODE_POLL_MILLIS = 10_000;
 
     private final ChainConfigLoader configLoader;
     private final OpenCodeRunnerProperties runnerProperties;
@@ -123,7 +124,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                     request.openCode().getModel(),
                     runDir,
                     () -> summaryValidator.validate(summaryJson).ok(),
-                    2_000,
+                    OPENCODE_POLL_MILLIS,
                     request.openCode().getTimeoutMinutes()
             );
             SmartEsbSummaryValidator.Validation validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
@@ -169,7 +170,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 request.openCode().getModel(),
                 runDir,
                 () -> summaryValidator.validate(summaryJson).ok(),
-                2_000,
+                OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
         );
     }
@@ -203,7 +204,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 request.openCode().getModel(),
                 runDir,
                 () -> topLevelReady(indexMd, summaryMd),
-                2_000,
+                OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
         );
         boolean ok = outputWaiter.waitFor(

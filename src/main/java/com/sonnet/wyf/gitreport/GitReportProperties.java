@@ -14,6 +14,7 @@ public class GitReportProperties {
     private final Paths paths = new Paths();
     private final Git git = new Git();
     private final OpenCode opencode = new OpenCode();
+    private final SynthesisInput synthesisInput = new SynthesisInput();
     private final Runtime runtime = new Runtime();
 
     public boolean isEnabled() {
@@ -38,6 +39,10 @@ public class GitReportProperties {
 
     public OpenCode getOpencode() {
         return opencode;
+    }
+
+    public SynthesisInput getSynthesisInput() {
+        return synthesisInput;
     }
 
     public Runtime getRuntime() {
@@ -269,6 +274,45 @@ public class GitReportProperties {
 
         public void setSynthesisMessage(String synthesisMessage) {
             this.synthesisMessage = synthesisMessage;
+        }
+    }
+
+    public static class SynthesisInput {
+        private int personReportExcerptChars = 8_000;
+        private int snippetsPerAuthor = 5;
+        private int snippetsTotal = 30;
+        private int snippetLines = 20;
+
+        public int getPersonReportExcerptChars() {
+            return personReportExcerptChars;
+        }
+
+        public void setPersonReportExcerptChars(int personReportExcerptChars) {
+            this.personReportExcerptChars = personReportExcerptChars;
+        }
+
+        public int getSnippetsPerAuthor() {
+            return snippetsPerAuthor;
+        }
+
+        public void setSnippetsPerAuthor(int snippetsPerAuthor) {
+            this.snippetsPerAuthor = snippetsPerAuthor;
+        }
+
+        public int getSnippetsTotal() {
+            return snippetsTotal;
+        }
+
+        public void setSnippetsTotal(int snippetsTotal) {
+            this.snippetsTotal = snippetsTotal;
+        }
+
+        public int getSnippetLines() {
+            return snippetLines;
+        }
+
+        public void setSnippetLines(int snippetLines) {
+            this.snippetLines = snippetLines;
         }
     }
 
