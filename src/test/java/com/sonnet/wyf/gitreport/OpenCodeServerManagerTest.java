@@ -74,7 +74,7 @@ class OpenCodeServerManagerTest {
                 #!/bin/sh
                 sleep 30 &
                 echo $! > "%s"
-                printf started
+                printf "started env:$OPENCODE_DISABLE_MODELS_FETCH:$CUSTOM_OPENCODE_ENV"
                 wait
                 """.formatted(childPid));
         fakeOpencode.toFile().setExecutable(true);
@@ -91,12 +91,14 @@ class OpenCodeServerManagerTest {
         GitReportProperties properties = properties("http://127.0.0.1:" + port);
         properties.getPaths().setOpencodeBin(fakeOpencode.toString());
         properties.getOpencode().setServerStartTimeoutSeconds(5);
+        properties.getOpencode().getEnvironment().put("CUSTOM_OPENCODE_ENV", "custom-value");
         OpenCodeServerManager manager = manager();
 
         OpenCodeServerHandle handle = manager.ensureReady(properties, tempDir.resolve("out"));
 
         assertThat(handle.ownedByJava()).isTrue();
         waitForContent(tempDir.resolve("out/runs/opencode-server/stdout.log"), "started");
+        waitForContent(tempDir.resolve("out/runs/opencode-server/stdout.log"), "env:true:custom-value");
         long childProcessId = waitForProcessId(childPid);
 
         manager.shutdown();

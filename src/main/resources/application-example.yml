@@ -22,3 +22,6 @@ opencode-runner:
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
+    environment:
+      # 内网/离线环境避免 OpenCode 创建 session 时联网拉取 models.dev。
+      OPENCODE_DISABLE_MODELS_FETCH: "true"

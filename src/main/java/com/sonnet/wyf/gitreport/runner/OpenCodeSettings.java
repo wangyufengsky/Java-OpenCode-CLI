@@ -1,5 +1,8 @@
 package com.sonnet.wyf.gitreport.runner;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public class OpenCodeSettings {
     private String serverUrl = "http://127.0.0.1:4096";
     private boolean manageServer = true;
@@ -11,6 +14,13 @@ public class OpenCodeSettings {
     private int maxRetries = 1;
     private int maxConcurrency = 6;
     private String opencodeBin = "opencode";
+    private Map<String, String> environment = defaultEnvironment();
+
+    private static Map<String, String> defaultEnvironment() {
+        Map<String, String> environment = new LinkedHashMap<>();
+        environment.put("OPENCODE_DISABLE_MODELS_FETCH", "true");
+        return environment;
+    }
 
     public String getServerUrl() {
         return serverUrl;
@@ -90,5 +100,13 @@ public class OpenCodeSettings {
 
     public void setOpencodeBin(String opencodeBin) {
         this.opencodeBin = opencodeBin;
+    }
+
+    public Map<String, String> getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(Map<String, String> environment) {
+        this.environment = environment == null ? new LinkedHashMap<>() : new LinkedHashMap<>(environment);
     }
 }

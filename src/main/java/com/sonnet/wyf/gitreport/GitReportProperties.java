@@ -5,7 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @ConfigurationProperties(prefix = "git-report")
 public class GitReportProperties {
@@ -173,6 +175,13 @@ public class GitReportProperties {
         private int maxConcurrency = 6;
         private String workerMessage = "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。";
         private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。";
+        private Map<String, String> environment = defaultEnvironment();
+
+        private static Map<String, String> defaultEnvironment() {
+            Map<String, String> environment = new LinkedHashMap<>();
+            environment.put("OPENCODE_DISABLE_MODELS_FETCH", "true");
+            return environment;
+        }
 
         public String getServerUrl() {
             return serverUrl;
@@ -244,6 +253,14 @@ public class GitReportProperties {
 
         public void setMaxConcurrency(int maxConcurrency) {
             this.maxConcurrency = maxConcurrency;
+        }
+
+        public Map<String, String> getEnvironment() {
+            return environment;
+        }
+
+        public void setEnvironment(Map<String, String> environment) {
+            this.environment = environment == null ? new LinkedHashMap<>() : new LinkedHashMap<>(environment);
         }
 
         public String getWorkerMessage() {

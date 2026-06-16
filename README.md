@@ -67,6 +67,8 @@ opencode-runner:
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
+    environment:
+      OPENCODE_DISABLE_MODELS_FETCH: "true"
 ```
 
 字段说明：
@@ -80,6 +82,7 @@ opencode-runner:
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
 - `opencode.request-timeout-seconds`：单次调用 OpenCode Server API 的 HTTP 超时，例如创建 session、提交 prompt；和整个任务的 `timeout-minutes` 不是同一个超时。
+- `opencode.environment`：Java 托管启动 `opencode serve` 时注入的环境变量。内网/离线环境默认设置 `OPENCODE_DISABLE_MODELS_FETCH=true`，避免 OpenCode 创建 session 时联网拉取 `models.dev`。
 
 ## 运行模式
 
@@ -278,6 +281,40 @@ opencode serve --port 4096
 ```
 
 OpenCode 1.17 的 `/api/session/{id}/prompt` 不接收 `model` 字段。Runner 使用 OpenCode Server 侧的当前默认模型；需要换模型时，先在本机 OpenCode 中切换并确认 `opencode serve` 使用同一套配置。
+
+### 内网/离线模型目录
+
+OpenCode 1.17 会维护模型目录缓存，`opencode models --refresh` 会从 `models.dev` 拉取模型元数据。内网或离线环境无法访问 `models.dev` 时，`/api/session` 可能在创建 session 时卡住并在 `runs/opencode-server/stderr.log` 中出现：
+
+```text
+service=models.dev error=Unable to connect ... Failed to fetch models.dev
+```
+
+Java 托管启动时默认注入：
+
+```yaml
+opencode-runner:
+  opencode:
+    environment:
+      OPENCODE_DISABLE_MODELS_FETCH: "true"
+```
+
+如果手工启动 OpenCode Server，需要在启动前设置同一个环境变量：
+
+```powershell
+$env:OPENCODE_DISABLE_MODELS_FETCH = "true"
+opencode serve --port 4096 --hostname 127.0.0.1 --print-logs --log-level DEBUG
+```
+
+如果需要使用固定模型目录文件，也可以配置：
+
+```yaml
+opencode-runner:
+  opencode:
+    environment:
+      OPENCODE_DISABLE_MODELS_FETCH: "true"
+      OPENCODE_MODELS_PATH: "D:/opencode/models.json"
+```
 
 ## Session 监控
 

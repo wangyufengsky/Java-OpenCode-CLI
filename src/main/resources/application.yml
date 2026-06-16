@@ -18,3 +18,5 @@ opencode-runner:
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
+    environment:
+      OPENCODE_DISABLE_MODELS_FETCH: "true"

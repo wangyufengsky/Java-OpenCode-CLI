@@ -35,6 +35,7 @@ public class OpenCodeServerManager {
         settings.setServerUrl(properties.getOpencode().getServerUrl());
         settings.setManageServer(properties.getOpencode().isManageServer());
         settings.setServerStartTimeoutSeconds(properties.getOpencode().getServerStartTimeoutSeconds());
+        settings.setEnvironment(properties.getOpencode().getEnvironment());
         settings.setOpencodeBin(properties.getPaths().getOpencodeBin());
         return ensureReady(settings, out);
     }
@@ -81,8 +82,11 @@ public class OpenCodeServerManager {
         Path logDir = out.resolve("runs").resolve("opencode-server").toAbsolutePath().normalize();
         Files.createDirectories(logDir);
         List<String> command = List.of(opencodeBin, "serve", "--port", String.valueOf(port));
-        log.info("Starting managed OpenCode Server: command={}, logs={}", String.join(" ", command), logDir);
-        ownedProcess = new ProcessBuilder(command)
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.environment().putAll(settings.getEnvironment());
+        log.info("Starting managed OpenCode Server: command={}, logs={}, environmentKeys={}",
+                String.join(" ", command), logDir, settings.getEnvironment().keySet());
+        ownedProcess = processBuilder
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(logDir.resolve("stdout.log").toFile()))
                 .redirectError(ProcessBuilder.Redirect.appendTo(logDir.resolve("stderr.log").toFile()))
                 .start();
