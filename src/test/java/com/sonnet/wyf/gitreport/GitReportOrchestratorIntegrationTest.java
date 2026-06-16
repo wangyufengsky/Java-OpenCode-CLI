@@ -287,20 +287,28 @@ class GitReportOrchestratorIntegrationTest {
         AtomicInteger ids = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
-        server.createContext("/session/", exchange -> {
+        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"session-" + ids.incrementAndGet() + "\"}}"));
+        server.createContext("/api/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
-                if (path.endsWith("/prompt_async")) {
+                if (path.endsWith("/prompt")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    String prompt = objectMapper.readTree(body).at("/prompt/text").asText();
                     prompts.add(prompt);
                     writeFakeOpenCodeOutput(prompt);
-                    respond(exchange, 200, "{\"ok\":true}");
+                    respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"session-1\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}");
                     return;
                 }
-                if (path.matches("/session/[^/]+")) {
-                    respond(exchange, 200, "{\"status\":\"idle\"}");
+                if (path.matches("/api/session/[^/]+/message")) {
+                    respond(exchange, 200, """
+                            {
+                              "data": [
+                                {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                                {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
+                              ],
+                              "cursor": {"previous": null, "next": null}
+                            }
+                            """);
                     return;
                 }
                 respond(exchange, 404, "{}");

@@ -4,12 +4,12 @@ public class OpenCodeSettings {
     private String serverUrl = "http://127.0.0.1:4096";
     private boolean manageServer = true;
     private int serverStartTimeoutSeconds = 30;
+    private int requestTimeoutSeconds = 60;
     private int concurrency = 6;
     private int timeoutMinutes = 40;
     private int outputWaitSeconds = 30;
     private int maxRetries = 1;
     private int maxConcurrency = 6;
-    private String model;
     private String opencodeBin = "opencode";
 
     public String getServerUrl() {
@@ -34,6 +34,14 @@ public class OpenCodeSettings {
 
     public void setServerStartTimeoutSeconds(int serverStartTimeoutSeconds) {
         this.serverStartTimeoutSeconds = serverStartTimeoutSeconds;
+    }
+
+    public int getRequestTimeoutSeconds() {
+        return requestTimeoutSeconds;
+    }
+
+    public void setRequestTimeoutSeconds(int requestTimeoutSeconds) {
+        this.requestTimeoutSeconds = requestTimeoutSeconds;
     }
 
     public int getConcurrency() {
@@ -74,14 +82,6 @@ public class OpenCodeSettings {
 
     public void setMaxConcurrency(int maxConcurrency) {
         this.maxConcurrency = maxConcurrency;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
     }
 
     public String getOpencodeBin() {

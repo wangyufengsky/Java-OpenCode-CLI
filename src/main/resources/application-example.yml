@@ -15,10 +15,10 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    request-timeout-seconds: 60
     opencode-bin: "opencode"
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
-    model: ""

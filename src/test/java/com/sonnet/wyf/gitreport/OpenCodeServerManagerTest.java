@@ -69,11 +69,14 @@ class OpenCodeServerManagerTest {
     void startsManagedServerAndWritesServerLogs() throws Exception {
         int port = freePort();
         Path fakeOpencode = tempDir.resolve("fake-opencode.sh");
+        Path childPid = tempDir.resolve("child.pid");
         Files.writeString(fakeOpencode, """
                 #!/bin/sh
+                sleep 30 &
+                echo $! > "%s"
                 printf started
-                sleep 30
-                """);
+                wait
+                """.formatted(childPid));
         fakeOpencode.toFile().setExecutable(true);
         Thread healthThread = new Thread(() -> {
             try {
@@ -94,9 +97,12 @@ class OpenCodeServerManagerTest {
 
         assertThat(handle.ownedByJava()).isTrue();
         waitForContent(tempDir.resolve("out/runs/opencode-server/stdout.log"), "started");
+        long childProcessId = waitForProcessId(childPid);
 
         manager.shutdown();
         healthThread.join();
+
+        assertThatProcessExits(childProcessId);
     }
 
     @Test
@@ -181,5 +187,28 @@ class OpenCodeServerManagerTest {
                 Duration.ofMillis(20)
         );
         assertThat(found).isTrue();
+    }
+
+    private void assertThatProcessExits(long processId) throws Exception {
+        boolean exited = scheduledProbeWaiter().waitFor(
+                () -> ProcessHandle.of(processId).map(process -> !process.isAlive()).orElse(true),
+                Boolean::booleanValue,
+                () -> false,
+                Duration.ofSeconds(2),
+                Duration.ofMillis(20)
+        );
+        assertThat(exited).isTrue();
+    }
+
+    private long waitForProcessId(Path path) throws Exception {
+        boolean found = scheduledProbeWaiter().waitFor(
+                () -> Files.exists(path) && !Files.readString(path).trim().isBlank(),
+                Boolean::booleanValue,
+                () -> false,
+                Duration.ofSeconds(2),
+                Duration.ofMillis(20)
+        );
+        assertThat(found).isTrue();
+        return Long.parseLong(Files.readString(path).trim());
     }
 }

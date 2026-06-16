@@ -16,6 +16,7 @@ class ArchitectureConventionsTest {
         assertThat(code).doesNotContain("new GitReportPreparation");
         assertThat(code).doesNotContain("new GitReportOrchestrator");
         assertThat(code).doesNotContain("new OpenCodeServerTaskRunner");
+        assertThat(code).contains("SpringApplication.exit(context)");
     }
 
     @Test
@@ -34,6 +35,22 @@ class ArchitectureConventionsTest {
 
         assertThat(code).contains("ScheduledProbeWaiter");
         assertThat(code).doesNotContain("TimeUnit.MILLISECONDS.sleep");
+    }
+
+    @Test
+    void openCodeClientUsesOpenCode117ApiContractOnly() throws Exception {
+        String client = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerClient.java");
+        String application = read("src/main/resources/application.yml");
+        String example = read("src/main/resources/application-example.yml");
+
+        assertThat(client).contains("/api/session");
+        assertThat(client).contains("/prompt");
+        assertThat(client).contains("/message?order=asc&limit=100");
+        assertThat(client).doesNotContain("prompt_async");
+        assertThat(client).doesNotContain("x-opencode-directory");
+        assertThat(client).doesNotContain("body.put(\"model\"");
+        assertThat(application).doesNotContain("model:");
+        assertThat(example).doesNotContain("model:");
     }
 
     @Test

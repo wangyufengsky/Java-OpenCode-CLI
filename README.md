@@ -21,6 +21,7 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     opencode-bin: "opencode"
+    request-timeout-seconds: 60
     timeout-minutes: 40
 ```
 
@@ -59,13 +60,13 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    request-timeout-seconds: 60
     opencode-bin: "opencode"
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
     max-retries: 1
     max-concurrency: 6
-    model: ""
 ```
 
 字段说明：
@@ -78,6 +79,7 @@ opencode-runner:
 - `rerun.type`：补跑类型。
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
+- `opencode.request-timeout-seconds`：单次调用 OpenCode Server API 的 HTTP 超时，例如创建 session、提交 prompt；和整个任务的 `timeout-minutes` 不是同一个超时。
 
 ## 运行模式
 
@@ -275,17 +277,7 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-`model` 为空时使用 OpenCode 默认模型。非空时必须使用：
-
-```text
-provider/model
-```
-
-例如：
-
-```yaml
-model: "openai/gpt-4.1"
-```
+OpenCode 1.17 的 `/api/session/{id}/prompt` 不接收 `model` 字段。Runner 使用 OpenCode Server 侧的当前默认模型；需要换模型时，先在本机 OpenCode 中切换并确认 `opencode serve` 使用同一套配置。
 
 ## Session 监控
 

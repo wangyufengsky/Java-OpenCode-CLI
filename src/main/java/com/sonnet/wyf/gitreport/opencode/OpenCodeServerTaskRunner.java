@@ -38,22 +38,22 @@ public class OpenCodeServerTaskRunner {
             String title,
             Path promptFile,
             String message,
-            String model,
             Path runDir,
             CompletionProbe completionProbe,
+            int requestTimeoutSeconds,
             int pollMillis,
             int timeoutMinutes
     ) throws Exception {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
-        OpenCodeSession session = client.createSession(server.serverUrl(), repo, title);
+        OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, requestTimeoutSeconds);
         RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
         monitor.write("created", "unknown", false, false);
-        client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, model);
-        monitor.write("running", "unknown", false, false);
-        AtomicReference<String> lastState = new AtomicReference<>("unknown");
+        client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, requestTimeoutSeconds);
+        AtomicReference<String> lastState = new AtomicReference<>("submitted");
+        monitor.write("running", lastState.get(), false, false);
         return scheduledProbeWaiter.waitFor(
                 () -> pollOnce(server, repo, runDir, completionProbe, session, lastState, monitor),
                 result -> result != null,

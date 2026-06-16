@@ -215,9 +215,9 @@ public class GitReportOrchestrator {
                             "git-report-" + authorKey,
                             promptFile,
                             properties.getOpencode().getWorkerMessage(),
-                            properties.getOpencode().getModel(),
                             runDir,
                             () -> outputValidator.validate(reportMd, qualitySummaryJson).ok(),
+                            properties.getOpencode().getRequestTimeoutSeconds(),
                             OPENCODE_POLL_MILLIS,
                             properties.getOpencode().getTimeoutMinutes()
                     );
@@ -305,9 +305,9 @@ public class GitReportOrchestrator {
                 "git-report-synthesis",
                 promptFile,
                 properties.getOpencode().getSynthesisMessage(),
-                properties.getOpencode().getModel(),
                 runDir,
                 () -> finalReportReady(finalReport),
+                properties.getOpencode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 properties.getOpencode().getTimeoutMinutes()
         );

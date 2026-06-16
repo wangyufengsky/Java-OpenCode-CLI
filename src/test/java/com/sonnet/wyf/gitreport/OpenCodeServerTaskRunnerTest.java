@@ -24,7 +24,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class OpenCodeServerTaskRunnerTest {
     private HttpServer server;
-    private boolean abortCalled;
     private ThreadPoolTaskScheduler taskScheduler;
 
     @TempDir
@@ -44,15 +43,23 @@ class OpenCodeServerTaskRunnerTest {
     void sendsPersistedPromptToSessionAndCompletesByOutputProbe() throws Exception {
         Path output = tempDir.resolve("done.txt");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"task-session\"}"));
-        server.createContext("/session/task-session/prompt_async", exchange -> {
+        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"task-session\"}}"));
+        server.createContext("/api/session/task-session/prompt", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             if (body.contains("worker message") && body.contains("persisted prompt")) {
                 Files.writeString(output, "done");
             }
-            respond(exchange, 200, "{\"ok\":true}");
+            respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"task-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}");
         });
-        server.createContext("/session/task-session", exchange -> respond(exchange, 200, "{\"status\":\"busy\"}"));
+        server.createContext("/api/session/task-session/message", exchange -> respond(exchange, 200, """
+                {
+                  "data": [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
+                  ],
+                  "cursor": {"previous": null, "next": null}
+                }
+                """));
         server.start();
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
@@ -66,9 +73,9 @@ class OpenCodeServerTaskRunnerTest {
                 "test-title",
                 promptFile,
                 "worker message",
-                null,
                 tempDir.resolve("run"),
                 () -> Files.exists(output),
+                60,
                 50,
                 1
         );
@@ -81,15 +88,19 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
-    void abortsSessionOnTimeout() throws Exception {
+    void recordsTimeoutWithoutAbortWhenUsingOpenCodeV2Api() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"timeout-session\"}"));
-        server.createContext("/session/timeout-session/prompt_async", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session/timeout-session", exchange -> respond(exchange, 200, "{\"status\":\"busy\"}"));
-        server.createContext("/session/timeout-session/abort", exchange -> {
-            abortCalled = true;
-            respond(exchange, 200, "{\"ok\":true}");
-        });
+        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"timeout-session\"}}"));
+        server.createContext("/api/session/timeout-session/prompt", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"timeout-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}"));
+        server.createContext("/api/session/timeout-session/message", exchange -> respond(exchange, 200, """
+                {
+                  "data": [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
+                  ],
+                  "cursor": {"previous": null, "next": null}
+                }
+                """));
         server.start();
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
@@ -103,27 +114,34 @@ class OpenCodeServerTaskRunnerTest {
                 "test-title",
                 promptFile,
                 "worker message",
-                null,
                 tempDir.resolve("run"),
                 () -> false,
+                60,
                 50,
                 0
         );
 
         assertThat(result.timedOut()).isTrue();
-        assertThat(result.aborted()).isTrue();
-        assertThat(abortCalled).isTrue();
+        assertThat(result.aborted()).isFalse();
     }
 
     @Test
     void writesSessionStatusHeartbeatWhilePolling() throws Exception {
         AtomicInteger statusRequests = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"heartbeat-session\"}"));
-        server.createContext("/session/heartbeat-session/prompt_async", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session/heartbeat-session", exchange -> {
+        server.createContext("/api/session", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"heartbeat-session\"}}"));
+        server.createContext("/api/session/heartbeat-session/prompt", exchange -> respond(exchange, 200, "{\"data\":{\"id\":\"msg_1\",\"sessionID\":\"heartbeat-session\",\"admittedSeq\":1,\"prompt\":{\"text\":\"ok\"},\"delivery\":\"queue\",\"timeCreated\":1}}"));
+        server.createContext("/api/session/heartbeat-session/message", exchange -> {
             statusRequests.incrementAndGet();
-            respond(exchange, 200, "{\"status\":\"busy\"}");
+            respond(exchange, 200, """
+                    {
+                      "data": [
+                        {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                        {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
+                      ],
+                      "cursor": {"previous": null, "next": null}
+                    }
+                    """);
         });
         server.start();
 
@@ -139,9 +157,9 @@ class OpenCodeServerTaskRunnerTest {
                 "heartbeat-title",
                 promptFile,
                 "worker message",
-                null,
                 runDir,
                 () -> statusRequests.get() >= 2,
+                60,
                 50,
                 1
         );
@@ -151,7 +169,7 @@ class OpenCodeServerTaskRunnerTest {
         assertThat(status).contains("\"sessionId\" : \"heartbeat-session\"");
         assertThat(status).contains("\"title\" : \"heartbeat-title\"");
         assertThat(status).contains("\"phase\" : \"completed_by_output\"");
-        assertThat(status).contains("\"serverState\" : \"busy\"");
+        assertThat(status).contains("\"serverState\" : \"running\"");
         assertThat(status).contains("\"pollCount\" : 2");
     }
 

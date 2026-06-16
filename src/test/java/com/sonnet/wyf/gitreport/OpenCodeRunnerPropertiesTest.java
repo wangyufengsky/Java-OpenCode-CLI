@@ -29,11 +29,11 @@ class OpenCodeRunnerPropertiesTest {
                         "opencode-runner.opencode.server-url=http://127.0.0.1:4097",
                         "opencode-runner.opencode.manage-server=false",
                         "opencode-runner.opencode.opencode-bin=C:/Users/dev/AppData/Roaming/npm/opencode.cmd",
+                        "opencode-runner.opencode.request-timeout-seconds=90",
                         "opencode-runner.opencode.concurrency=3",
                         "opencode-runner.opencode.max-concurrency=5",
                         "opencode-runner.opencode.timeout-minutes=25",
-                        "opencode-runner.opencode.output-wait-seconds=9",
-                        "opencode-runner.opencode.model=bigmodel/glm-coding"
+                        "opencode-runner.opencode.output-wait-seconds=9"
                 )
                 .run(context -> {
                     OpenCodeRunnerProperties properties = context.getBean(OpenCodeRunnerProperties.class);
@@ -48,11 +48,11 @@ class OpenCodeRunnerPropertiesTest {
                     assertThat(properties.getOpencode().getServerUrl()).isEqualTo("http://127.0.0.1:4097");
                     assertThat(properties.getOpencode().isManageServer()).isFalse();
                     assertThat(properties.getOpencode().getOpencodeBin()).isEqualTo("C:/Users/dev/AppData/Roaming/npm/opencode.cmd");
+                    assertThat(properties.getOpencode().getRequestTimeoutSeconds()).isEqualTo(90);
                     assertThat(properties.getOpencode().getConcurrency()).isEqualTo(3);
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(5);
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(25);
                     assertThat(properties.getOpencode().getOutputWaitSeconds()).isEqualTo(9);
-                    assertThat(properties.getOpencode().getModel()).isEqualTo("bigmodel/glm-coding");
                 });
     }
 

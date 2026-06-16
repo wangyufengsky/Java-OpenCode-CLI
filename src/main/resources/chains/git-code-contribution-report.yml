@@ -6,7 +6,6 @@ project:
 paths:
   repo: "D:/workspace/upfs-production"
   out: "D:/reports/git-code-contribution/2026-06-15"
-  opencode-bin: "opencode"
 
 git:
   since: "2026-06-01"
@@ -28,7 +27,3 @@ synthesis-input:
   snippets-per-author: 5
   snippets-total: 30
   snippet-lines: 20
-
-runtime:
-  resume: true
-  fail-fast: true

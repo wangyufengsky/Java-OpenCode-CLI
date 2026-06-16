@@ -12,6 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 
 public class OpenCodeServerManager {
@@ -60,11 +63,7 @@ public class OpenCodeServerManager {
         }
         if (ownedProcess.isAlive()) {
             log.info("Stopping managed OpenCode Server: {}", ownedServerUrl);
-            ownedProcess.destroy();
-            if (!ownedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                ownedProcess.destroyForcibly();
-                ownedProcess.waitFor();
-            }
+            stopProcessTree(ownedProcess);
         }
         ownedProcess = null;
         ownedServerUrl = null;
@@ -112,11 +111,51 @@ public class OpenCodeServerManager {
         }
         Process process = ownedProcess;
         if (process != null && process.isAlive()) {
-            process.destroyForcibly();
-            process.waitFor();
+            stopProcessTree(process);
             ownedProcess = null;
             ownedServerUrl = null;
         }
         throw new IllegalStateException("OpenCode Server startup timed out after " + timeoutSeconds + " seconds: " + serverUrl);
+    }
+
+    private void stopProcessTree(Process process) throws InterruptedException {
+        List<ProcessHandle> descendants = process.descendants().toList();
+        process.destroy();
+        descendants.forEach(this::destroyIfAlive);
+        if (!waitForExit(process.toHandle(), descendants, Duration.ofSeconds(5))) {
+            destroyIfAlive(process.toHandle());
+            descendants.forEach(this::destroyForciblyIfAlive);
+            process.waitFor();
+            waitForExit(process.toHandle(), descendants, Duration.ofSeconds(5));
+        }
+    }
+
+    private boolean waitForExit(ProcessHandle process, List<ProcessHandle> descendants, Duration timeout) throws InterruptedException {
+        List<CompletableFuture<ProcessHandle>> exits = descendants.stream()
+                .filter(ProcessHandle::isAlive)
+                .map(ProcessHandle::onExit)
+                .toList();
+        try {
+            process.onExit().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            CompletableFuture.allOf(exits.toArray(CompletableFuture[]::new))
+                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (ExecutionException exception) {
+            throw new IllegalStateException("Failed while waiting for OpenCode Server process tree to exit", exception);
+        } catch (TimeoutException exception) {
+            return false;
+        }
+    }
+
+    private void destroyIfAlive(ProcessHandle process) {
+        if (process.isAlive()) {
+            process.destroy();
+        }
+    }
+
+    private void destroyForciblyIfAlive(ProcessHandle process) {
+        if (process.isAlive()) {
+            process.destroyForcibly();
+        }
     }
 }

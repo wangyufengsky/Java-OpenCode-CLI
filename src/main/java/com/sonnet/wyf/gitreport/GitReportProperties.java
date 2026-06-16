@@ -9,21 +9,11 @@ import java.util.List;
 
 @ConfigurationProperties(prefix = "git-report")
 public class GitReportProperties {
-    private boolean enabled = false;
     private final Project project = new Project();
     private final Paths paths = new Paths();
     private final Git git = new Git();
     private final OpenCode opencode = new OpenCode();
     private final SynthesisInput synthesisInput = new SynthesisInput();
-    private final Runtime runtime = new Runtime();
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
 
     public Project getProject() {
         return project;
@@ -43,10 +33,6 @@ public class GitReportProperties {
 
     public SynthesisInput getSynthesisInput() {
         return synthesisInput;
-    }
-
-    public Runtime getRuntime() {
-        return runtime;
     }
 
     public static class Project {
@@ -179,12 +165,12 @@ public class GitReportProperties {
         private String serverUrl = "http://127.0.0.1:4096";
         private boolean manageServer = true;
         private int serverStartTimeoutSeconds = 30;
+        private int requestTimeoutSeconds = 60;
         private int concurrency = 6;
         private int timeoutMinutes = 40;
         private int outputWaitSeconds = 30;
         private int maxRetries = 1;
         private int maxConcurrency = 6;
-        private String model;
         private String workerMessage = "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。";
         private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。";
 
@@ -210,6 +196,14 @@ public class GitReportProperties {
 
         public void setServerStartTimeoutSeconds(int serverStartTimeoutSeconds) {
             this.serverStartTimeoutSeconds = serverStartTimeoutSeconds;
+        }
+
+        public int getRequestTimeoutSeconds() {
+            return requestTimeoutSeconds;
+        }
+
+        public void setRequestTimeoutSeconds(int requestTimeoutSeconds) {
+            this.requestTimeoutSeconds = requestTimeoutSeconds;
         }
 
         public int getConcurrency() {
@@ -250,14 +244,6 @@ public class GitReportProperties {
 
         public void setMaxConcurrency(int maxConcurrency) {
             this.maxConcurrency = maxConcurrency;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
         }
 
         public String getWorkerMessage() {
@@ -316,33 +302,4 @@ public class GitReportProperties {
         }
     }
 
-    public static class Runtime {
-        private String mode = "full";
-        private boolean resume = true;
-        private boolean failFast = true;
-
-        public String getMode() {
-            return mode;
-        }
-
-        public void setMode(String mode) {
-            this.mode = mode;
-        }
-
-        public boolean isResume() {
-            return resume;
-        }
-
-        public void setResume(boolean resume) {
-            this.resume = resume;
-        }
-
-        public boolean isFailFast() {
-            return failFast;
-        }
-
-        public void setFailFast(boolean failFast) {
-            this.failFast = failFast;
-        }
-    }
 }

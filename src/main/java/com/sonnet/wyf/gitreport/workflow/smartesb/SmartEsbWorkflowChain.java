@@ -121,9 +121,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                     "smartesb-review-" + transaction.name(),
                     promptFile,
                     properties.getWorkerMessage(),
-                    request.openCode().getModel(),
                     runDir,
                     () -> summaryValidator.validate(summaryJson).ok(),
+                    request.openCode().getRequestTimeoutSeconds(),
                     OPENCODE_POLL_MILLIS,
                     request.openCode().getTimeoutMinutes()
             );
@@ -167,9 +167,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 "smartesb-review-rerun-" + transaction.name(),
                 promptFile,
                 properties.getWorkerMessage(),
-                request.openCode().getModel(),
                 runDir,
                 () -> summaryValidator.validate(summaryJson).ok(),
+                request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
         );
@@ -201,9 +201,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 "smartesb-review-index",
                 promptFile,
                 properties.getSynthesisMessage(),
-                request.openCode().getModel(),
                 runDir,
                 () -> topLevelReady(indexMd, summaryMd),
+                request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
         );

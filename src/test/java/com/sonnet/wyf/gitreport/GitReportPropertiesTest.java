@@ -23,18 +23,17 @@ class GitReportPropertiesTest {
                         "git-report.project.run-id=manual-run-001",
                         "git-report.paths.repo=D:/workspace/upfs-production",
                         "git-report.paths.out=D:/reports/git-code-contribution/2026-06-15",
-                        "git-report.paths.opencode-bin=C:/Users/dev/AppData/Roaming/npm/opencode.cmd",
                         "git-report.git.since=2026-06-01",
                         "git-report.git.until=2026-06-15",
                         "git-report.git.exclude[0]=target/**",
                         "git-report.opencode.server-url=http://127.0.0.1:4097",
                         "git-report.opencode.manage-server=false",
                         "git-report.opencode.server-start-timeout-seconds=12",
+                        "git-report.opencode.request-timeout-seconds=90",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
                         "git-report.synthesis-input.snippets-per-author=5",
                         "git-report.synthesis-input.snippets-total=30",
-                        "git-report.synthesis-input.snippet-lines=20",
-                        "git-report.runtime.mode=synthesis-only"
+                        "git-report.synthesis-input.snippet-lines=20"
                 )
                 .run(context -> {
                     GitReportProperties properties = context.getBean(GitReportProperties.class);
@@ -44,7 +43,6 @@ class GitReportPropertiesTest {
                     assertThat(properties.getProject().getRunId()).isEqualTo("manual-run-001");
                     assertThat(properties.getPaths().getRepo()).isEqualTo(Path.of("D:/workspace/upfs-production"));
                     assertThat(properties.getPaths().getOut()).isEqualTo(Path.of("D:/reports/git-code-contribution/2026-06-15"));
-                    assertThat(properties.getPaths().getOpencodeBin()).isEqualTo("C:/Users/dev/AppData/Roaming/npm/opencode.cmd");
                     assertThat(properties.getGit().getSince()).isEqualTo(LocalDate.of(2026, 6, 1));
                     assertThat(properties.getGit().getUntil()).isEqualTo(LocalDate.of(2026, 6, 15));
                     assertThat(properties.getGit().getRevision()).isEqualTo("HEAD");
@@ -52,6 +50,7 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getServerUrl()).isEqualTo("http://127.0.0.1:4097");
                     assertThat(properties.getOpencode().isManageServer()).isFalse();
                     assertThat(properties.getOpencode().getServerStartTimeoutSeconds()).isEqualTo(12);
+                    assertThat(properties.getOpencode().getRequestTimeoutSeconds()).isEqualTo(90);
                     assertThat(properties.getOpencode().getConcurrency()).isEqualTo(6);
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
                     assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);
@@ -60,7 +59,6 @@ class GitReportPropertiesTest {
                     assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
                     assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);
                     assertThat(properties.getSynthesisInput().getSnippetLines()).isEqualTo(20);
-                    assertThat(properties.getRuntime().getMode()).isEqualTo("synthesis-only");
                 });
     }
 
