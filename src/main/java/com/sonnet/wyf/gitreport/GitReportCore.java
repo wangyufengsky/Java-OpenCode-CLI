@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,9 +9,15 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -882,25 +889,369 @@ class GitReportPreparation {
     }
 }
 
-class OpenCodeCommandBuilder {
-    List<String> buildRunCommand(Path repo, String opencodeBin, String title, Path promptFile, String format, String model, String message) {
-        List<String> command = new ArrayList<>(List.of(
-                opencodeBin,
-                "run",
-                "--dir",
-                repo.toString(),
-                "--format",
-                format == null || format.isBlank() ? "json" : format,
-                "--title",
-                title,
-                "--file=" + promptFile
-        ));
-        if (model != null && !model.isBlank()) {
-            command.add("--model");
-            command.add(model);
+record OpenCodeSession(String id) {
+}
+
+record OpenCodeServerHandle(URI serverUrl, boolean ownedByJava) {
+}
+
+class OpenCodeRunResult {
+    private final String sessionId;
+    private final String serverUrl;
+    private final boolean serverOwnedByJava;
+    private final boolean timedOut;
+    private final boolean completedByOutput;
+    private final boolean aborted;
+    private final String serverState;
+
+    OpenCodeRunResult(String sessionId, String serverUrl, boolean serverOwnedByJava, boolean timedOut, boolean completedByOutput, boolean aborted, String serverState) {
+        this.sessionId = sessionId;
+        this.serverUrl = serverUrl;
+        this.serverOwnedByJava = serverOwnedByJava;
+        this.timedOut = timedOut;
+        this.completedByOutput = completedByOutput;
+        this.aborted = aborted;
+        this.serverState = serverState == null ? "unknown" : serverState;
+    }
+
+    String sessionId() {
+        return sessionId;
+    }
+
+    String serverUrl() {
+        return serverUrl;
+    }
+
+    boolean serverOwnedByJava() {
+        return serverOwnedByJava;
+    }
+
+    boolean timedOut() {
+        return timedOut;
+    }
+
+    boolean completedByOutput() {
+        return completedByOutput;
+    }
+
+    boolean aborted() {
+        return aborted;
+    }
+
+    String serverState() {
+        return serverState;
+    }
+}
+
+class OpenCodeServerClient {
+    private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
+
+    OpenCodeServerClient(ObjectMapper objectMapper) {
+        this(objectMapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+    }
+
+    OpenCodeServerClient(ObjectMapper objectMapper, HttpClient httpClient) {
+        this.objectMapper = objectMapper;
+        this.httpClient = httpClient;
+    }
+
+    boolean isHealthy(URI serverUrl) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/global/health"))
+                    .timeout(Duration.ofSeconds(2))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (Exception ignored) {
+            return false;
         }
-        command.add(message);
-        return command;
+    }
+
+    OpenCodeSession createSession(URI serverUrl, Path repo, String title) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("title", title);
+        HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session", repo))
+                .timeout(Duration.ofSeconds(10))
+                .header("content-type", "application/json")
+                .header("x-opencode-directory", repo.toAbsolutePath().normalize().toString())
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                .build();
+        JsonNode json = sendJson(request);
+        String id = firstText(json, "id", "sessionID", "sessionId");
+        if (id.isBlank()) {
+            throw new IllegalStateException("OpenCode Server /session response missing session id: " + json);
+        }
+        return new OpenCodeSession(id);
+    }
+
+    void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text, String model) throws IOException, InterruptedException {
+        Map<String, Object> part = new LinkedHashMap<>();
+        part.put("type", "text");
+        part.put("text", text);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("parts", List.of(part));
+        if (model != null && !model.isBlank()) {
+            body.put("model", modelObject(model));
+        }
+        HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session/" + pathEncode(sessionId) + "/prompt_async", repo))
+                .timeout(Duration.ofSeconds(30))
+                .header("content-type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                .build();
+        sendJson(request);
+    }
+
+    String getSessionStatus(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session/" + pathEncode(sessionId), repo))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+        JsonNode json = sendJson(request);
+        String direct = firstText(json, "status", "state");
+        if (!direct.isBlank()) {
+            return direct;
+        }
+        JsonNode nested = json.path("session");
+        return firstText(nested, "status", "state");
+    }
+
+    boolean abortSession(URI serverUrl, Path repo, String sessionId) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session/" + pathEncode(sessionId) + "/abort", repo))
+                    .timeout(Duration.ofSeconds(10))
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private Map<String, Object> modelObject(String model) {
+        String trimmed = model.trim();
+        int slash = trimmed.indexOf('/');
+        if (slash <= 0 || slash == trimmed.length() - 1) {
+            throw new IllegalArgumentException("git-report.opencode.model must use provider/model format when set: " + model);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("providerID", trimmed.substring(0, slash));
+        result.put("modelID", trimmed.substring(slash + 1));
+        return result;
+    }
+
+    private JsonNode sendJson(HttpRequest request) throws IOException, InterruptedException {
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("OpenCode Server request failed: " + request.method() + " " + request.uri() + " status=" + response.statusCode() + " body=" + response.body());
+        }
+        String body = response.body() == null || response.body().isBlank() ? "{}" : response.body();
+        return objectMapper.readTree(body);
+    }
+
+    private URI resolve(URI serverUrl, String path) {
+        String base = serverUrl.toString();
+        if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return URI.create(base + path);
+    }
+
+    private URI resolve(URI serverUrl, String path, Path directory) {
+        return URI.create(resolve(serverUrl, path) + "?directory=" + pathEncode(directory.toAbsolutePath().normalize().toString()));
+    }
+
+    private String pathEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private String firstText(JsonNode json, String... names) {
+        for (String name : names) {
+            JsonNode value = json.path(name);
+            if (value.isTextual() && !value.asText().isBlank()) {
+                return value.asText();
+            }
+        }
+        return "";
+    }
+}
+
+class OpenCodeServerManager {
+    private static final Logger log = LoggerFactory.getLogger(OpenCodeServerManager.class);
+
+    private final OpenCodeServerClient client;
+    private Process ownedProcess;
+    private URI ownedServerUrl;
+
+    OpenCodeServerManager(OpenCodeServerClient client) {
+        this.client = client;
+    }
+
+    synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws IOException, InterruptedException {
+        URI serverUrl = URI.create(properties.getOpencode().getServerUrl());
+        if (client.isHealthy(serverUrl)) {
+            log.info("Reusing healthy OpenCode Server: {}", serverUrl);
+            return new OpenCodeServerHandle(serverUrl, false);
+        }
+        if (!properties.getOpencode().isManageServer()) {
+            throw new IllegalStateException("OpenCode Server is not healthy at " + serverUrl + " and git-report.opencode.manage-server=false. Start `opencode serve` or enable server management.");
+        }
+        if (ownedProcess != null && ownedProcess.isAlive() && serverUrl.equals(ownedServerUrl)) {
+            waitForHealth(serverUrl, properties.getOpencode().getServerStartTimeoutSeconds());
+            return new OpenCodeServerHandle(serverUrl, true);
+        }
+        startServer(properties, out, serverUrl);
+        waitForHealth(serverUrl, properties.getOpencode().getServerStartTimeoutSeconds());
+        return new OpenCodeServerHandle(serverUrl, true);
+    }
+
+    synchronized void shutdown() throws InterruptedException {
+        if (ownedProcess == null) {
+            return;
+        }
+        if (ownedProcess.isAlive()) {
+            log.info("Stopping managed OpenCode Server: {}", ownedServerUrl);
+            ownedProcess.destroy();
+            if (!ownedProcess.waitFor(5, TimeUnit.SECONDS)) {
+                ownedProcess.destroyForcibly();
+                ownedProcess.waitFor();
+            }
+        }
+        ownedProcess = null;
+        ownedServerUrl = null;
+    }
+
+    private void startServer(GitReportProperties properties, Path out, URI serverUrl) throws IOException {
+        String opencodeBin = properties.getPaths().getOpencodeBin();
+        if (opencodeBin == null || opencodeBin.isBlank()) {
+            throw new IllegalArgumentException("git-report.paths.opencode-bin is required when git-report.opencode.manage-server=true");
+        }
+        int port = serverUrl.getPort();
+        if (port <= 0) {
+            throw new IllegalArgumentException("git-report.opencode.server-url must include an explicit port when Java manages OpenCode Server: " + serverUrl);
+        }
+        Path logDir = out.resolve("runs").resolve("opencode-server").toAbsolutePath().normalize();
+        Files.createDirectories(logDir);
+        List<String> command = List.of(opencodeBin, "serve", "--port", String.valueOf(port));
+        log.info("Starting managed OpenCode Server: command={}, logs={}", String.join(" ", command), logDir);
+        ownedProcess = new ProcessBuilder(command)
+                .redirectOutput(ProcessBuilder.Redirect.appendTo(logDir.resolve("stdout.log").toFile()))
+                .redirectError(ProcessBuilder.Redirect.appendTo(logDir.resolve("stderr.log").toFile()))
+                .start();
+        ownedServerUrl = serverUrl;
+    }
+
+    private void waitForHealth(URI serverUrl, int timeoutSeconds) throws InterruptedException, IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, timeoutSeconds));
+        while (System.nanoTime() < deadline) {
+            if (client.isHealthy(serverUrl)) {
+                log.info("OpenCode Server is healthy: {}", serverUrl);
+                return;
+            }
+            if (ownedProcess != null && !ownedProcess.isAlive()) {
+                throw new IllegalStateException("OpenCode Server process exited before becoming healthy: " + serverUrl + ", exitCode=" + ownedProcess.exitValue());
+            }
+            TimeUnit.MILLISECONDS.sleep(250);
+        }
+        Process process = ownedProcess;
+        if (process != null && process.isAlive()) {
+            process.destroyForcibly();
+            process.waitFor();
+            ownedProcess = null;
+            ownedServerUrl = null;
+        }
+        throw new IllegalStateException("OpenCode Server startup timed out after " + timeoutSeconds + " seconds: " + serverUrl);
+    }
+}
+
+class OpenCodeServerTaskRunner {
+    private static final Logger log = LoggerFactory.getLogger(OpenCodeServerTaskRunner.class);
+
+    private final OpenCodeServerClient client;
+
+    OpenCodeServerTaskRunner(OpenCodeServerClient client) {
+        this.client = client;
+    }
+
+    OpenCodeRunResult runUntil(
+            OpenCodeServerHandle server,
+            Path repo,
+            String title,
+            Path promptFile,
+            String message,
+            String model,
+            Path runDir,
+            CompletionProbe completionProbe,
+            int pollMillis,
+            int timeoutMinutes
+    ) throws IOException, InterruptedException {
+        Files.createDirectories(runDir);
+        String prompt = Files.readString(promptFile);
+        String text = composeMessage(message, prompt);
+        OpenCodeSession session = client.createSession(server.serverUrl(), repo, title);
+        log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
+        client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, model);
+        long timeoutNanos = TimeUnit.MINUTES.toNanos(Math.max(0, timeoutMinutes));
+        long deadline = System.nanoTime() + timeoutNanos;
+        int sleepMillis = Math.max(50, pollMillis);
+        String lastState = "unknown";
+        while (timeoutNanos == 0 || System.nanoTime() <= deadline) {
+            if (isComplete(completionProbe, runDir)) {
+                return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, true, false, lastState);
+            }
+            lastState = readSessionState(server.serverUrl(), repo, session.id(), lastState);
+            if (isTerminalFailure(lastState)) {
+                return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, lastState);
+            }
+            if (isTerminalSuccess(lastState)) {
+                return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, lastState);
+            }
+            if (timeoutNanos == 0) {
+                break;
+            }
+            TimeUnit.MILLISECONDS.sleep(sleepMillis);
+        }
+        boolean aborted = client.abortSession(server.serverUrl(), repo, session.id());
+        return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), true, false, aborted, lastState);
+    }
+
+    private String composeMessage(String message, String prompt) {
+        if (message == null || message.isBlank()) {
+            return prompt;
+        }
+        return message + "\n\n" + prompt;
+    }
+
+    private boolean isComplete(CompletionProbe completionProbe, Path runDir) throws IOException {
+        try {
+            return completionProbe.isComplete();
+        } catch (IOException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IOException("completion probe failed for runDir=" + runDir + ": " + exception.getMessage(), exception);
+        }
+    }
+
+    private String readSessionState(URI serverUrl, Path repo, String sessionId, String fallback) {
+        try {
+            String status = client.getSessionStatus(serverUrl, repo, sessionId);
+            return status == null || status.isBlank() ? fallback : status;
+        } catch (Exception exception) {
+            log.debug("Unable to read OpenCode session status: sessionId={}, reason={}", sessionId, exception.getMessage());
+            return fallback;
+        }
+    }
+
+    private boolean isTerminalSuccess(String state) {
+        String normalized = state == null ? "" : state.toLowerCase(Locale.ROOT);
+        return normalized.equals("idle") || normalized.equals("completed") || normalized.equals("complete") || normalized.equals("done");
+    }
+
+    private boolean isTerminalFailure(String state) {
+        String normalized = state == null ? "" : state.toLowerCase(Locale.ROOT);
+        return normalized.equals("failed") || normalized.equals("error") || normalized.equals("aborted") || normalized.equals("canceled") || normalized.equals("cancelled");
     }
 }
 
@@ -979,7 +1330,7 @@ class AuthorOutputValidator {
                 return AuthorValidationResult.failed("person report missing: " + reportMd);
             }
             String report = Files.readString(reportMd);
-            if (report.isBlank() || report.contains(GitReportConstants.AUTHOR_REPORT_MARKER)) {
+            if (report.isBlank()) {
                 return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
             }
             if (!Files.exists(qualitySummaryJson)) {
@@ -1008,10 +1359,30 @@ class AuthorOutputValidator {
                     }
                 }
             }
+            if (report.contains(GitReportConstants.AUTHOR_REPORT_MARKER)) {
+                if (!removeTrailingAuthorMarker(reportMd, report)) {
+                    return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
+                }
+            }
             return AuthorValidationResult.success();
         } catch (Exception exception) {
             return AuthorValidationResult.failed(exception.getMessage());
         }
+    }
+
+    private boolean removeTrailingAuthorMarker(Path reportMd, String report) throws IOException {
+        int markerAt = report.indexOf(GitReportConstants.AUTHOR_REPORT_MARKER);
+        int lastMarkerAt = report.lastIndexOf(GitReportConstants.AUTHOR_REPORT_MARKER);
+        if (markerAt != lastMarkerAt) {
+            return false;
+        }
+        String beforeMarker = report.substring(0, markerAt);
+        String afterMarker = report.substring(markerAt + GitReportConstants.AUTHOR_REPORT_MARKER.length());
+        if (beforeMarker.isBlank() || !afterMarker.isBlank()) {
+            return false;
+        }
+        Files.writeString(reportMd, beforeMarker.stripTrailing() + "\n");
+        return true;
     }
 }
 
@@ -1079,34 +1450,6 @@ class QualityScoresWriter {
     }
 }
 
-class ProcessRunResult {
-    private final int exitCode;
-    private final boolean timedOut;
-    private final boolean completedByOutput;
-
-    ProcessRunResult(int exitCode, boolean timedOut) {
-        this(exitCode, timedOut, false);
-    }
-
-    ProcessRunResult(int exitCode, boolean timedOut, boolean completedByOutput) {
-        this.exitCode = exitCode;
-        this.timedOut = timedOut;
-        this.completedByOutput = completedByOutput;
-    }
-
-    int exitCode() {
-        return exitCode;
-    }
-
-    boolean timedOut() {
-        return timedOut;
-    }
-
-    boolean completedByOutput() {
-        return completedByOutput;
-    }
-}
-
 @FunctionalInterface
 interface CompletionProbe {
     boolean isComplete() throws Exception;
@@ -1156,71 +1499,6 @@ class AuthorTaskResult {
     }
 }
 
-class OpenCodeProcessRunner {
-    private static final Logger log = LoggerFactory.getLogger(OpenCodeProcessRunner.class);
-
-    ProcessRunResult run(List<String> command, Path runDir, int timeoutMinutes) throws IOException, InterruptedException {
-        return runUntil(command, runDir, timeoutMinutes, () -> false, 2_000);
-    }
-
-    ProcessRunResult runUntil(List<String> command, Path runDir, int timeoutMinutes, CompletionProbe completionProbe, int pollMillis) throws IOException, InterruptedException {
-        Files.createDirectories(runDir);
-        log.info("Starting OpenCode process: runDir={}, timeoutMinutes={}, command={}", runDir, timeoutMinutes, String.join(" ", command));
-        Process process = new ProcessBuilder(command)
-                .redirectOutput(runDir.resolve("events.jsonl").toFile())
-                .redirectError(runDir.resolve("stderr.log").toFile())
-                .start();
-        long timeoutNanos = TimeUnit.MINUTES.toNanos(Math.max(0, timeoutMinutes));
-        long deadline = System.nanoTime() + timeoutNanos;
-        int sleepMillis = Math.max(100, pollMillis);
-        while (true) {
-            if (isComplete(completionProbe, runDir)) {
-                log.info("OpenCode process output completed before process exit: runDir={}", runDir);
-                process.destroy();
-                if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                    process.destroyForcibly();
-                    process.waitFor();
-                }
-                return new ProcessRunResult(process.exitValue(), false, true);
-            }
-            if (process.waitFor(sleepMillis, TimeUnit.MILLISECONDS)) {
-                log.info("OpenCode process finished: runDir={}, exitCode={}", runDir, process.exitValue());
-                return new ProcessRunResult(process.exitValue(), false, false);
-            }
-            if (timeoutNanos == 0 || System.nanoTime() >= deadline) {
-                break;
-            }
-        }
-        if (isComplete(completionProbe, runDir)) {
-            log.info("OpenCode process output completed at timeout boundary: runDir={}", runDir);
-            process.destroy();
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                process.waitFor();
-            }
-            return new ProcessRunResult(process.exitValue(), false, true);
-        }
-        if (process.isAlive()) {
-            log.warn("OpenCode process timed out: runDir={}, timeoutMinutes={}", runDir, timeoutMinutes);
-            process.destroyForcibly();
-            process.waitFor();
-            return new ProcessRunResult(process.exitValue(), true);
-        }
-        log.info("OpenCode process finished: runDir={}, exitCode={}", runDir, process.exitValue());
-        return new ProcessRunResult(process.exitValue(), false, false);
-    }
-
-    private boolean isComplete(CompletionProbe completionProbe, Path runDir) throws IOException {
-        try {
-            return completionProbe.isComplete();
-        } catch (IOException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new IOException("completion probe failed for runDir=" + runDir + ": " + exception.getMessage(), exception);
-        }
-    }
-}
-
 class RunStatusRepository {
     private final ObjectMapper objectMapper;
 
@@ -1240,8 +1518,8 @@ class GitReportOrchestrator {
     private final GitReportPreparation preparation;
     private final ObjectMapper objectMapper;
     private final PromptBuilder promptBuilder;
-    private final OpenCodeCommandBuilder commandBuilder;
-    private final OpenCodeProcessRunner processRunner;
+    private final OpenCodeServerManager serverManager;
+    private final OpenCodeServerTaskRunner taskRunner;
     private final AuthorOutputValidator outputValidator;
     private final QualityScoresWriter qualityScoresWriter;
     private final RunStatusRepository statusRepository;
@@ -1250,8 +1528,8 @@ class GitReportOrchestrator {
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
             PromptBuilder promptBuilder,
-            OpenCodeCommandBuilder commandBuilder,
-            OpenCodeProcessRunner processRunner,
+            OpenCodeServerManager serverManager,
+            OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             QualityScoresWriter qualityScoresWriter,
             RunStatusRepository statusRepository
@@ -1259,8 +1537,8 @@ class GitReportOrchestrator {
         this.preparation = preparation;
         this.objectMapper = objectMapper;
         this.promptBuilder = promptBuilder;
-        this.commandBuilder = commandBuilder;
-        this.processRunner = processRunner;
+        this.serverManager = serverManager;
+        this.taskRunner = taskRunner;
         this.outputValidator = outputValidator;
         this.qualityScoresWriter = qualityScoresWriter;
         this.statusRepository = statusRepository;
@@ -1268,14 +1546,15 @@ class GitReportOrchestrator {
 
     void run(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
-        validateOpenCodeExecutable(properties.getPaths().getOpencodeBin());
-        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, opencodeBin={}, concurrency={}, timeoutMinutes={}, outputWaitSeconds={}, maxRetries={}",
+        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
+        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}, concurrency={}, timeoutMinutes={}, outputWaitSeconds={}, maxRetries={}",
                 properties.getProject().getId(),
                 properties.getProject().getName(),
                 properties.getProject().getRunId(),
                 properties.getPaths().getRepo().toAbsolutePath().normalize(),
                 out,
-                properties.getPaths().getOpencodeBin(),
+                server.serverUrl(),
+                server.ownedByJava(),
                 properties.getOpencode().getConcurrency(),
                 properties.getOpencode().getTimeoutMinutes(),
                 properties.getOpencode().getOutputWaitSeconds(),
@@ -1287,27 +1566,28 @@ class GitReportOrchestrator {
                 out.resolve("summary.json"),
                 out.resolve("index_inputs.json"),
                 listOfMaps(indexInputs.get("tasks")).size());
-        runAuthorTasks(properties, out, indexInputs);
+        runAuthorTasks(properties, out, indexInputs, server);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        runSynthesis(properties, out, qualityScores);
+        runSynthesis(properties, out, qualityScores, server);
         log.info("Git report orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
     void runSynthesisOnly(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
-        validateOpenCodeExecutable(properties.getPaths().getOpencodeBin());
-        log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, opencodeBin={}",
+        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
+        log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}",
                 properties.getProject().getId(),
                 properties.getProject().getName(),
                 properties.getProject().getRunId(),
                 properties.getPaths().getRepo().toAbsolutePath().normalize(),
                 out,
-                properties.getPaths().getOpencodeBin());
+                server.serverUrl(),
+                server.ownedByJava());
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         validateExistingAuthorOutputs(indexInputs);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        runSynthesis(properties, out, qualityScores);
+        runSynthesis(properties, out, qualityScores, server);
         log.info("Git report synthesis-only orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
@@ -1326,7 +1606,7 @@ class GitReportOrchestrator {
         }
     }
 
-    private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs) throws Exception {
+    private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs, OpenCodeServerHandle server) throws Exception {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
         int concurrency = Math.max(1, Math.min(properties.getOpencode().getConcurrency(), properties.getOpencode().getMaxConcurrency()));
         log.info("Starting author tasks: taskCount={}, concurrency={}", tasks.size(), concurrency);
@@ -1334,7 +1614,7 @@ class GitReportOrchestrator {
         try {
             List<Future<AuthorTaskResult>> futures = new ArrayList<>();
             for (Map<String, Object> task : tasks) {
-                futures.add(executor.submit(authorCallable(properties, out, task)));
+                futures.add(executor.submit(authorCallable(properties, out, task, server)));
             }
             List<AuthorTaskResult> failures = new ArrayList<>();
             for (Future<AuthorTaskResult> future : futures) {
@@ -1358,7 +1638,7 @@ class GitReportOrchestrator {
         }
     }
 
-    private Callable<AuthorTaskResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task) {
+    private Callable<AuthorTaskResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
         return () -> {
             String authorKey = task.get("author_key").toString();
             String author = task.get("author").toString();
@@ -1370,32 +1650,27 @@ class GitReportOrchestrator {
                 log.info("Author task started: authorKey={}, author={}, attempt={}/{}", authorKey, author, attempt, attempts);
                 String state = "failed";
                 String error = "";
-                int exitCode = -1;
                 boolean timedOut = false;
+                OpenCodeRunResult runResult = null;
                 try {
                     Files.createDirectories(runDir);
                     Path promptFile = runDir.resolve("worker-prompt.md");
                     String prompt = promptBuilder.buildWorkerPrompt(Path.of(task.get("detail_json").toString()));
                     Files.writeString(promptFile, prompt);
-                    List<String> command = commandBuilder.buildRunCommand(
-                            properties.getPaths().getRepo(),
-                            properties.getPaths().getOpencodeBin(),
-                            "git-report-" + authorKey,
-                            promptFile,
-                            properties.getOpencode().getFormat(),
-                            properties.getOpencode().getModel(),
-                            properties.getOpencode().getWorkerMessage()
-                    );
                     Path reportMd = Path.of(task.get("report_md").toString());
                     Path qualitySummaryJson = Path.of(task.get("quality_summary_json").toString());
-                    ProcessRunResult runResult = processRunner.runUntil(
-                            command,
+                    runResult = taskRunner.runUntil(
+                            server,
+                            properties.getPaths().getRepo(),
+                            "git-report-" + authorKey,
+                            promptFile,
+                            properties.getOpencode().getWorkerMessage(),
+                            properties.getOpencode().getModel(),
                             runDir,
-                            properties.getOpencode().getTimeoutMinutes(),
                             () -> outputValidator.validate(reportMd, qualitySummaryJson).ok(),
-                            2_000
+                            2_000,
+                            properties.getOpencode().getTimeoutMinutes()
                     );
-                    exitCode = runResult.exitCode();
                     timedOut = runResult.timedOut();
                     AuthorValidationResult validation = waitForAuthorOutputs(
                             reportMd,
@@ -1404,14 +1679,15 @@ class GitReportOrchestrator {
                     );
                     if (validation.ok()) {
                         state = "completed";
-                        writeAuthorStatus(statusPath, task, attempt, state, exitCode, timedOut, runResult.completedByOutput(), "");
-                        log.info("Author task completed: authorKey={}, author={}, attempt={}, exitCode={}, timedOut={}, completedByOutput={}, report={}, qualitySummary={}",
+                        writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, "");
+                        log.info("Author task completed: authorKey={}, author={}, attempt={}, sessionId={}, timedOut={}, completedByOutput={}, serverState={}, report={}, qualitySummary={}",
                                 authorKey,
                                 author,
                                 attempt,
-                                exitCode,
+                                runResult.sessionId(),
                                 timedOut,
                                 runResult.completedByOutput(),
+                                runResult.serverState(),
                                 task.get("report_md"),
                                 task.get("quality_summary_json"));
                         return AuthorTaskResult.success(authorKey, author, statusPath);
@@ -1422,14 +1698,14 @@ class GitReportOrchestrator {
                         log.warn("AUTHOR_VALIDATION_FAILED reason=\"{}\" authorKey={} author={} attempt={}", error, authorKey, author, attempt);
                     }
                 } catch (Exception exception) {
-                    error = sanitizeProcessError(exception);
+                    error = sanitizeOpenCodeError(exception);
                     log.warn("AUTHOR_ATTEMPT_EXCEPTION reason=\"{}\" authorKey={} author={} attempt={}",
                             error, authorKey, author, attempt, exception);
                 }
                 lastError = error;
-                writeAuthorStatus(statusPath, task, attempt, state, exitCode, timedOut, false, error);
-                log.warn("AUTHOR_ATTEMPT_FAILED reason=\"{}\" state={} exitCode={} timedOut={} authorKey={} author={} attempt={}",
-                        error, state, exitCode, timedOut, authorKey, author, attempt);
+                writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, error);
+                log.warn("AUTHOR_ATTEMPT_FAILED reason=\"{}\" state={} timedOut={} authorKey={} author={} attempt={}",
+                        error, state, timedOut, authorKey, author, attempt);
             }
             log.error("AUTHOR_FAILED reason=\"{}\" status={} authorKey={} author={} attempts={}", lastError, statusPath, authorKey, author, attempts);
             return AuthorTaskResult.failed(authorKey, author, statusPath, lastError);
@@ -1446,40 +1722,11 @@ class GitReportOrchestrator {
         return last;
     }
 
-    private void validateOpenCodeExecutable(String opencodeBin) throws IOException, InterruptedException {
-        if (opencodeBin == null || opencodeBin.isBlank()) {
-            throw new IllegalArgumentException("git-report.paths.opencode-bin is required");
-        }
-        Path configuredPath = Path.of(opencodeBin);
-        if (configuredPath.isAbsolute() || opencodeBin.contains("/") || opencodeBin.contains("\\")) {
-            if (!Files.isRegularFile(configuredPath)) {
-                throw new IllegalStateException("OpenCode CLI launcher not found: " + opencodeBin + ". Set git-report.paths.opencode-bin to the absolute opencode command launcher path, for example C:/Users/<user>/AppData/Roaming/npm/opencode.cmd.");
-            }
-            log.info("OpenCode CLI launcher configured by path: {}", configuredPath);
-            return;
-        }
-        List<String> lookupCommand = isWindows() ? List.of("where", opencodeBin) : List.of("which", opencodeBin);
-        Process process = new ProcessBuilder(lookupCommand).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        int exitCode = process.waitFor();
-        if (exitCode != 0 || output.isBlank()) {
-            throw new IllegalStateException("OpenCode CLI launcher not found on PATH: " + opencodeBin + ". Install OpenCode CLI or set git-report.paths.opencode-bin to the absolute command launcher path, for example C:/Users/<user>/AppData/Roaming/npm/opencode.cmd.");
-        }
-        log.info("OpenCode CLI launcher resolved from PATH: {}", output.lines().findFirst().orElse(opencodeBin));
-    }
-
-    private boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
-
-    private String sanitizeProcessError(Exception exception) {
-        if (exception instanceof IOException && exception.getMessage() != null && exception.getMessage().contains("CreateProcess error=2")) {
-            return "OpenCode CLI launcher not found. Set git-report.paths.opencode-bin to the absolute opencode command launcher path, for example C:/Users/<user>/AppData/Roaming/npm/opencode.cmd.";
-        }
+    private String sanitizeOpenCodeError(Exception exception) {
         return exception.getClass().getName() + ": " + (exception.getMessage() == null ? "" : exception.getMessage());
     }
 
-    private void runSynthesis(GitReportProperties properties, Path out, Path qualityScores) throws Exception {
+    private void runSynthesis(GitReportProperties properties, Path out, Path qualityScores, OpenCodeServerHandle server) throws Exception {
         Path runDir = out.resolve("runs").resolve("synthesis");
         Files.createDirectories(runDir);
         Path finalReport = out.resolve("code-contribution-report.md");
@@ -1495,34 +1742,34 @@ class GitReportOrchestrator {
                 promptFile,
                 qualityScores,
                 out.resolve("code-contribution-report.md"));
-        List<String> command = commandBuilder.buildRunCommand(
+        OpenCodeRunResult result = taskRunner.runUntil(
+                server,
                 properties.getPaths().getRepo(),
-                properties.getPaths().getOpencodeBin(),
                 "git-report-synthesis",
                 promptFile,
-                properties.getOpencode().getFormat(),
+                properties.getOpencode().getSynthesisMessage(),
                 properties.getOpencode().getModel(),
-                properties.getOpencode().getSynthesisMessage()
-        );
-        ProcessRunResult result = processRunner.runUntil(
-                command,
                 runDir,
-                properties.getOpencode().getTimeoutMinutes(),
                 () -> finalReportReady(finalReport),
-                2_000
+                2_000,
+                properties.getOpencode().getTimeoutMinutes()
         );
         boolean ok = waitForFinalReport(finalReport, properties.getOpencode().getOutputWaitSeconds());
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("state", ok ? "completed" : "failed");
-        status.put("exitCode", result.exitCode());
+        status.put("sessionId", result.sessionId());
+        status.put("serverUrl", result.serverUrl());
+        status.put("serverOwnedByJava", result.serverOwnedByJava());
         status.put("timedOut", result.timedOut());
         status.put("completedByOutput", result.completedByOutput());
+        status.put("aborted", result.aborted());
+        status.put("serverState", result.serverState());
         status.put("finalReportOk", ok);
         status.put("finishedAt", OffsetDateTime.now().toString());
         statusRepository.write(runDir.resolve("status.json"), status);
         if (!ok) {
-            log.error("Synthesis failed: exitCode={}, timedOut={}, finalReportOk={}, status={}",
-                    result.exitCode(),
+            log.error("Synthesis failed: sessionId={}, timedOut={}, finalReportOk={}, status={}",
+                    result.sessionId(),
                     result.timedOut(),
                     ok,
                     runDir.resolve("status.json"));
@@ -1546,15 +1793,19 @@ class GitReportOrchestrator {
         return !report.isBlank() && !report.contains(GitReportConstants.REPORT_MARKER);
     }
 
-    private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, int exitCode, boolean timedOut, boolean completedByOutput, String error) throws IOException {
+    private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, OpenCodeRunResult runResult, String error) throws IOException {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("authorKey", task.get("author_key"));
         status.put("author", task.get("author"));
         status.put("attempt", attempt);
         status.put("state", state);
-        status.put("exitCode", exitCode);
+        status.put("sessionId", runResult == null ? "" : runResult.sessionId());
+        status.put("serverUrl", runResult == null ? "" : runResult.serverUrl());
+        status.put("serverOwnedByJava", runResult != null && runResult.serverOwnedByJava());
         status.put("timedOut", timedOut);
-        status.put("completedByOutput", completedByOutput);
+        status.put("completedByOutput", runResult != null && runResult.completedByOutput());
+        status.put("aborted", runResult != null && runResult.aborted());
+        status.put("serverState", runResult == null ? "unknown" : runResult.serverState());
         status.put("finishedAt", OffsetDateTime.now().toString());
         status.put("error", error == null ? "" : error);
         statusRepository.write(statusPath, status);

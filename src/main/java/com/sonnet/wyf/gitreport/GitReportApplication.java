@@ -33,13 +33,33 @@ public class GitReportApplication {
     }
 
     @Bean
-    GitReportOrchestrator gitReportOrchestrator(GitReportPreparation preparation, ObjectMapper objectMapper) {
+    OpenCodeServerClient openCodeServerClient(ObjectMapper objectMapper) {
+        return new OpenCodeServerClient(objectMapper);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    OpenCodeServerManager openCodeServerManager(OpenCodeServerClient openCodeServerClient) {
+        return new OpenCodeServerManager(openCodeServerClient);
+    }
+
+    @Bean
+    OpenCodeServerTaskRunner openCodeServerTaskRunner(OpenCodeServerClient openCodeServerClient) {
+        return new OpenCodeServerTaskRunner(openCodeServerClient);
+    }
+
+    @Bean
+    GitReportOrchestrator gitReportOrchestrator(
+            GitReportPreparation preparation,
+            ObjectMapper objectMapper,
+            OpenCodeServerManager serverManager,
+            OpenCodeServerTaskRunner taskRunner
+    ) {
         return new GitReportOrchestrator(
                 preparation,
                 objectMapper,
                 new PromptBuilder(),
-                new OpenCodeCommandBuilder(),
-                new OpenCodeProcessRunner(),
+                serverManager,
+                taskRunner,
                 new AuthorOutputValidator(objectMapper),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new RunStatusRepository(objectMapper)

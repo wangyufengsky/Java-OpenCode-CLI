@@ -23,12 +23,16 @@ git-report:
       - "*.lock"
 
   opencode:
-    concurrency: 3
+    # Java 会先检查 server-url；不可用且 manage-server=true 时自动执行:
+    #   opencode serve --port 4096
+    server-url: "http://127.0.0.1:4096"
+    manage-server: true
+    server-start-timeout-seconds: 30
+    concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
     max-retries: 1
-    max-concurrency: 5
-    format: "json"
+    max-concurrency: 6
     model: ""
     worker-message: "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。"
     synthesis-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
@@ -38,4 +42,3 @@ git-report:
     mode: "full"
     resume: true
     fail-fast: true
-    write-command-to-status: true

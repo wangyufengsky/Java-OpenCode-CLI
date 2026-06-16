@@ -171,15 +171,41 @@ public class GitReportProperties {
     }
 
     public static class OpenCode {
-        private int concurrency = 3;
+        private String serverUrl = "http://127.0.0.1:4096";
+        private boolean manageServer = true;
+        private int serverStartTimeoutSeconds = 30;
+        private int concurrency = 6;
         private int timeoutMinutes = 40;
         private int outputWaitSeconds = 30;
         private int maxRetries = 1;
-        private int maxConcurrency = 5;
-        private String format = "json";
+        private int maxConcurrency = 6;
         private String model;
         private String workerMessage = "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。";
         private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。";
+
+        public String getServerUrl() {
+            return serverUrl;
+        }
+
+        public void setServerUrl(String serverUrl) {
+            this.serverUrl = serverUrl;
+        }
+
+        public boolean isManageServer() {
+            return manageServer;
+        }
+
+        public void setManageServer(boolean manageServer) {
+            this.manageServer = manageServer;
+        }
+
+        public int getServerStartTimeoutSeconds() {
+            return serverStartTimeoutSeconds;
+        }
+
+        public void setServerStartTimeoutSeconds(int serverStartTimeoutSeconds) {
+            this.serverStartTimeoutSeconds = serverStartTimeoutSeconds;
+        }
 
         public int getConcurrency() {
             return concurrency;
@@ -221,14 +247,6 @@ public class GitReportProperties {
             this.maxConcurrency = maxConcurrency;
         }
 
-        public String getFormat() {
-            return format;
-        }
-
-        public void setFormat(String format) {
-            this.format = format;
-        }
-
         public String getModel() {
             return model;
         }
@@ -258,7 +276,6 @@ public class GitReportProperties {
         private String mode = "full";
         private boolean resume = true;
         private boolean failFast = true;
-        private boolean writeCommandToStatus = true;
 
         public String getMode() {
             return mode;
@@ -282,14 +299,6 @@ public class GitReportProperties {
 
         public void setFailFast(boolean failFast) {
             this.failFast = failFast;
-        }
-
-        public boolean isWriteCommandToStatus() {
-            return writeCommandToStatus;
-        }
-
-        public void setWriteCommandToStatus(boolean writeCommandToStatus) {
-            this.writeCommandToStatus = writeCommandToStatus;
         }
     }
 }

@@ -2,25 +2,42 @@ package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitReportOrchestratorIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final List<String> prompts = new ArrayList<>();
+    private HttpServer server;
 
     @TempDir
     Path tempDir;
 
+    @AfterEach
+    void stopServer() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
+
     @Test
-    void orchestratesPreparationAuthorWorkerQualityScoresAndSynthesisWithFakeOpenCode() throws Exception {
+    void orchestratesPreparationAuthorWorkerQualityScoresAndSynthesisWithFakeOpenCodeServer() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path out = tempDir.resolve("out");
         Files.createDirectories(repo);
@@ -30,76 +47,30 @@ class GitReportOrchestratorIntegrationTest {
         Files.writeString(repo.resolve("Demo.java"), "class Demo {\n  int a = 1;\n}\n");
         GitTestSupport.run(repo, "git", "add", "Demo.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
-
-        Path fakeOpenCode = tempDir.resolve("fake-opencode.sh");
-        Files.writeString(fakeOpenCode, """
-                #!/bin/sh
-                prompt=""
-                while [ "$#" -gt 0 ]; do
-                  if [ "$1" = "--file" ]; then
-                    prompt="$2"
-                    shift 2
-                  elif echo "$1" | grep -q '^--file='; then
-                    prompt="${1#--file=}"
-                    shift
-                  else
-                    shift
-                  fi
-                done
-                if grep -q '^detail_json:' "$prompt"; then
-                  detail=$(awk -F': ' '/^detail_json: /{print $2}' "$prompt" | tail -1)
-                  python3 - "$detail" <<'PY'
-                import json, pathlib, sys
-                detail = json.loads(pathlib.Path(sys.argv[1]).read_text())
-                pathlib.Path(detail["output"]["person_report_md"]).write_text("个人报告内容\\n", encoding="utf-8")
-                pathlib.Path(detail["output"]["quality_summary_json"]).write_text(json.dumps({
-                  "author": detail["author"],
-                  "status": "completed",
-                  "findings": [],
-                  "positive_signals": [],
-                  "risk_signals": [],
-                  "code_snippets": [],
-                  "unverified": [],
-                  "summary": "无"
-                }, ensure_ascii=False), encoding="utf-8")
-                PY
-                else
-                  index_inputs=$(awk -F': ' '/^index_inputs_json: /{print $2}' "$prompt" | tail -1)
-                  python3 - "$index_inputs" <<'PY'
-                import json, pathlib, sys
-                index_inputs = json.loads(pathlib.Path(sys.argv[1]).read_text())
-                pathlib.Path(index_inputs["final_report"]).write_text("最终中文总报告\\n", encoding="utf-8")
-                PY
-                fi
-                echo '{"type":"done"}'
-                """);
-        fakeOpenCode.toFile().setExecutable(true);
+        startFakeOpenCodeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getPaths().setOpencodeBin(fakeOpenCode.toString());
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
-        GitReportOrchestrator orchestrator = new GitReportOrchestrator(
-                new GitReportPreparation(new GitStatsCollector(new CommandExecutor(), new CommentLineCounter()), new ReportPreparationWriter(objectMapper)),
-                objectMapper,
-                new PromptBuilder(),
-                new OpenCodeCommandBuilder(),
-                new OpenCodeProcessRunner(),
-                new AuthorOutputValidator(objectMapper),
-                new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
-                new RunStatusRepository(objectMapper)
-        );
-        orchestrator.run(properties);
+        orchestrator().run(properties);
 
         assertThat(out.resolve("quality-scores.json")).exists();
         assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
         JsonNode qualityScores = objectMapper.readTree(out.resolve("quality-scores.json").toFile());
         assertThat(qualityScores.get("rankings")).hasSize(1);
-        assertThat(out.resolve("runs/author-001-alice-alice-example-com/status.json")).exists();
-        assertThat(out.resolve("runs/synthesis/status.json")).exists();
+        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
+        assertThat(authorStatus.path("sessionId").asText()).isNotBlank();
+        assertThat(authorStatus.path("serverUrl").asText()).isEqualTo(serverUrl());
+        assertThat(authorStatus.path("serverOwnedByJava").asBoolean()).isFalse();
+        JsonNode synthesisStatus = objectMapper.readTree(out.resolve("runs/synthesis/status.json").toFile());
+        assertThat(synthesisStatus.path("sessionId").asText()).isNotBlank();
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
     }
 
     @Test
@@ -142,56 +113,115 @@ class GitReportOrchestratorIntegrationTest {
                 ))
         ));
         Files.writeString(out.resolve("code-contribution-report.md"), GitReportConstants.REPORT_MARKER + "\n");
-
-        Path authorWorkerCalled = tempDir.resolve("author-worker-called.txt");
-        Path fakeOpenCode = tempDir.resolve("fake-opencode-synthesis.sh");
-        Files.writeString(fakeOpenCode, """
-                #!/bin/sh
-                prompt=""
-                while [ "$#" -gt 0 ]; do
-                  if echo "$1" | grep -q '^--file='; then
-                    prompt="${1#--file=}"
-                  fi
-                  shift
-                done
-                if grep -q '^detail_json:' "$prompt"; then
-                  printf called > "%s"
-                  exit 2
-                fi
-                index_inputs=$(awk -F': ' '/^index_inputs_json: /{print $2}' "$prompt" | tail -1)
-                python3 - "$index_inputs" <<'PY'
-                import json, pathlib, sys
-                index_inputs = json.loads(pathlib.Path(sys.argv[1]).read_text())
-                pathlib.Path(index_inputs["final_report"]).write_text("补跑后的最终中文总报告\\n", encoding="utf-8")
-                PY
-                """.formatted(authorWorkerCalled));
-        fakeOpenCode.toFile().setExecutable(true);
+        startFakeOpenCodeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getPaths().setOpencodeBin(fakeOpenCode.toString());
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
         GitReportPreparation preparation = new GitReportPreparation(null, null) {
             @Override
             void prepare(GitReportProperties ignored) {
                 throw new AssertionError("preparation must not run in synthesis-only mode");
             }
         };
-        GitReportOrchestrator orchestrator = new GitReportOrchestrator(
+
+        orchestrator(preparation).runSynthesisOnly(properties);
+
+        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("index_inputs_json:"));
+        assertThat(out.resolve("quality-scores.json")).exists();
+        assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
+    }
+
+    private GitReportOrchestrator orchestrator() {
+        return orchestrator(new GitReportPreparation(new GitStatsCollector(new CommandExecutor(), new CommentLineCounter()), new ReportPreparationWriter(objectMapper)));
+    }
+
+    private GitReportOrchestrator orchestrator(GitReportPreparation preparation) {
+        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+        return new GitReportOrchestrator(
                 preparation,
                 objectMapper,
                 new PromptBuilder(),
-                new OpenCodeCommandBuilder(),
-                new OpenCodeProcessRunner(),
+                new OpenCodeServerManager(client),
+                new OpenCodeServerTaskRunner(client),
                 new AuthorOutputValidator(objectMapper),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new RunStatusRepository(objectMapper)
         );
+    }
 
-        orchestrator.runSynthesisOnly(properties);
+    private void startFakeOpenCodeServer() throws IOException {
+        AtomicInteger ids = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/prompt_async")) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    prompts.add(prompt);
+                    writeFakeOpenCodeOutput(prompt);
+                    respond(exchange, 200, "{\"ok\":true}");
+                    return;
+                }
+                if (path.matches("/session/[^/]+")) {
+                    respond(exchange, 200, "{\"status\":\"idle\"}");
+                    return;
+                }
+                respond(exchange, 404, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
+        server.start();
+    }
 
-        assertThat(authorWorkerCalled).doesNotExist();
-        assertThat(out.resolve("quality-scores.json")).exists();
-        assertThat(out.resolve("code-contribution-report.md")).hasContent("补跑后的最终中文总报告\n");
+    private void writeFakeOpenCodeOutput(String prompt) throws IOException {
+        if (prompt.contains("detail_json:")) {
+            Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
+            JsonNode detail = objectMapper.readTree(detailPath.toFile());
+            Files.writeString(Path.of(detail.at("/output/person_report_md").asText()), "个人报告内容\n");
+            objectMapper.writeValue(Path.of(detail.at("/output/quality_summary_json").asText()).toFile(), Map.of(
+                    "author", detail.path("author").asText(),
+                    "status", "completed",
+                    "findings", List.of(),
+                    "positive_signals", List.of(),
+                    "risk_signals", List.of(),
+                    "code_snippets", List.of(),
+                    "unverified", List.of(),
+                    "summary", "无"
+            ));
+            return;
+        }
+        Path indexInputsPath = Path.of(extractPath(prompt, "index_inputs_json:"));
+        JsonNode indexInputs = objectMapper.readTree(indexInputsPath.toFile());
+        Files.writeString(Path.of(indexInputs.path("final_report").asText()), "最终中文总报告\n");
+    }
+
+    private String extractPath(String prompt, String prefix) {
+        List<String> matches = prompt.lines()
+                .filter(line -> line.startsWith(prefix))
+                .map(line -> line.substring(prefix.length()).trim())
+                .toList();
+        if (matches.isEmpty()) {
+            throw new IllegalStateException("path payload missing: " + prefix);
+        }
+        return matches.get(matches.size() - 1);
+    }
+
+    private String serverUrl() {
+        return "http://127.0.0.1:" + server.getAddress().getPort();
+    }
+
+    private void respond(HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 }

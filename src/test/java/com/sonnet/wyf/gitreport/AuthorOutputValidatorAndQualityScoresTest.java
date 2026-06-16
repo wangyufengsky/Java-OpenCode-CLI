@@ -51,6 +51,38 @@ class AuthorOutputValidatorAndQualityScoresTest {
     }
 
     @Test
+    void validatorFinalizesReportWhenOnlyTrailingMarkerRemainsAfterContent() throws Exception {
+        Path report = tempDir.resolve("person-report.md");
+        Path quality = tempDir.resolve("quality-summary.json");
+        Files.writeString(report, """
+                # 个人代码提交量报告：Alice
+
+                已生成的个人报告内容。
+
+                <!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->
+                """);
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+        AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
+
+        AuthorValidationResult result = validator.validate(report, quality);
+
+        assertThat(result.ok()).isTrue();
+        assertThat(Files.readString(report)).doesNotContain(GitReportConstants.AUTHOR_REPORT_MARKER);
+        assertThat(Files.readString(report)).contains("已生成的个人报告内容。");
+    }
+
+    @Test
     void qualityScoresWriterCreatesFinalRankingFromJavaScores() throws Exception {
         Path quality = tempDir.resolve("quality-summary.json");
         Files.writeString(quality, """
