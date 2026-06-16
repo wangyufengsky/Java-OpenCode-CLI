@@ -2,6 +2,12 @@ package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.scoring.QualityScoreCalculator;
+import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
+import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
+import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
+import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

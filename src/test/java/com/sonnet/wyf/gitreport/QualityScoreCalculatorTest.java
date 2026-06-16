@@ -1,5 +1,6 @@
 package com.sonnet.wyf.gitreport;
 
+import com.sonnet.wyf.gitreport.scoring.QualityScoreCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.scoring;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -7,14 +7,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-class QualityScoreCalculator {
+public class QualityScoreCalculator {
     private static final Map<String, Double> DIMENSION_LIMITS = Map.of("code_standard", 8.0, "maintainability", 8.0, "risk_control", 8.0, "reviewability", 6.0);
     private static final Map<String, Map<String, Double>> SCORE_TABLE = Map.of(
             "negative", Map.of("low", -2.0, "medium", -5.0, "high", -8.0),
             "positive", Map.of("low", 1.0, "medium", 3.0, "high", 5.0)
     );
 
-    Map<String, Object> calculate(Map<String, Object> qualitySummary) {
+    public Map<String, Object> calculate(Map<String, Object> qualitySummary) {
         Map<String, Double> componentsByDimension = new LinkedHashMap<>();
         DIMENSION_LIMITS.keySet().forEach(dimension -> componentsByDimension.put(dimension, 0.0));
         List<Map<String, Object>> scoredFindings = new ArrayList<>();

@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.opencode;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,16 +10,16 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
-class OpenCodeServerTaskRunner {
+public class OpenCodeServerTaskRunner {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerTaskRunner.class);
 
     private final OpenCodeServerClient client;
 
-    OpenCodeServerTaskRunner(OpenCodeServerClient client) {
+    public OpenCodeServerTaskRunner(OpenCodeServerClient client) {
         this.client = client;
     }
 
-    OpenCodeRunResult runUntil(
+    public OpenCodeRunResult runUntil(
             OpenCodeServerHandle server,
             Path repo,
             String title,

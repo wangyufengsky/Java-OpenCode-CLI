@@ -1,7 +1,18 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.orchestration;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.GitReportProperties;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
+import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
+import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
+import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
+import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,7 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-class GitReportOrchestrator {
+public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
 
     private final GitReportPreparation preparation;
@@ -31,7 +42,7 @@ class GitReportOrchestrator {
     private final QualityScoresWriter qualityScoresWriter;
     private final RunStatusRepository statusRepository;
 
-    GitReportOrchestrator(
+    public GitReportOrchestrator(
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
             PromptBuilder promptBuilder,
@@ -51,7 +62,7 @@ class GitReportOrchestrator {
         this.statusRepository = statusRepository;
     }
 
-    void run(GitReportProperties properties) throws Exception {
+    public void run(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}, concurrency={}, timeoutMinutes={}, outputWaitSeconds={}, maxRetries={}",
@@ -79,7 +90,7 @@ class GitReportOrchestrator {
         log.info("Git report orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
-    void runSynthesisOnly(GitReportProperties properties) throws Exception {
+    public void runSynthesisOnly(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}",

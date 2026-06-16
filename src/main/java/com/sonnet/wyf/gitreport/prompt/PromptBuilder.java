@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.prompt;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -6,8 +6,8 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
-class PromptBuilder {
-    String buildWorkerPrompt(Path detailJson) {
+public class PromptBuilder {
+    public String buildWorkerPrompt(Path detailJson) {
         String prompt = readResource("git-report-prompt-pack/prompts/run-author-report.md");
         String template = readResource("git-report-prompt-pack/templates/person-code-contribution-report.md");
         return prompt + "\n\n## 路径载荷\n\n```text\n"
@@ -17,7 +17,7 @@ class PromptBuilder {
                 + "\n```\n";
     }
 
-    String buildSynthesisPrompt(Path summaryJson, Path indexInputsJson, Path qualityScoresJson) {
+    public String buildSynthesisPrompt(Path summaryJson, Path indexInputsJson, Path qualityScoresJson) {
         String prompt = readResource("git-report-prompt-pack/prompts/synthesize-report.md");
         String template = readResource("git-report-prompt-pack/templates/code-contribution-report.md");
         return prompt + "\n\n## 路径载荷\n\n```text\n"

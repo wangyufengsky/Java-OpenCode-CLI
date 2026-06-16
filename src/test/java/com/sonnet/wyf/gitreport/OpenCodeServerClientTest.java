@@ -2,6 +2,8 @@ package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeSession;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;

@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.orchestration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -7,10 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
-class RunStatusRepository {
+public class RunStatusRepository {
     private final ObjectMapper objectMapper;
 
-    RunStatusRepository(ObjectMapper objectMapper) {
+    public RunStatusRepository(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

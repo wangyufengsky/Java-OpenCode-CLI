@@ -1,6 +1,7 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,12 +13,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-class ReportPreparationWriter {
+public class ReportPreparationWriter {
     private static final Logger log = LoggerFactory.getLogger(ReportPreparationWriter.class);
 
     private final ObjectMapper objectMapper;
 
-    ReportPreparationWriter(ObjectMapper objectMapper) {
+    public ReportPreparationWriter(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

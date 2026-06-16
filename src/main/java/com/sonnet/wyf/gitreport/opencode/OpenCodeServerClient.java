@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.opencode;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,20 +16,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-class OpenCodeServerClient {
+public class OpenCodeServerClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    OpenCodeServerClient(ObjectMapper objectMapper) {
+    public OpenCodeServerClient(ObjectMapper objectMapper) {
         this(objectMapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
     }
 
-    OpenCodeServerClient(ObjectMapper objectMapper, HttpClient httpClient) {
+    public OpenCodeServerClient(ObjectMapper objectMapper, HttpClient httpClient) {
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
     }
 
-    boolean isHealthy(URI serverUrl) {
+    public boolean isHealthy(URI serverUrl) {
         try {
             HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/global/health"))
                     .timeout(Duration.ofSeconds(2))
@@ -42,7 +42,7 @@ class OpenCodeServerClient {
         }
     }
 
-    OpenCodeSession createSession(URI serverUrl, Path repo, String title) throws IOException, InterruptedException {
+    public OpenCodeSession createSession(URI serverUrl, Path repo, String title) throws IOException, InterruptedException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("title", title);
         HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session", repo))
@@ -59,7 +59,7 @@ class OpenCodeServerClient {
         return new OpenCodeSession(id);
     }
 
-    void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text, String model) throws IOException, InterruptedException {
+    public void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text, String model) throws IOException, InterruptedException {
         Map<String, Object> part = new LinkedHashMap<>();
         part.put("type", "text");
         part.put("text", text);
@@ -76,7 +76,7 @@ class OpenCodeServerClient {
         sendJson(request);
     }
 
-    String getSessionStatus(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
+    public String getSessionStatus(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session/" + pathEncode(sessionId), repo))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
@@ -90,7 +90,7 @@ class OpenCodeServerClient {
         return firstText(nested, "status", "state");
     }
 
-    boolean abortSession(URI serverUrl, Path repo, String sessionId) {
+    public boolean abortSession(URI serverUrl, Path repo, String sessionId) {
         try {
             HttpRequest request = HttpRequest.newBuilder(resolve(serverUrl, "/session/" + pathEncode(sessionId) + "/abort", repo))
                     .timeout(Duration.ofSeconds(10))

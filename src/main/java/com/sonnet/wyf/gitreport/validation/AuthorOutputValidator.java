@@ -1,7 +1,8 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.validation;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -9,14 +10,14 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-class AuthorOutputValidator {
+public class AuthorOutputValidator {
     private final ObjectMapper objectMapper;
 
-    AuthorOutputValidator(ObjectMapper objectMapper) {
+    public AuthorOutputValidator(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
-    AuthorValidationResult validate(Path reportMd, Path qualitySummaryJson) {
+    public AuthorValidationResult validate(Path reportMd, Path qualitySummaryJson) {
         try {
             if (!Files.exists(reportMd)) {
                 return AuthorValidationResult.failed("person report missing: " + reportMd);

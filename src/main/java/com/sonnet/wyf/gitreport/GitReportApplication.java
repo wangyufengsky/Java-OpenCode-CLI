@@ -1,6 +1,21 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
+import com.sonnet.wyf.gitreport.orchestration.RunStatusRepository;
+import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
+import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
+import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
+import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
+import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
+import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
+import com.sonnet.wyf.gitreport.scoring.QualityScoreCalculator;
+import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
+import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
+import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;

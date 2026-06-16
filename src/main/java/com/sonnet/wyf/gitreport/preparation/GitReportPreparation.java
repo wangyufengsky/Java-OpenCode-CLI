@@ -1,22 +1,23 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
+import com.sonnet.wyf.gitreport.GitReportProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-class GitReportPreparation {
+public class GitReportPreparation {
     private static final Logger log = LoggerFactory.getLogger(GitReportPreparation.class);
 
     private final GitStatsCollector statsCollector;
     private final ReportPreparationWriter writer;
 
-    GitReportPreparation(GitStatsCollector statsCollector, ReportPreparationWriter writer) {
+    public GitReportPreparation(GitStatsCollector statsCollector, ReportPreparationWriter writer) {
         this.statsCollector = statsCollector;
         this.writer = writer;
     }
 
-    void prepare(GitReportProperties properties) throws Exception {
+    public void prepare(GitReportProperties properties) throws Exception {
         validate(properties);
         log.info("Preparing git contribution data: repo={}, out={}, since={}, until={}, revision={}, includeMerges={}",
                 properties.getPaths().getRepo().toAbsolutePath().normalize(),

@@ -1,7 +1,10 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.GitReportProperties;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -16,13 +19,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-class GitStatsCollector {
+public class GitStatsCollector {
     private final CommandExecutor commandExecutor;
     private final CommentLineCounter commentLineCounter;
     private final WorkloadScoreCalculator scoreCalculator = new WorkloadScoreCalculator();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    GitStatsCollector(CommandExecutor commandExecutor, CommentLineCounter commentLineCounter) {
+    public GitStatsCollector(CommandExecutor commandExecutor, CommentLineCounter commentLineCounter) {
         this.commandExecutor = commandExecutor;
         this.commentLineCounter = commentLineCounter;
     }

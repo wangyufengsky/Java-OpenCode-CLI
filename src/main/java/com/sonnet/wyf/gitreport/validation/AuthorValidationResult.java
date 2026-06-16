@@ -1,6 +1,6 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.validation;
 
-class AuthorValidationResult {
+public class AuthorValidationResult {
     private final boolean ok;
     private final String error;
 
@@ -9,19 +9,19 @@ class AuthorValidationResult {
         this.error = error;
     }
 
-    static AuthorValidationResult success() {
+    public static AuthorValidationResult success() {
         return new AuthorValidationResult(true, "");
     }
 
-    static AuthorValidationResult failed(String error) {
+    public static AuthorValidationResult failed(String error) {
         return new AuthorValidationResult(false, error);
     }
 
-    boolean ok() {
+    public boolean ok() {
         return ok;
     }
 
-    String error() {
+    public String error() {
         return error;
     }
 }

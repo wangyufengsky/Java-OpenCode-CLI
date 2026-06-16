@@ -1,15 +1,15 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
 import java.util.Locale;
 import java.util.Set;
 
-class CommentLineCounter {
+public class CommentLineCounter {
     private static final Set<String> BLOCK_COMMENT_EXTS = Set.of(".java", ".kt", ".kts", ".scala", ".groovy", ".js", ".jsx", ".ts", ".tsx", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cs", ".go", ".rs", ".swift", ".php", ".css", ".scss", ".sass", ".less", ".proto", ".sql");
     private static final Set<String> HASH_COMMENT_EXTS = Set.of(".py", ".rb", ".sh", ".bash", ".zsh", ".ps1", ".yaml", ".yml", ".toml", ".ini", ".conf", ".r", ".pl", ".graphql", ".gql");
     private static final Set<String> XML_COMMENT_EXTS = Set.of(".xml", ".html", ".htm", ".xhtml", ".vue", ".jsp", ".jspx");
     private static final Set<String> PROPERTIES_EXTS = Set.of(".properties");
 
-    boolean isCountableCodeLine(String path, String line, CommentState state) {
+    public boolean isCountableCodeLine(String path, String line, CommentState state) {
         String suffix = suffix(path);
         String text = line.replaceAll("[\\r\\n]+$", "");
         if (text.trim().isEmpty()) {
@@ -77,7 +77,7 @@ class CommentLineCounter {
         return at == -1 ? "" : name.substring(at);
     }
 
-    static class CommentState {
+    public static class CommentState {
         private boolean inBlock;
         private String blockEnd = "*/";
     }

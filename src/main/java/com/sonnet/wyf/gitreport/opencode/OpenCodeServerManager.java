@@ -1,5 +1,6 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.opencode;
 
+import com.sonnet.wyf.gitreport.GitReportProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,18 +11,18 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-class OpenCodeServerManager {
+public class OpenCodeServerManager {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerManager.class);
 
     private final OpenCodeServerClient client;
     private Process ownedProcess;
     private URI ownedServerUrl;
 
-    OpenCodeServerManager(OpenCodeServerClient client) {
+    public OpenCodeServerManager(OpenCodeServerClient client) {
         this.client = client;
     }
 
-    synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws IOException, InterruptedException {
+    public synchronized OpenCodeServerHandle ensureReady(GitReportProperties properties, Path out) throws IOException, InterruptedException {
         URI serverUrl = URI.create(properties.getOpencode().getServerUrl());
         if (client.isHealthy(serverUrl)) {
             log.info("Reusing healthy OpenCode Server: {}", serverUrl);
@@ -39,7 +40,7 @@ class OpenCodeServerManager {
         return new OpenCodeServerHandle(serverUrl, true);
     }
 
-    synchronized void shutdown() throws InterruptedException {
+    public synchronized void shutdown() throws InterruptedException {
         if (ownedProcess == null) {
             return;
         }

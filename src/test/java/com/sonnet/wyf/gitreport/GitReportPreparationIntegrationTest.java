@@ -2,6 +2,12 @@ package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
+import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
+import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
+import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
+import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

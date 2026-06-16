@@ -1,5 +1,7 @@
 package com.sonnet.wyf.gitreport;
 
+import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
+import com.sonnet.wyf.gitreport.preparation.FileScopeFilter;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

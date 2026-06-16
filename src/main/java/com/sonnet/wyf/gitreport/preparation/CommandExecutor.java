@@ -1,11 +1,11 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 
-class CommandExecutor {
+public class CommandExecutor {
     String run(Path cwd, String... command) throws IOException, InterruptedException {
         return run(cwd, Arrays.asList(command));
     }

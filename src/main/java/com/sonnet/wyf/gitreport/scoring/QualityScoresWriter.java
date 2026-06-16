@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.scoring;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,20 +15,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-class QualityScoresWriter {
+public class QualityScoresWriter {
     private static final Logger log = LoggerFactory.getLogger(QualityScoresWriter.class);
 
     private final ObjectMapper objectMapper;
     private final QualityScoreCalculator qualityScoreCalculator;
     private final WorkloadScoreCalculator workloadScoreCalculator;
 
-    QualityScoresWriter(ObjectMapper objectMapper, QualityScoreCalculator qualityScoreCalculator, WorkloadScoreCalculator workloadScoreCalculator) {
+    public QualityScoresWriter(ObjectMapper objectMapper, QualityScoreCalculator qualityScoreCalculator, WorkloadScoreCalculator workloadScoreCalculator) {
         this.objectMapper = objectMapper;
         this.qualityScoreCalculator = qualityScoreCalculator;
         this.workloadScoreCalculator = workloadScoreCalculator;
     }
 
-    Path write(Path output, Map<String, Object> summary, Map<String, Object> indexInputs) throws IOException {
+    public Path write(Path output, Map<String, Object> summary, Map<String, Object> indexInputs) throws IOException {
         List<Map<String, Object>> rankings = new ArrayList<>();
         Map<String, Map<String, Object>> summaryByAuthorKey = new LinkedHashMap<>();
         for (Map<String, Object> row : listOfMaps(summary.get("ranking"))) {

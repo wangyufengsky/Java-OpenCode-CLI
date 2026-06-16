@@ -1,6 +1,6 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.opencode;
 
-class OpenCodeRunResult {
+public class OpenCodeRunResult {
     private final String sessionId;
     private final String serverUrl;
     private final boolean serverOwnedByJava;
@@ -19,31 +19,31 @@ class OpenCodeRunResult {
         this.serverState = serverState == null ? "unknown" : serverState;
     }
 
-    String sessionId() {
+    public String sessionId() {
         return sessionId;
     }
 
-    String serverUrl() {
+    public String serverUrl() {
         return serverUrl;
     }
 
-    boolean serverOwnedByJava() {
+    public boolean serverOwnedByJava() {
         return serverOwnedByJava;
     }
 
-    boolean timedOut() {
+    public boolean timedOut() {
         return timedOut;
     }
 
-    boolean completedByOutput() {
+    public boolean completedByOutput() {
         return completedByOutput;
     }
 
-    boolean aborted() {
+    public boolean aborted() {
         return aborted;
     }
 
-    String serverState() {
+    public String serverState() {
         return serverState;
     }
 }

@@ -1,11 +1,13 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.preparation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.regex.Pattern;
 
-class FileScopeFilter {
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
+
+public class FileScopeFilter {
     private final List<String> includes;
     private final List<String> excludes;
 
@@ -14,19 +16,19 @@ class FileScopeFilter {
         this.excludes = excludes;
     }
 
-    static FileScopeFilter withUserPatterns(List<String> userIncludes, List<String> userExcludes) {
+    public static FileScopeFilter withUserPatterns(List<String> userIncludes, List<String> userExcludes) {
         return new FileScopeFilter(merge(GitReportConstants.DEFAULT_INCLUDE_PATTERNS, userIncludes), merge(GitReportConstants.DEFAULT_EXCLUDE_PATTERNS, userExcludes));
     }
 
-    List<String> includes() {
+    public List<String> includes() {
         return includes;
     }
 
-    List<String> excludes() {
+    public List<String> excludes() {
         return excludes;
     }
 
-    boolean isCounted(String path) {
+    public boolean isCounted(String path) {
         return matchesAny(path, includes) && !matchesAny(path, excludes);
     }
 

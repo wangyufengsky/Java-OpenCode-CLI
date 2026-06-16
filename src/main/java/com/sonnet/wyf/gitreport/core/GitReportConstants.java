@@ -1,12 +1,12 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.core;
 
 import java.util.List;
 
-final class GitReportConstants {
-    static final String REPORT_MARKER = "<!-- CODE_CONTRIBUTION_REPORT_CONTENT -->";
-    static final String AUTHOR_REPORT_MARKER = "<!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->";
-    static final String QUALITY_SUMMARY_MARKER = "\"__QUALITY_SUMMARY_JSON_CONTENT__\"";
-    static final List<String> DEFAULT_INCLUDE_PATTERNS = List.of(
+public final class GitReportConstants {
+    public static final String REPORT_MARKER = "<!-- CODE_CONTRIBUTION_REPORT_CONTENT -->";
+    public static final String AUTHOR_REPORT_MARKER = "<!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->";
+    public static final String QUALITY_SUMMARY_MARKER = "\"__QUALITY_SUMMARY_JSON_CONTENT__\"";
+    public static final List<String> DEFAULT_INCLUDE_PATTERNS = List.of(
             "*.java", "*.kt", "*.kts", "*.scala", "*.groovy", "*.gradle", "*.py", "*.rb", "*.sh", "*.bash",
             "*.zsh", "*.ps1", "*.bat", "*.cmd", "*.js", "*.jsx", "*.ts", "*.tsx", "*.mjs", "*.cjs",
             "*.vue", "*.svelte", "*.html", "*.htm", "*.xhtml", "*.css", "*.scss", "*.sass", "*.less",
@@ -16,7 +16,7 @@ final class GitReportConstants {
             "Dockerfile", "Dockerfile.*", "Makefile", "makefile", "GNUmakefile", "Jenkinsfile", "Jenkinsfile.*",
             ".gitignore", ".gitattributes", ".dockerignore", ".editorconfig"
     );
-    static final List<String> DEFAULT_EXCLUDE_PATTERNS = List.of(
+    public static final List<String> DEFAULT_EXCLUDE_PATTERNS = List.of(
             "*.md", "*.markdown", "*.mdown", "*.mkd", "*.doc", "*.docx", "*.xls", "*.xlsx", "*.xlsm",
             "*.ppt", "*.pptx", "*.pdf", "*.rtf", "*.txt", "*.csv", "*.png", "*.jpg", "*.jpeg", "*.gif",
             "*.bmp", "*.webp", "*.ico", "*.zip", "*.tar", "*.gz", "*.7z", "*.rar"

@@ -1,5 +1,6 @@
 package com.sonnet.wyf.gitreport;
 
+import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;

@@ -1,9 +1,9 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.scoring;
 
 import java.util.Map;
 
-class WorkloadScoreCalculator {
-    double calculate(Map<String, Object> author) {
+public class WorkloadScoreCalculator {
+    public double calculate(Map<String, Object> author) {
         double score = number(author, "commit_count") * 3.0
                 + number(author, "file_change_count") * 1.5
                 + number(author, "non_comment_added") * 1.2
@@ -12,7 +12,7 @@ class WorkloadScoreCalculator {
         return round2(score);
     }
 
-    double adjusted(double baseScore, double qualityAdjustmentPercent) {
+    public double adjusted(double baseScore, double qualityAdjustmentPercent) {
         double bounded = Math.clamp(qualityAdjustmentPercent, -30.0, 30.0);
         return round2(baseScore * (1 + bounded / 100.0));
     }
