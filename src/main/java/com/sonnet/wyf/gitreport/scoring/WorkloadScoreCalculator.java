@@ -3,6 +3,9 @@ package com.sonnet.wyf.gitreport.scoring;
 import java.util.Map;
 
 public class WorkloadScoreCalculator {
+    public WorkloadScoreCalculator() {
+    }
+
     public double calculate(Map<String, Object> author) {
         double score = number(author, "commit_count") * 3.0
                 + number(author, "file_change_count") * 1.5

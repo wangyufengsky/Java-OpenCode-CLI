@@ -7,6 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 public class PromptBuilder {
+    public PromptBuilder() {
+    }
+
     public String buildWorkerPrompt(Path detailJson) {
         String prompt = readResource("git-report-prompt-pack/prompts/run-author-report.md");
         String template = readResource("git-report-prompt-pack/templates/person-code-contribution-report.md");

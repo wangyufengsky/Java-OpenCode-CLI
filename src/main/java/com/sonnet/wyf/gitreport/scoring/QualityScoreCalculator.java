@@ -14,6 +14,9 @@ public class QualityScoreCalculator {
             "positive", Map.of("low", 1.0, "medium", 3.0, "high", 5.0)
     );
 
+    public QualityScoreCalculator() {
+    }
+
     public Map<String, Object> calculate(Map<String, Object> qualitySummary) {
         Map<String, Double> componentsByDimension = new LinkedHashMap<>();
         DIMENSION_LIMITS.keySet().forEach(dimension -> componentsByDimension.put(dimension, 0.0));

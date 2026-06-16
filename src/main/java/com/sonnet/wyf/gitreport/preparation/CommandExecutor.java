@@ -6,6 +6,9 @@ import java.util.Arrays;
 import java.util.List;
 
 public class CommandExecutor {
+    public CommandExecutor() {
+    }
+
     String run(Path cwd, String... command) throws IOException, InterruptedException {
         return run(cwd, Arrays.asList(command));
     }

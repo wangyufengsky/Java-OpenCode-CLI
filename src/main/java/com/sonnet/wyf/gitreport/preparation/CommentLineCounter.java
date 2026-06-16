@@ -9,6 +9,9 @@ public class CommentLineCounter {
     private static final Set<String> XML_COMMENT_EXTS = Set.of(".xml", ".html", ".htm", ".xhtml", ".vue", ".jsp", ".jspx");
     private static final Set<String> PROPERTIES_EXTS = Set.of(".properties");
 
+    public CommentLineCounter() {
+    }
+
     public boolean isCountableCodeLine(String path, String line, CommentState state) {
         String suffix = suffix(path);
         String text = line.replaceAll("[\\r\\n]+$", "");
