@@ -1,0 +1,6 @@
+interface:
+  display_name: "Git Code Contribution Report"
+  short_description: "按日期统计开发人员代码提交量"
+  default_prompt: "Use $git-code-contribution-report to generate a Chinese Markdown report for developer code contribution statistics between two dates."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smartesb-rewrite-code-review/transaction-summary.schema.json",
+  "title": "SmartESB rewrite transaction review summary",
+  "type": "object",
+  "required": [
+    "transaction",
+    "description",
+    "status",
+    "review_md",
+    "matrix_md",
+    "section_files",
+    "code_standard_findings",
+    "new_code_paths",
+    "old_code_paths",
+    "documents_checked",
+    "finding_counts",
+    "top_findings",
+    "unverified"
+  ],
+  "properties": {
+    "transaction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed"]
+    },
+    "review_md": {
+      "type": "string",
+      "minLength": 1
+    },
+    "matrix_md": {
+      "type": "string",
+      "minLength": 1
+    },
+    "section_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "code_standard_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "new_code_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "old_code_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "documents_checked": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "finding_counts": {
+      "type": "object",
+      "required": ["P0", "P1", "P2", "P3"],
+      "properties": {
+        "P0": {"type": "integer", "minimum": 0},
+        "P1": {"type": "integer", "minimum": 0},
+        "P2": {"type": "integer", "minimum": 0},
+        "P3": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "top_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "unverified": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "enum": ["P0", "P1", "P2", "P3"]
+    },
+    "finding": {
+      "type": "object",
+      "required": ["severity", "title", "impact"],
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "new_code": {
+          "type": "string"
+        },
+        "old_code": {
+          "type": "string"
+        },
+        "protocol_basis": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
