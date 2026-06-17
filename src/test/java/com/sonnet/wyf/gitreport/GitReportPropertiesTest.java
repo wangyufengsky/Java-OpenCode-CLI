@@ -31,6 +31,7 @@ class GitReportPropertiesTest {
                         "git-report.opencode.server-start-timeout-seconds=12",
                         "git-report.opencode.create-session-timeout-seconds=11",
                         "git-report.opencode.request-timeout-seconds=90",
+                        "git-report.opencode.validation-max-corrections=3",
                         "git-report.detail-input.top-files=7",
                         "git-report.detail-input.commits=12",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
@@ -55,6 +56,7 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getServerStartTimeoutSeconds()).isEqualTo(12);
                     assertThat(properties.getOpencode().getCreateSessionTimeoutSeconds()).isEqualTo(11);
                     assertThat(properties.getOpencode().getRequestTimeoutSeconds()).isEqualTo(90);
+                    assertThat(properties.getOpencode().getValidationMaxCorrections()).isEqualTo(3);
                     assertThat(properties.getOpencode().getConcurrency()).isEqualTo(6);
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
                     assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);

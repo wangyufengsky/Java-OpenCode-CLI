@@ -1,7 +1,6 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -64,11 +63,10 @@ public class RunnerConfiguration {
             SmartEsbSummaryValidator summaryValidator,
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
-            ScheduledProbeWaiter scheduledProbeWaiter,
             ObjectMapper objectMapper,
             AsyncTaskExecutor authorTaskExecutor
     ) {
-        return new SmartEsbWorkflowChain(chainConfigLoader, runnerProperties, planLoader, preparation, promptBuilder, summaryValidator, serverManager, taskRunner, scheduledProbeWaiter, objectMapper, authorTaskExecutor);
+        return new SmartEsbWorkflowChain(chainConfigLoader, runnerProperties, planLoader, preparation, promptBuilder, summaryValidator, serverManager, taskRunner, objectMapper, authorTaskExecutor);
     }
 
     @Bean

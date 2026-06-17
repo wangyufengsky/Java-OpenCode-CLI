@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -140,6 +141,41 @@ class GitReportOrchestratorIntegrationTest {
 
         assertThat(sessions).hasValue(1);
         assertThat(prompts).hasSize(1);
+    }
+
+    @Test
+    void correctsInvalidAuthorOutputInSameSessionWithoutOuterRetry() throws Exception {
+        Path repo = tempDir.resolve("repo-same-session-correction");
+        Path out = tempDir.resolve("out-same-session-correction");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
+        GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
+        Files.writeString(repo.resolve("Demo.java"), "class Demo {\n  int a = 1;\n}\n");
+        GitTestSupport.run(repo, "git", "add", "Demo.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
+
+        AtomicInteger sessions = startFakeOpenCodeServerWithInvalidAuthorThenCorrection();
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
+        properties.getOpencode().setMaxRetries(2);
+        properties.getOpencode().setOutputWaitSeconds(0);
+        properties.getOpencode().setValidationMaxCorrections(2);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+
+        orchestrator().run(properties);
+
+        assertThat(sessions).hasValue(2);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(1);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).hasSize(1);
+        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
+        assertThat(authorStatus.path("attempt").asInt()).isEqualTo(1);
+        assertThat(authorStatus.path("sessionId").asText()).isEqualTo("session-1");
     }
 
     @Test
@@ -338,7 +374,6 @@ class GitReportOrchestratorIntegrationTest {
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new SynthesisInputWriter(objectMapper),
                 new RunStatusRepository(objectMapper),
-                scheduledProbeWaiter,
                 authorTaskExecutor()
         );
     }
@@ -481,26 +516,88 @@ class GitReportOrchestratorIntegrationTest {
         return maxActiveOpenCodeTasks;
     }
 
+    private AtomicInteger startFakeOpenCodeServerWithInvalidAuthorThenCorrection() throws IOException {
+        AtomicInteger ids = new AtomicInteger();
+        AtomicReference<Path> authorDetail = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/prompt_async")) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    prompts.add(prompt);
+                    if (prompt.contains("detail_json:")) {
+                        Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
+                        authorDetail.set(detailPath);
+                        writeInvalidAuthorOutput(detailPath);
+                    } else if (prompt.contains("Java 产物校验失败") && authorDetail.get() != null) {
+                        writeValidAuthorOutput(authorDetail.get());
+                    } else if (prompt.contains("synthesis_inputs_json:")) {
+                        writeFakeOpenCodeOutput(prompt);
+                    }
+                    respond(exchange, 204, "");
+                    return;
+                }
+                if (path.matches("/session/[^/]+/message")) {
+                    respond(exchange, 200, """
+                            [
+                                {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                                {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
+                            ]
+                            """);
+                    return;
+                }
+                respond(exchange, 404, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
+        server.start();
+        return ids;
+    }
+
     private void writeFakeOpenCodeOutput(String prompt) throws IOException {
         if (prompt.contains("detail_json:")) {
             Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
-            JsonNode detail = objectMapper.readTree(detailPath.toFile());
-            Files.writeString(Path.of(detail.at("/output/person_report_md").asText()), "个人报告内容\n");
-            objectMapper.writeValue(Path.of(detail.at("/output/quality_summary_json").asText()).toFile(), Map.of(
-                    "author", detail.path("author").asText(),
-                    "status", "completed",
-                    "findings", List.of(),
-                    "positive_signals", List.of(),
-                    "risk_signals", List.of(),
-                    "code_snippets", List.of(),
-                    "unverified", List.of(),
-                    "summary", "无"
-            ));
+            writeValidAuthorOutput(detailPath);
             return;
         }
         Path synthesisInputsPath = Path.of(extractPath(prompt, "synthesis_inputs_json:"));
         JsonNode synthesisInputs = objectMapper.readTree(synthesisInputsPath.toFile());
         Files.writeString(Path.of(synthesisInputs.path("final_report").asText()), validFinalReport());
+    }
+
+    private void writeInvalidAuthorOutput(Path detailPath) throws IOException {
+        JsonNode detail = objectMapper.readTree(detailPath.toFile());
+        Files.writeString(Path.of(detail.at("/output/person_report_md").asText()), "个人报告内容 {{UNFINISHED}}\n");
+        objectMapper.writeValue(Path.of(detail.at("/output/quality_summary_json").asText()).toFile(), Map.of(
+                "author", detail.path("author").asText(),
+                "status", "completed",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "无"
+        ));
+    }
+
+    private void writeValidAuthorOutput(Path detailPath) throws IOException {
+        JsonNode detail = objectMapper.readTree(detailPath.toFile());
+        Files.writeString(Path.of(detail.at("/output/person_report_md").asText()), "个人报告内容\n");
+        objectMapper.writeValue(Path.of(detail.at("/output/quality_summary_json").asText()).toFile(), Map.of(
+                "author", detail.path("author").asText(),
+                "status", "completed",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "无"
+        ));
     }
 
     private String validFinalReport() {

@@ -65,7 +65,6 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new SmartEsbSummaryValidator(objectMapper),
                 new HealthyServerManager(),
                 taskRunner,
-                scheduledProbeWaiter(),
                 objectMapper,
                 authorTaskExecutor(3)
         );
@@ -141,6 +140,30 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 int pollMillis,
                 int timeoutMinutes
         ) throws Exception {
+            return runTrackedTask(server, runDir);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(
+                OpenCodeServerHandle server,
+                Path repo,
+                String title,
+                Path promptFile,
+                String message,
+                Path runDir,
+                ValidationProbe validationProbe,
+                String sessionModel,
+                int createSessionTimeoutSeconds,
+                int requestTimeoutSeconds,
+                int pollMillis,
+                int timeoutMinutes,
+                int validationSettleSeconds,
+                int validationMaxCorrections
+        ) throws Exception {
+            return runTrackedTask(server, runDir);
+        }
+
+        private OpenCodeRunResult runTrackedTask(OpenCodeServerHandle server, Path runDir) throws Exception {
             if ("index".equals(runDir.getFileName().toString())) {
                 writeIndexOutputs(runDir);
                 return new OpenCodeRunResult("index-session", server.serverUrl().toString(), false, false, true, false, "idle");

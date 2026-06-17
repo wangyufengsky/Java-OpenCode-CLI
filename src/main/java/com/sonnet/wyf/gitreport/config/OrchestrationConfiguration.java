@@ -1,7 +1,6 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -50,7 +49,6 @@ public class OrchestrationConfiguration {
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
-            ScheduledProbeWaiter outputWaiter,
             AsyncTaskExecutor authorTaskExecutor
     ) {
         return new GitReportOrchestrator(
@@ -64,7 +62,6 @@ public class OrchestrationConfiguration {
                 qualityScoresWriter,
                 synthesisInputWriter,
                 statusRepository,
-                outputWaiter,
                 authorTaskExecutor
         );
     }

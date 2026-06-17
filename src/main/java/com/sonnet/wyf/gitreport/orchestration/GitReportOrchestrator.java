@@ -3,11 +3,11 @@ package com.sonnet.wyf.gitreport.orchestration;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
-import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
@@ -24,7 +24,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -49,7 +48,6 @@ public class GitReportOrchestrator {
     private final QualityScoresWriter qualityScoresWriter;
     private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
-    private final ScheduledProbeWaiter outputWaiter;
     private final AsyncTaskExecutor authorTaskExecutor;
 
     public GitReportOrchestrator(
@@ -63,7 +61,6 @@ public class GitReportOrchestrator {
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
-            ScheduledProbeWaiter outputWaiter,
             AsyncTaskExecutor authorTaskExecutor
     ) {
         this.preparation = preparation;
@@ -76,7 +73,6 @@ public class GitReportOrchestrator {
         this.qualityScoresWriter = qualityScoresWriter;
         this.synthesisInputWriter = synthesisInputWriter;
         this.statusRepository = statusRepository;
-        this.outputWaiter = outputWaiter;
         this.authorTaskExecutor = authorTaskExecutor;
     }
 
@@ -231,26 +227,24 @@ public class GitReportOrchestrator {
                     Files.writeString(promptFile, prompt);
                     Path reportMd = Path.of(task.get("report_md").toString());
                     Path qualitySummaryJson = Path.of(task.get("quality_summary_json").toString());
-                    runResult = taskRunner.runUntil(
+                    runResult = taskRunner.runUntilValidated(
                             server,
                             properties.getPaths().getRepo(),
                             "git-report-" + authorKey,
                             promptFile,
                             properties.getOpencode().getWorkerMessage(),
                             runDir,
-                            () -> outputValidator.validate(reportMd, qualitySummaryJson).ok(),
+                            () -> authorValidationCheck(reportMd, qualitySummaryJson),
                             properties.getOpencode().getSessionModel(),
                             properties.getOpencode().getCreateSessionTimeoutSeconds(),
                             properties.getOpencode().getRequestTimeoutSeconds(),
                             OPENCODE_POLL_MILLIS,
-                            properties.getOpencode().getTimeoutMinutes()
+                            properties.getOpencode().getTimeoutMinutes(),
+                            properties.getOpencode().getOutputWaitSeconds(),
+                            properties.getOpencode().getValidationMaxCorrections()
                     );
                     timedOut = runResult.timedOut();
-                    AuthorValidationResult validation = waitForAuthorOutputs(
-                            reportMd,
-                            qualitySummaryJson,
-                            properties.getOpencode().getOutputWaitSeconds()
-                    );
+                    AuthorValidationResult validation = outputValidator.validate(reportMd, qualitySummaryJson);
                     if (validation.ok()) {
                         state = "completed";
                         writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, "");
@@ -302,16 +296,6 @@ public class GitReportOrchestrator {
         };
     }
 
-    private AuthorValidationResult waitForAuthorOutputs(Path reportMd, Path qualitySummaryJson, int outputWaitSeconds) throws Exception {
-        return outputWaiter.waitFor(
-                () -> outputValidator.validate(reportMd, qualitySummaryJson),
-                AuthorValidationResult::ok,
-                () -> outputValidator.validate(reportMd, qualitySummaryJson),
-                Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
-                Duration.ofSeconds(2)
-        );
-    }
-
     private String sanitizeOpenCodeError(Exception exception) {
         return exception.getClass().getName() + ": " + (exception.getMessage() == null ? "" : exception.getMessage());
     }
@@ -339,21 +323,23 @@ public class GitReportOrchestrator {
                 synthesisInputs,
                 qualityScores,
                 out.resolve("code-contribution-report.md"));
-        OpenCodeRunResult result = taskRunner.runUntil(
+        OpenCodeRunResult result = taskRunner.runUntilValidated(
                 server,
                 properties.getPaths().getRepo(),
                 "git-report-synthesis",
                 promptFile,
                 properties.getOpencode().getSynthesisMessage(),
                 runDir,
-                () -> finalReportValidator.validate(finalReport).ok(),
+                () -> finalReportValidationCheck(finalReport),
                 properties.getOpencode().getSessionModel(),
                 properties.getOpencode().getCreateSessionTimeoutSeconds(),
                 properties.getOpencode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
-                properties.getOpencode().getTimeoutMinutes()
+                properties.getOpencode().getTimeoutMinutes(),
+                properties.getOpencode().getOutputWaitSeconds(),
+                properties.getOpencode().getValidationMaxCorrections()
         );
-        FinalReportValidator.Validation finalReportValidation = waitForFinalReport(finalReport, properties.getOpencode().getOutputWaitSeconds());
+        FinalReportValidator.Validation finalReportValidation = finalReportValidator.validate(finalReport);
         boolean ok = finalReportValidation.ok();
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("state", ok ? "completed" : "failed");
@@ -381,14 +367,14 @@ public class GitReportOrchestrator {
         log.info("Synthesis completed: finalReport={}", finalReport);
     }
 
-    private FinalReportValidator.Validation waitForFinalReport(Path finalReport, int outputWaitSeconds) throws Exception {
-        return outputWaiter.waitFor(
-                () -> finalReportValidator.validate(finalReport),
-                FinalReportValidator.Validation::ok,
-                () -> finalReportValidator.validate(finalReport),
-                Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
-                Duration.ofSeconds(2)
-        );
+    private ValidationCheck authorValidationCheck(Path reportMd, Path qualitySummaryJson) {
+        AuthorValidationResult validation = outputValidator.validate(reportMd, qualitySummaryJson);
+        return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
+    }
+
+    private ValidationCheck finalReportValidationCheck(Path finalReport) {
+        FinalReportValidator.Validation validation = finalReportValidator.validate(finalReport);
+        return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
     }
 
     private String appendAuthorRerunHint(String error, String authorKey) {

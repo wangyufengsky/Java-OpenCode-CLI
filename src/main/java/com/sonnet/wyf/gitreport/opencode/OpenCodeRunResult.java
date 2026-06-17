@@ -8,8 +8,26 @@ public class OpenCodeRunResult {
     private final boolean completedByOutput;
     private final boolean aborted;
     private final String serverState;
+    private final boolean validationOk;
+    private final String validationError;
+    private final int correctionRounds;
 
     OpenCodeRunResult(String sessionId, String serverUrl, boolean serverOwnedByJava, boolean timedOut, boolean completedByOutput, boolean aborted, String serverState) {
+        this(sessionId, serverUrl, serverOwnedByJava, timedOut, completedByOutput, aborted, serverState, completedByOutput, "", 0);
+    }
+
+    OpenCodeRunResult(
+            String sessionId,
+            String serverUrl,
+            boolean serverOwnedByJava,
+            boolean timedOut,
+            boolean completedByOutput,
+            boolean aborted,
+            String serverState,
+            boolean validationOk,
+            String validationError,
+            int correctionRounds
+    ) {
         this.sessionId = sessionId;
         this.serverUrl = serverUrl;
         this.serverOwnedByJava = serverOwnedByJava;
@@ -17,6 +35,9 @@ public class OpenCodeRunResult {
         this.completedByOutput = completedByOutput;
         this.aborted = aborted;
         this.serverState = serverState == null ? "unknown" : serverState;
+        this.validationOk = validationOk;
+        this.validationError = validationError == null ? "" : validationError;
+        this.correctionRounds = Math.max(0, correctionRounds);
     }
 
     public String sessionId() {
@@ -45,5 +66,17 @@ public class OpenCodeRunResult {
 
     public String serverState() {
         return serverState;
+    }
+
+    public boolean validationOk() {
+        return validationOk;
+    }
+
+    public String validationError() {
+        return validationError;
+    }
+
+    public int correctionRounds() {
+        return correctionRounds;
     }
 }

@@ -36,6 +36,7 @@ class OpenCodeRunnerPropertiesTest {
                         "opencode-runner.opencode.max-concurrency=5",
                         "opencode-runner.opencode.timeout-minutes=25",
                         "opencode-runner.opencode.output-wait-seconds=9",
+                        "opencode-runner.opencode.validation-max-corrections=4",
                         "opencode-runner.opencode.environment.OPENCODE_DISABLE_MODELS_FETCH=true",
                         "opencode-runner.opencode.environment.OPENCODE_MODELS_PATH=C:/opencode/models.json"
                 )
@@ -59,6 +60,7 @@ class OpenCodeRunnerPropertiesTest {
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(5);
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(25);
                     assertThat(properties.getOpencode().getOutputWaitSeconds()).isEqualTo(9);
+                    assertThat(properties.getOpencode().getValidationMaxCorrections()).isEqualTo(4);
                     assertThat(properties.getOpencode().getEnvironment())
                             .containsEntry("OPENCODE_DISABLE_MODELS_FETCH", "true")
                             .containsEntry("OPENCODE_MODELS_PATH", "C:/opencode/models.json");

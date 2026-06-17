@@ -6,6 +6,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ class OpenCodeServerTaskRunnerTest {
     private HttpServer server;
     private ThreadPoolTaskScheduler taskScheduler;
     private ExecutorService httpExecutor;
+    private ExecutorService delayedOutputExecutor;
 
     @TempDir
     Path tempDir;
@@ -43,6 +45,9 @@ class OpenCodeServerTaskRunnerTest {
         }
         if (httpExecutor != null) {
             httpExecutor.shutdownNow();
+        }
+        if (delayedOutputExecutor != null) {
+            delayedOutputExecutor.shutdownNow();
         }
     }
 
@@ -336,6 +341,124 @@ class OpenCodeServerTaskRunnerTest {
 
         assertThat(result.sessionId()).isEqualTo("prompt-timeout-session");
         assertThat(result.completedByOutput()).isTrue();
+        assertThat(promptRequests).hasValue(1);
+    }
+
+    @Test
+    void sendsCorrectionPromptToSameSessionWhenValidationFailsAfterServerIdle() throws Exception {
+        Path output = tempDir.resolve("validated-output.txt");
+        AtomicInteger sessions = new AtomicInteger();
+        AtomicInteger promptRequests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> {
+            sessions.incrementAndGet();
+            respond(exchange, 200, "{\"id\":\"validation-session\"}");
+        });
+        server.createContext("/session/validation-session/prompt_async", exchange -> {
+            int request = promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (request == 1 && body.contains("initial prompt")) {
+                Files.writeString(output, "bad");
+            } else if (request == 2 && body.contains("Java 产物校验失败") && body.contains("expected validated output")) {
+                Files.writeString(output, "good");
+            }
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/validation-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
+                ]
+                """));
+        server.start();
+
+        Path promptFile = tempDir.resolve("validation-prompt.md");
+        Files.writeString(promptFile, "initial prompt");
+        Path runDir = tempDir.resolve("validation-run");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntilValidated(
+                handle,
+                tempDir,
+                "validation-title",
+                promptFile,
+                "worker message",
+                runDir,
+                () -> Files.exists(output) && "good".equals(Files.readString(output))
+                        ? ValidationCheck.success()
+                        : ValidationCheck.failed("expected validated output"),
+                "",
+                60,
+                60,
+                50,
+                1,
+                0,
+                2
+        );
+
+        assertThat(sessions).hasValue(1);
+        assertThat(promptRequests).hasValue(2);
+        assertThat(result.sessionId()).isEqualTo("validation-session");
+        assertThat(result.validationOk()).isTrue();
+        assertThat(result.validationError()).isBlank();
+        assertThat(result.correctionRounds()).isEqualTo(1);
+        String status = Files.readString(runDir.resolve("session-status.json"));
+        assertThat(status).contains("\"correctionRound\" : 1");
+    }
+
+    @Test
+    void waitsForDelayedOutputAfterServerIdleBeforeSendingCorrection() throws Exception {
+        Path output = tempDir.resolve("delayed-validation-output.txt");
+        AtomicInteger promptRequests = new AtomicInteger();
+        delayedOutputExecutor = Executors.newSingleThreadExecutor();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"idle-validation-session\"}"));
+        server.createContext("/session/idle-validation-session/prompt_async", exchange -> {
+            promptRequests.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            delayedOutputExecutor.submit(() -> {
+                sleep(300);
+                try {
+                    Files.writeString(output, "ready");
+                } catch (IOException exception) {
+                    throw new IllegalStateException(exception);
+                }
+            });
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/idle-validation-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
+                ]
+                """));
+        server.start();
+
+        Path promptFile = tempDir.resolve("idle-validation-prompt.md");
+        Files.writeString(promptFile, "delayed output");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntilValidated(
+                handle,
+                tempDir,
+                "idle-validation-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("idle-validation-run"),
+                () -> Files.exists(output) ? ValidationCheck.success() : ValidationCheck.failed("output not ready"),
+                "",
+                60,
+                60,
+                50,
+                1,
+                1,
+                2
+        );
+
+        assertThat(result.validationOk()).isTrue();
+        assertThat(result.correctionRounds()).isZero();
         assertThat(promptRequests).hasValue(1);
     }
 

@@ -25,6 +25,7 @@ opencode-runner:
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30
+    validation-max-corrections: 2
     max-retries: 1
     max-concurrency: 6
     environment:

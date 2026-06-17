@@ -20,13 +20,15 @@ class ArchitectureConventionsTest {
     }
 
     @Test
-    void orchestrationUsesSpringExecutorAndScheduledWaiter() throws Exception {
-        String code = read("src/main/java/com/sonnet/wyf/gitreport/orchestration/GitReportOrchestrator.java");
+    void orchestrationUsesSpringExecutorAndRunnerOwnsScheduledWaiter() throws Exception {
+        String orchestrator = read("src/main/java/com/sonnet/wyf/gitreport/orchestration/GitReportOrchestrator.java");
+        String taskRunner = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
 
-        assertThat(code).contains("AsyncTaskExecutor");
-        assertThat(code).contains("ScheduledProbeWaiter");
-        assertThat(code).doesNotContain("Executors.");
-        assertThat(code).doesNotContain("TimeUnit.SECONDS.sleep");
+        assertThat(orchestrator).contains("AsyncTaskExecutor");
+        assertThat(orchestrator).doesNotContain("Executors.");
+        assertThat(orchestrator).doesNotContain("TimeUnit.SECONDS.sleep");
+        assertThat(taskRunner).contains("ScheduledProbeWaiter");
+        assertThat(taskRunner).doesNotContain("TimeUnit.SECONDS.sleep");
     }
 
     @Test

@@ -12,6 +12,7 @@ public class OpenCodeSettings {
     private int concurrency = 6;
     private int timeoutMinutes = 40;
     private int outputWaitSeconds = 30;
+    private int validationMaxCorrections = 2;
     private int maxRetries = 1;
     private int maxConcurrency = 6;
     private String opencodeBin = "opencode";
@@ -86,6 +87,14 @@ public class OpenCodeSettings {
 
     public void setOutputWaitSeconds(int outputWaitSeconds) {
         this.outputWaitSeconds = outputWaitSeconds;
+    }
+
+    public int getValidationMaxCorrections() {
+        return validationMaxCorrections;
+    }
+
+    public void setValidationMaxCorrections(int validationMaxCorrections) {
+        this.validationMaxCorrections = validationMaxCorrections;
     }
 
     public int getMaxRetries() {

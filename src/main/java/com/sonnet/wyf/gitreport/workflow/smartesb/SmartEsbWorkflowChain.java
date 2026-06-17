@@ -2,11 +2,11 @@ package com.sonnet.wyf.gitreport.workflow.smartesb;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
@@ -17,7 +17,6 @@ import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +37,6 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     private final SmartEsbSummaryValidator summaryValidator;
     private final OpenCodeServerManager serverManager;
     private final OpenCodeServerTaskRunner taskRunner;
-    private final ScheduledProbeWaiter outputWaiter;
     private final ObjectMapper objectMapper;
     private final AsyncTaskExecutor transactionTaskExecutor;
 
@@ -51,7 +49,6 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             SmartEsbSummaryValidator summaryValidator,
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
-            ScheduledProbeWaiter outputWaiter,
             ObjectMapper objectMapper,
             AsyncTaskExecutor transactionTaskExecutor
     ) {
@@ -63,7 +60,6 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         this.summaryValidator = summaryValidator;
         this.serverManager = serverManager;
         this.taskRunner = taskRunner;
-        this.outputWaiter = outputWaiter;
         this.objectMapper = objectMapper;
         this.transactionTaskExecutor = transactionTaskExecutor;
     }
@@ -180,62 +176,28 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         String summarySchema = ((Map<?, ?>) indexInputs.get("schemas")).get("transaction_summary").toString();
         Files.writeString(promptFile, promptBuilder.buildTransactionPrompt(task.get("task_path").toString(), summarySchema));
         Path summaryJson = localSummaryPath(out, transaction.name());
-        OpenCodeRunResult result = taskRunner.runUntil(
+        OpenCodeRunResult result = taskRunner.runUntilValidated(
                 server,
                 Path.of(properties.getNewProject()),
                 "smartesb-review-" + transaction.name(),
                 promptFile,
                 properties.getWorkerMessage(),
                 runDir,
-                () -> summaryValidator.validate(summaryJson).ok(),
+                () -> summaryValidationCheck(summaryJson),
                 request.openCode().getSessionModel(),
                 request.openCode().getCreateSessionTimeoutSeconds(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes()
+                request.openCode().getTimeoutMinutes(),
+                request.openCode().getOutputWaitSeconds(),
+                request.openCode().getValidationMaxCorrections()
         );
-        SmartEsbSummaryValidator.Validation validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
+        SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryJson);
         if (!validation.ok()) {
-            log.warn("SmartESB transaction review failed once, rerunning: transaction={}, reason={}, sessionId={}, timedOut={}",
-                    transaction.name(), validation.error(), result.sessionId(), result.timedOut());
-            rerunTransaction(properties, request, server, out, transaction, task, summarySchema, summaryJson);
-            validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
+            log.warn("SmartESB transaction review failed after same-session correction attempts: transaction={}, reason={}, sessionId={}, timedOut={}, correctionRounds={}",
+                    transaction.name(), validation.error(), result.sessionId(), result.timedOut(), result.correctionRounds());
         }
         return validation.ok() ? "" : transaction.name() + ": " + validation.error();
-    }
-
-    private void rerunTransaction(
-            SmartEsbRewriteProperties properties,
-            WorkflowRunRequest request,
-            OpenCodeServerHandle server,
-            Path out,
-            SmartEsbDailyTransactionPlan.Transaction transaction,
-            Map<String, Object> task,
-            String summarySchema,
-            Path summaryJson
-    ) throws Exception {
-        Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(transaction.name()) + "-rerun");
-        Files.createDirectories(runDir);
-        Path promptFile = runDir.resolve("worker-prompt.md");
-        Files.writeString(promptFile, promptBuilder.buildRerunTransactionPrompt(
-                task.get("task_path").toString(),
-                Files.exists(summaryJson) ? summaryJson.toString() : task.get("review_md").toString(),
-                summarySchema
-        ));
-        taskRunner.runUntil(
-                server,
-                Path.of(properties.getNewProject()),
-                "smartesb-review-rerun-" + transaction.name(),
-                promptFile,
-                properties.getWorkerMessage(),
-                runDir,
-                () -> summaryValidator.validate(summaryJson).ok(),
-                request.openCode().getSessionModel(),
-                request.openCode().getCreateSessionTimeoutSeconds(),
-                request.openCode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes()
-        );
     }
 
     private void runIndex(SmartEsbRewriteProperties properties, WorkflowRunRequest request, Path out) throws Exception {
@@ -258,40 +220,26 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));
         Path indexMd = out.resolve("index.md");
         Path summaryMd = out.resolve("summary.md");
-        taskRunner.runUntil(
+        taskRunner.runUntilValidated(
                 server,
                 Path.of(properties.getNewProject()),
                 "smartesb-review-index",
                 promptFile,
                 properties.getSynthesisMessage(),
                 runDir,
-                () -> topLevelReady(indexMd, summaryMd),
+                () -> topLevelValidation(indexMd, summaryMd),
                 request.openCode().getSessionModel(),
                 request.openCode().getCreateSessionTimeoutSeconds(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes()
+                request.openCode().getTimeoutMinutes(),
+                request.openCode().getOutputWaitSeconds(),
+                request.openCode().getValidationMaxCorrections()
         );
-        boolean ok = outputWaiter.waitFor(
-                () -> topLevelReady(indexMd, summaryMd),
-                Boolean::booleanValue,
-                () -> false,
-                Duration.ofSeconds(Math.max(0, request.openCode().getOutputWaitSeconds())),
-                Duration.ofSeconds(2)
-        );
-        if (!ok) {
+        ValidationCheck validation = topLevelValidation(indexMd, summaryMd);
+        if (!validation.ok()) {
             throw new IllegalStateException("SmartESB index synthesis failed: " + indexMd + ", " + summaryMd);
         }
-    }
-
-    private SmartEsbSummaryValidator.Validation waitForSummary(Path summaryJson, int outputWaitSeconds) throws Exception {
-        return outputWaiter.waitFor(
-                () -> summaryValidator.validate(summaryJson),
-                SmartEsbSummaryValidator.Validation::ok,
-                () -> summaryValidator.validate(summaryJson),
-                Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
-                Duration.ofSeconds(2)
-        );
     }
 
     private boolean topLevelReady(Path indexMd, Path summaryMd) throws Exception {
@@ -299,6 +247,27 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 && Files.exists(summaryMd)
                 && placeholdersReplaced(indexMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md"))
                 && placeholdersReplaced(summaryMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md"));
+    }
+
+    private ValidationCheck summaryValidationCheck(Path summaryJson) {
+        SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryJson);
+        return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
+    }
+
+    private ValidationCheck topLevelValidation(Path indexMd, Path summaryMd) throws Exception {
+        if (!Files.exists(indexMd)) {
+            return ValidationCheck.failed("SmartESB index missing: " + indexMd);
+        }
+        if (!Files.exists(summaryMd)) {
+            return ValidationCheck.failed("SmartESB summary missing: " + summaryMd);
+        }
+        if (!placeholdersReplaced(indexMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md"))) {
+            return ValidationCheck.failed("SmartESB index still contains template placeholder: " + indexMd);
+        }
+        if (!placeholdersReplaced(summaryMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md"))) {
+            return ValidationCheck.failed("SmartESB summary still contains template placeholder: " + summaryMd);
+        }
+        return ValidationCheck.success();
     }
 
     private boolean placeholdersReplaced(Path path, List<String> placeholders) throws Exception {
