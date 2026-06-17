@@ -31,6 +31,8 @@ class GitReportPropertiesTest {
                         "git-report.opencode.server-start-timeout-seconds=12",
                         "git-report.opencode.create-session-timeout-seconds=11",
                         "git-report.opencode.request-timeout-seconds=90",
+                        "git-report.detail-input.top-files=7",
+                        "git-report.detail-input.commits=12",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
                         "git-report.synthesis-input.snippets-per-author=5",
                         "git-report.synthesis-input.snippets-total=30",
@@ -57,6 +59,8 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
                     assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(6);
+                    assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(7);
+                    assertThat(properties.getDetailInput().getCommits()).isEqualTo(12);
                     assertThat(properties.getSynthesisInput().getPersonReportExcerptChars()).isEqualTo(8192);
                     assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
                     assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);

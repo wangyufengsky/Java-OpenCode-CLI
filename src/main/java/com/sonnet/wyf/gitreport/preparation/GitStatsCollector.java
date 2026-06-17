@@ -101,8 +101,6 @@ public class GitStatsCollector {
         metadata.put("index_inputs", out.resolve("index_inputs.json").toString());
         metadata.put("details_dir", out.resolve("details").toString());
         metadata.put("reports_dir", out.resolve("reports").toString());
-        metadata.put("report_marker", GitReportConstants.REPORT_MARKER);
-        metadata.put("author_report_marker", GitReportConstants.AUTHOR_REPORT_MARKER);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("metadata", metadata);
         result.put("totals", totals(ranked));

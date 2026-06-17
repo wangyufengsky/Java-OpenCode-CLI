@@ -12,23 +12,25 @@ detail_json: <path>
 
 ## 严格边界
 
-- 只读取输入的 `detail_json` 和 `detail.top_files` 中排名靠前的最多 10 个开发文件。
+- 只读取输入的 `detail_json` 和 `detail.top_files` 中 Java 已裁剪出的 Top 开发文件；`detail_json` 不提供完整文件列表。
+- `detail.commits` 是 Java 已裁剪后的主要提交列表，不要要求或推断完整提交列表。
 - 不读取 `summary.json`、`details.json`、`index_inputs.json` 或其他人员 detail。
 - 不生成总报告 `code-contribution-report.md`。
 - 不创建、重命名、删除或移动任何文件。
 - 只写 `detail.output.person_report_md` 指定的文件。
 - 只写 `detail.output.quality_summary_json` 指定的质量摘要 JSON。
-- 写个人报告时只替换 `detail.output.report_marker`。
-- 写质量摘要时只替换 `detail.output.quality_summary_marker`；不得使用个人报告 marker 写质量摘要。
+- 写个人报告时只能替换模板中已有的 `{{...}}` 占位符，不得删除、重命名或重排标题结构。
+- 写质量摘要时只能把 Java 预创建 JSON 对象中的固定字段更新为最终值，不得改成非 JSON 或写入额外评分字段。
 - 按 `detail.execution_worklist` 的 `step` 升序执行，不得把 worklist 当作最终响应。
 - 不得在 `quality-summary.json` 中写入 `quality_adjustment_percent` 或 `components[].score`；质量评分由 Java 统一计算。
 
-## MCP 读写与取证规则
+## 受控读写与取证规则
 
-- 读取 `detail_json`、Top 文件和候选代码片段时，必须使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 写入个人报告和质量摘要时，必须使用 `intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- 不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content` 读取或写入报告、质量摘要或代码文件。
-- MCP 写入不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `detail_json`、Top 文件和候选代码片段时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具。
+- 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入报告、质量摘要或代码文件。
 - 公共代码取证优先使用 `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
 - 代码取证 MCP 不足时写入 `unverified`，不要写无证据 finding。
 
@@ -37,15 +39,15 @@ detail_json: <path>
 - 将 `|` 转义为 `\|`。
 - 单元格换行压缩为短语或 `<br>`。
 - 长表格分块写入时每块重复表头。
-- marker 不得放在表格内部，必须放在表格块之间或文末。
+- 替换表格占位行时必须保留表头和分隔行，不能把正文写进表头。
 
 ## 写入规则
 
 - 必须立即调用可用的文件读取/写入工具完成读写，不要只回复计划、摘要或“准备写入”。
 - 个人 Markdown 单次写入不超过 6000 字符、120 行；长表格分块写。
-- 写中间块时，将 marker 替换为“本次内容 + 同一个 marker”，保留 marker 供下一块继续追加。
-- 写最后一块时移除 marker。
-- `quality-summary.json` 必须替换为合法 JSON object。
+- 个人报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `detail.output.report_placeholders` 中列出的占位符。
+- `quality-summary.json` 必须保持合法 JSON object，并将 `status` 改为 `completed`。
+- 写入完成后，个人报告和质量摘要不得残留 `{{...}}` 占位符。
 - 任一文件无法写入或校验失败时，最终只返回：
 
 ```text

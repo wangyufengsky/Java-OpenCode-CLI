@@ -15,6 +15,7 @@ public class GitReportProperties {
     private final Paths paths = new Paths();
     private final Git git = new Git();
     private final OpenCode opencode = new OpenCode();
+    private final DetailInput detailInput = new DetailInput();
     private final SynthesisInput synthesisInput = new SynthesisInput();
 
     public Project getProject() {
@@ -31,6 +32,10 @@ public class GitReportProperties {
 
     public OpenCode getOpencode() {
         return opencode;
+    }
+
+    public DetailInput getDetailInput() {
+        return detailInput;
     }
 
     public SynthesisInput getSynthesisInput() {
@@ -334,6 +339,27 @@ public class GitReportProperties {
 
         public void setSnippetLines(int snippetLines) {
             this.snippetLines = snippetLines;
+        }
+    }
+
+    public static class DetailInput {
+        private int topFiles = 10;
+        private int commits = 20;
+
+        public int getTopFiles() {
+            return topFiles;
+        }
+
+        public void setTopFiles(int topFiles) {
+            this.topFiles = topFiles;
+        }
+
+        public int getCommits() {
+            return commits;
+        }
+
+        public void setCommits(int commits) {
+            this.commits = commits;
         }
     }
 

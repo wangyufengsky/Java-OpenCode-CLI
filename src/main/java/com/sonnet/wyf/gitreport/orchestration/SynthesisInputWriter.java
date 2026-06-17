@@ -3,7 +3,6 @@ package com.sonnet.wyf.gitreport.orchestration;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties.SynthesisInput;
-import com.sonnet.wyf.gitreport.core.GitReportConstants;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -67,7 +66,7 @@ public class SynthesisInputWriter {
         root.put("metadata", summary.get("metadata"));
         root.put("totals", summary.get("totals"));
         root.put("final_report", indexInputs.get("final_report"));
-        root.put("final_report_marker", indexInputs.getOrDefault("final_report_marker", GitReportConstants.REPORT_MARKER));
+        root.put("final_report_placeholders", indexInputs.get("final_report_placeholders"));
         root.put("quality_scores", qualityScores);
         root.put("authors", authors);
         root.put("code_snippets", allSnippets);

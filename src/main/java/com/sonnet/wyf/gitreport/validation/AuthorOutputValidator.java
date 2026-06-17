@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.core.GitReportConstants;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -35,12 +34,21 @@ public class AuthorOutputValidator {
             if (report.isBlank()) {
                 return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
             }
+            if (report.contains("{{")) {
+                return AuthorValidationResult.failed("person report contains unresolved template placeholder: " + reportMd);
+            }
+            if (report.contains(GitReportConstants.AUTHOR_REPORT_MARKER)) {
+                return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
+            }
             if (!Files.exists(qualitySummaryJson)) {
                 return AuthorValidationResult.failed("quality summary missing: " + qualitySummaryJson);
             }
             String quality = Files.readString(qualitySummaryJson);
             if (quality.isBlank() || quality.trim().equals(GitReportConstants.QUALITY_SUMMARY_MARKER) || quality.contains(GitReportConstants.QUALITY_SUMMARY_MARKER)) {
                 return AuthorValidationResult.failed("quality summary still contains marker: " + qualitySummaryJson);
+            }
+            if (quality.contains("{{")) {
+                return AuthorValidationResult.failed("quality summary contains unresolved template placeholder: " + qualitySummaryJson);
             }
             Map<String, Object> root = objectMapper.readValue(quality, new TypeReference<>() {});
             for (String key : List.of("findings", "positive_signals", "risk_signals", "code_snippets", "unverified")) {
@@ -65,6 +73,9 @@ public class AuthorOutputValidator {
             if (!rootValidation.ok()) {
                 return rootValidation;
             }
+            if (!"completed".equals(string(root.get("status")))) {
+                return AuthorValidationResult.failed("quality summary status must be completed");
+            }
             AuthorValidationResult findingsValidation = validateFindings(listOfMaps(root.get("findings")));
             if (!findingsValidation.ok()) {
                 return findingsValidation;
@@ -73,30 +84,10 @@ public class AuthorOutputValidator {
             if (!snippetsValidation.ok()) {
                 return snippetsValidation;
             }
-            if (report.contains(GitReportConstants.AUTHOR_REPORT_MARKER)) {
-                if (!removeTrailingAuthorMarker(reportMd, report)) {
-                    return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
-                }
-            }
             return AuthorValidationResult.success();
         } catch (Exception exception) {
             return AuthorValidationResult.failed(exception.getMessage());
         }
-    }
-
-    private boolean removeTrailingAuthorMarker(Path reportMd, String report) throws IOException {
-        int markerAt = report.indexOf(GitReportConstants.AUTHOR_REPORT_MARKER);
-        int lastMarkerAt = report.lastIndexOf(GitReportConstants.AUTHOR_REPORT_MARKER);
-        if (markerAt != lastMarkerAt) {
-            return false;
-        }
-        String beforeMarker = report.substring(0, markerAt);
-        String afterMarker = report.substring(markerAt + GitReportConstants.AUTHOR_REPORT_MARKER.length());
-        if (beforeMarker.isBlank() || !afterMarker.isBlank()) {
-            return false;
-        }
-        Files.writeString(reportMd, beforeMarker.stripTrailing() + "\n");
-        return true;
     }
 
     private AuthorValidationResult validateRootRequiredFields(Map<String, Object> root) {

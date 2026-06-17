@@ -2,7 +2,6 @@ package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.core.GitReportConstants;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
@@ -219,7 +218,7 @@ class GitReportOrchestratorIntegrationTest {
                         "quality_summary_json", qualitySummary.toString()
                 ))
         ));
-        Files.writeString(out.resolve("code-contribution-report.md"), GitReportConstants.REPORT_MARKER + "\n");
+        Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
         startFakeOpenCodeServer();
 
         GitReportProperties properties = new GitReportProperties();
@@ -256,8 +255,17 @@ class GitReportOrchestratorIntegrationTest {
         Path aliceQuality = out.resolve("reports/author-001-alice/quality-summary.json");
         Path bobReport = out.resolve("reports/author-002-bob/person-report.md");
         Path bobQuality = out.resolve("reports/author-002-bob/quality-summary.json");
-        Files.writeString(aliceReport, GitReportConstants.AUTHOR_REPORT_MARKER + "\n");
-        Files.writeString(aliceQuality, GitReportConstants.QUALITY_SUMMARY_MARKER + "\n");
+        Files.writeString(aliceReport, "# 个人代码提交量报告：Alice <alice@example.com>\n\n{{WORKLOAD_STRUCTURE_ANALYSIS}}\n");
+        objectMapper.writeValue(aliceQuality.toFile(), Map.of(
+                "author", "Alice <alice@example.com>",
+                "status", "pending",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "{{QUALITY_SUMMARY}}"
+        ));
         Files.writeString(bobReport, "Bob 个人报告\n");
         objectMapper.writeValue(bobQuality.toFile(), Map.of(
                 "author", "Bob <bob@example.com>",
@@ -284,7 +292,7 @@ class GitReportOrchestratorIntegrationTest {
                         Map.of("author_key", "author-002-bob", "author", "Bob <bob@example.com>", "rank", 2, "detail_json", bobDetail.toString(), "report_md", bobReport.toString(), "quality_summary_json", bobQuality.toString())
                 )
         ));
-        Files.writeString(out.resolve("code-contribution-report.md"), GitReportConstants.REPORT_MARKER + "\n");
+        Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
         startFakeOpenCodeServer();
 
         GitReportProperties properties = new GitReportProperties();
@@ -533,8 +541,8 @@ class GitReportOrchestratorIntegrationTest {
                 "output", Map.of(
                         "person_report_md", personReport.toString(),
                         "quality_summary_json", qualitySummary.toString(),
-                        "report_marker", GitReportConstants.AUTHOR_REPORT_MARKER,
-                        "quality_summary_marker", GitReportConstants.QUALITY_SUMMARY_MARKER
+                        "report_placeholders", List.of("{{WORKLOAD_STRUCTURE_ANALYSIS}}"),
+                        "quality_summary_status_required", "completed"
                 ),
                 "execution_worklist", List.of()
         ));

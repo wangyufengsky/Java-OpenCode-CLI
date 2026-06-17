@@ -57,35 +57,32 @@ class AuthorOutputValidatorAndQualityScoresTest {
     }
 
     @Test
-    void validatorFinalizesReportWhenOnlyTrailingMarkerRemainsAfterContent() throws Exception {
+    void validatorRejectsUnresolvedTemplatePlaceholdersAndPendingQualitySummary() throws Exception {
         Path report = tempDir.resolve("person-report.md");
         Path quality = tempDir.resolve("quality-summary.json");
         Files.writeString(report, """
                 # 个人代码提交量报告：Alice
 
-                已生成的个人报告内容。
-
-                <!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->
+                {{WORKLOAD_STRUCTURE_ANALYSIS}}
                 """);
         Files.writeString(quality, """
                 {
                   "author": "Alice <alice@example.com>",
-                  "status": "completed",
+                  "status": "pending",
                   "findings": [],
                   "positive_signals": [],
                   "risk_signals": [],
                   "code_snippets": [],
                   "unverified": [],
-                  "summary": "无"
+                  "summary": "{{QUALITY_SUMMARY}}"
                 }
                 """);
         AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
 
         AuthorValidationResult result = validator.validate(report, quality);
 
-        assertThat(result.ok()).isTrue();
-        assertThat(Files.readString(report)).doesNotContain(GitReportConstants.AUTHOR_REPORT_MARKER);
-        assertThat(Files.readString(report)).contains("已生成的个人报告内容。");
+        assertThat(result.ok()).isFalse();
+        assertThat(result.error()).contains("unresolved template placeholder");
     }
 
     @Test

@@ -4,50 +4,43 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 仓库 | `<repo>` |
-| 修订范围 | `<revision>` |
-| 开始日期 | `<since>` |
-| 结束日期 | `<until>` |
-| 是否包含 merge commit | `<include_merges>` |
-| 默认统计白名单 | `<default_include_rules>` |
-| 用户追加统计白名单 | `<user_include_rules>` |
-| 默认排除规则 | `<default_exclude_rules>` |
-| 用户追加排除规则 | `<user_exclude_rules>` |
-| 生成时间 | `<generated_at>` |
+| 仓库 | {{repo}} |
+| 修订范围 | {{revision}} |
+| 开始日期 | {{since}} |
+| 结束日期 | {{until}} |
+| 是否包含 merge commit | {{include_merges}} |
+| 默认统计白名单 | {{default_include_rules}} |
+| 用户追加统计白名单 | {{user_include_rules}} |
+| 默认排除规则 | {{default_exclude_rules}} |
+| 用户追加排除规则 | {{user_exclude_rules}} |
+| 生成时间 | {{generated_at}} |
 
 ## 2. 总体汇总
 
 | 指标 | 数值 |
 | --- | ---: |
-| 提交数 | `<commit_count>` |
-| 文件修改次数 | `<file_change_count>` |
-| 去重文件数 | `<unique_file_count>` |
-| 原始新增行 | `<added>` |
-| 原始删除行 | `<deleted>` |
-| 原始净变更行 | `<net>` |
-| 去注释新增行 | `<non_comment_added>` |
-| 去注释删除行 | `<non_comment_deleted>` |
-| 去注释净变更行 | `<non_comment_net>` |
-| 去注释代码变更量 | `<non_comment_churn>` |
+| 提交数 | {{commit_count}} |
+| 文件修改次数 | {{file_change_count}} |
+| 去重文件数 | {{unique_file_count}} |
+| 原始新增行 | {{added}} |
+| 原始删除行 | {{deleted}} |
+| 原始净变更行 | {{net}} |
+| 去注释新增行 | {{non_comment_added}} |
+| 去注释删除行 | {{non_comment_deleted}} |
+| 去注释净变更行 | {{non_comment_net}} |
+| 去注释代码变更量 | {{non_comment_churn}} |
 
 ## 3. 人员工作量排名与分析
 
 ### 3.1 排名表
 
-先计算每个人的质量调整后 `workload_score`，再按质量调整后的 `workload_score` 降序排序生成最终排名。脚本初始 `rank` 只能作为初始排名展示，不能作为最终排名表的排序依据。
-
 | 最终排名 | 初始排名 | 开发人员 | 提交数 | 文件修改次数 | 去重文件数 | 去注释新增行 | 去注释删除行 | 基础工作量分 | 质量调整 | 最终工作量分 |
 | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `<final_rank>` | `<base_rank>` | `<author>` | `<commit_count>` | `<file_change_count>` | `<unique_file_count>` | `<non_comment_added>` | `<non_comment_deleted>` | `<base_workload_score>` | `<quality_adjustment_percent>%` | `<workload_score>` |
+{{RANKING_ROWS}}
 
 ### 3.2 AI 分析结论
 
-按最终排名顺序和每个人的 `person-report.md` 分析工作量结构。每个人至少说明：
-
-- 主要贡献类型：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- 统计依据：引用提交数、文件修改次数、去注释新增/删除/净变更行，并引用个人报告中的 Top 文件或扩展名分布结论。
-- 质量依据：引用 `quality-summary.json` 中的质量调整、正向信号、风险信号和未验证项。
-- 口径提醒：如存在格式化、生成文件、依赖锁文件、批量迁移、批量删除等可能影响排名的因素，明确说明。
+{{AI_ANALYSIS}}
 
 ### 3.3 质量调整口径
 
@@ -63,13 +56,13 @@ workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 1
 
 | 排名 | 开发人员 | 个人报告 | 简要结论 |
 | ---: | --- | --- | --- |
-| `<rank>` | `<author>` | `<report_markdown_link>` | `<summary>` |
+{{PERSON_REPORT_LINK_ROWS}}
 
 ## 5. 未完成个人报告
 
 | 开发人员 | 个人报告链接 | 状态 | 处理要求 |
 | --- | --- | --- | --- |
-| `<author>` | `<report_markdown_link>` | `<status>` | `<next_action>` |
+{{INCOMPLETE_REPORT_ROWS}}
 
 ## 6. 统计口径
 
@@ -88,31 +81,11 @@ workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 1
 
 ## 7. 风险与偏差
 
-列出可能影响统计准确性的因素，包括但不限于：
-
-- 大规模格式化或统一换行符。
-- 生成文件、依赖锁文件、编译产物或压缩文件。
-- 批量迁移、批量删除旧代码。
-- 作者邮箱未统一导致同一人被拆分。
-- 注释过滤为启发式规则，复杂语言语法可能存在误差。
+{{RISK_AND_BIAS}}
 
 ## 8. 典型低质量代码片段
 
-从各 `quality-summary.json.code_snippets` 中选取最多 10 个低质量代码片段。个人报告中的 `code_snippets` 每人最多 3 个；总报告每个开发人员最多引用 2 个，每个片段最多 12 行，不得粘贴完整文件。不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；如发现敏感内容，用 `[REDACTED]` 替代。
-
-### 8.`<index>` `<author>`：`<file>:<line_start>-<line_end>`
-
-- 维度：`<dimension>`
-- 严重程度：`<severity>`
-- 原因：`<reason>`
-- 建议：`<suggestion>`
-- 个人报告：`<report_markdown_link>`
-
-```text
-<snippet>
-```
-
-没有可安全摘录的片段时写：未发现可安全摘录的低质量代码片段。
+{{LOW_QUALITY_SNIPPETS}}
 
 ## 9. 附录
 

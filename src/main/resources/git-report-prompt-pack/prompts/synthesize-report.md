@@ -17,7 +17,7 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 - 不读取各个人报告或质量摘要原文件；Java 已将必要摘录和质量摘要压缩进 `synthesis_inputs`。
 - 不创建、重命名、删除或移动任何文件。
 - 只写 `synthesis_inputs.final_report` 指定的文件。
-- 只替换 `synthesis_inputs.final_report_marker`。
+- 只能替换模板中已有的 `{{...}}` 占位符，不得删除、重命名或重排标题结构。
 - 最终质量调整、最终 `workload_score` 和最终排名只能使用 `synthesis_inputs.quality_scores`。
 - 不运行 Python、Shell 或其他脚本计算质量分。
 
@@ -25,9 +25,9 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 
 - 必须立即调用可用的文件读取/写入工具完成最终报告写入，不要只回复计划或摘要。
 - 总报告单次写入不超过 6000 字符、120 行；排名表、个人报告链接表、未完成个人报告表较长时分块写。
-- 写中间块时，将 `synthesis_inputs.final_report_marker` 替换为“本次内容 + 同一个 marker”，保留 marker 供下一块继续追加。
-- 写最后一块时移除 marker。
-- 如果 marker 不存在、写入失败或目标文件不可写，最终返回 `BLOCKED reason=<reason>`。
+- 最终报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `synthesis_inputs.final_report_placeholders` 中列出的占位符。
+- 写入完成后，最终报告不得残留 `{{...}}` 占位符。
+- 如果占位符不存在、写入失败或目标文件不可写，最终返回 `BLOCKED reason=<reason>`。
 - 成功写入后最终只返回 `DONE final_report=<path>`。
 
 ## 汇总规则
@@ -40,19 +40,20 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 - Markdown、Office、普通文档、媒体和归档文件不得写入统计依据、质量依据或分数依据。
 - 从 `synthesis_inputs.code_snippets` 中汇总典型低质量代码片段；以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准。
 
-## MCP 读写规则
+## 受控读写规则
 
-- 读取 `synthesis_inputs_json` 时，必须使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 写入最终报告时，必须使用 `intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- 不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content` 读取或写入最终报告、输入 JSON 或个人报告。
-- MCP 写入不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `synthesis_inputs_json` 时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入最终报告时，优先使用 OpenCode 原生文件编辑工具。
+- 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入最终报告、输入 JSON 或个人报告。
 
 ## Markdown 表格安全
 
 - 将 `|` 转义为 `\|`。
 - 单元格换行压缩为短语或 `<br>`。
 - 排名表、个人报告链接表、未完成个人报告表分块写入时每块重复表头。
-- marker 不得放在表格内部，必须放在表格块之间或文末。
+- 替换表格占位行时必须保留表头和分隔行，不能把正文写进表头。
 
 ## 输出要求
 

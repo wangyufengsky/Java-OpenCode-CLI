@@ -25,7 +25,7 @@ class PromptPackContractTest {
     }
 
     @Test
-    void javaPromptPackEmbedsMcpAndMarkdownSafetyContract() throws Exception {
+    void javaPromptPackEmbedsControlledEditingAndMarkdownSafetyContract() throws Exception {
         Path promptPack = Path.of("src/main/resources/git-report-prompt-pack");
 
         String worker = Files.readString(promptPack.resolve("prompts/run-author-report.md"));
@@ -43,17 +43,27 @@ class PromptPackContractTest {
                 "intellij-index_ide_find_implementations"
         );
         assertThat(worker).contains(
-                "不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content`",
-                "MCP 写入不可用时必须返回 `BLOCKED`",
+                "写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具",
+                "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
+                "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
+                "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "代码取证 MCP 不足时写入 `unverified`",
                 "将 `|` 转义为 `\\|`",
-                "marker 不得放在表格内部"
+                "只能替换模板中已有的 `{{...}}` 占位符"
         );
         assertThat(synthesis).contains(
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
-                "不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content`",
-                "将 `|` 转义为 `\\|`"
+                "写入最终报告时，优先使用 OpenCode 原生文件编辑工具",
+                "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
+                "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
+                "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
+                "将 `|` 转义为 `\\|`",
+                "只能替换模板中已有的 `{{...}}` 占位符"
         );
+        assertThat(worker).doesNotContain("MCP 写入不可用时必须返回 `BLOCKED`");
+        assertThat(synthesis).doesNotContain("MCP 写入不可用时必须返回 `BLOCKED`");
+        assertThat(worker).doesNotContain("替换 `detail.output.report_marker`", "保留 marker", "移除 marker");
+        assertThat(synthesis).doesNotContain("final_report_marker", "保留 marker", "移除 marker");
         assertThat(synthesis).doesNotContain("每个开发人员最多 2 个", "总报告最多 10 个", "每个片段最多 12 行");
     }
 
@@ -66,6 +76,7 @@ class PromptPackContractTest {
         assertThat(prompt).contains("detail_json: D:/out/details/author-001.json");
         assertThat(prompt).contains("## 个人报告模板");
         assertThat(prompt).contains("个人代码提交量报告");
+        assertThat(prompt).contains("{{WORKLOAD_STRUCTURE_ANALYSIS}}");
         assertThat(prompt).doesNotContain("SKILL.md");
     }
 
@@ -78,5 +89,6 @@ class PromptPackContractTest {
         assertThat(prompt).contains("synthesis_inputs_json: D:/out/runs/synthesis/synthesis-inputs.json");
         assertThat(prompt).doesNotContain("index_inputs_json:", "summary_json:", "quality_scores_json:");
         assertThat(prompt).contains("Java 已将必要摘录和质量摘要压缩进 `synthesis_inputs`");
+        assertThat(prompt).contains("{{RANKING_ROWS}}");
     }
 }

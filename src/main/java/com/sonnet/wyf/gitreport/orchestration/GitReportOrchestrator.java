@@ -3,7 +3,6 @@ package com.sonnet.wyf.gitreport.orchestration;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
-import com.sonnet.wyf.gitreport.core.GitReportConstants;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
@@ -20,6 +19,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -35,6 +37,7 @@ import java.util.concurrent.Semaphore;
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
     private static final int OPENCODE_POLL_MILLIS = 10_000;
+    private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
 
     private final GitReportPreparation preparation;
     private final ObjectMapper objectMapper;
@@ -317,7 +320,7 @@ public class GitReportOrchestrator {
         Path runDir = out.resolve("runs").resolve("synthesis");
         Files.createDirectories(runDir);
         Path finalReport = out.resolve("code-contribution-report.md");
-        Files.writeString(finalReport, GitReportConstants.REPORT_MARKER + "\n");
+        Files.writeString(finalReport, readResource(FINAL_REPORT_TEMPLATE));
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         Map<String, Object> qualityScoreInputs = readMap(qualityScores);
@@ -395,6 +398,18 @@ public class GitReportOrchestrator {
             return base;
         }
         return base.isBlank() ? hint : base + "; " + hint;
+    }
+
+    private String readResource(String resourcePath) {
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        try (InputStream inputStream = classLoader.getResourceAsStream(resourcePath)) {
+            if (inputStream == null) {
+                throw new IllegalStateException("resource missing: " + resourcePath);
+            }
+            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
     }
 
     private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, OpenCodeRunResult runResult, String error) throws IOException {

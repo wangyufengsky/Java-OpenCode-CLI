@@ -27,7 +27,7 @@ public class GitReportPreparation {
                 properties.getGit().getRevision(),
                 properties.getGit().isIncludeMerges());
         Map<String, Object> data = statsCollector.collect(properties);
-        writer.write(properties.getPaths().getOut().toAbsolutePath().normalize(), data);
+        writer.write(properties.getPaths().getOut().toAbsolutePath().normalize(), data, properties.getDetailInput());
     }
 
     private void validate(GitReportProperties properties) {

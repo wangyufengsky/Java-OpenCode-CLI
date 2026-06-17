@@ -25,7 +25,7 @@ class GitReportPreparationIntegrationTest {
     Path tempDir;
 
     @Test
-    void javaPreparationCreatesSummaryIndexInputsDetailsAndMarkers() throws Exception {
+    void javaPreparationCreatesSummaryIndexInputsDetailsAndTemplateSkeletons() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path out = tempDir.resolve("out");
         Files.createDirectories(repo);
@@ -33,7 +33,11 @@ class GitReportPreparationIntegrationTest {
         GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
         GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
         Files.writeString(repo.resolve("Demo.java"), "class Demo {\n  // comment\n  int a = 1;\n}\n");
+        for (int index = 0; index < 12; index++) {
+            Files.writeString(repo.resolve("Feature%02d.java".formatted(index)), "class Feature%02d {\n  int value = %d;\n}\n".formatted(index, index));
+        }
         GitTestSupport.run(repo, "git", "add", "Demo.java");
+        GitTestSupport.run(repo, "git", "add", ".");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
 
         GitTestSupport.run(repo, "git", "config", "user.name", "Bob");
@@ -50,6 +54,8 @@ class GitReportPreparationIntegrationTest {
         properties.getPaths().setOut(out);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+        properties.getDetailInput().setTopFiles(7);
+        properties.getDetailInput().setCommits(3);
 
         GitReportPreparation preparation = new GitReportPreparation(
                 new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
@@ -67,18 +73,32 @@ class GitReportPreparationIntegrationTest {
         assertThat(indexInputs.get("tasks")).hasSize(1);
         assertThat(summary.get("ranking")).hasSize(1);
         assertThat(summary.get("ranking").get(0).get("author").asText()).isEqualTo("Alice <alice@example.com>");
-        assertThat(out.resolve("code-contribution-report.md")).hasContent(GitReportConstants.REPORT_MARKER + "\n");
+        String finalReport = Files.readString(out.resolve("code-contribution-report.md"));
+        assertThat(finalReport).contains("# 代码提交量统计报告", "{{RANKING_ROWS}}");
+        assertThat(finalReport).doesNotContain(GitReportConstants.REPORT_MARKER);
 
         JsonNode task = indexInputs.get("tasks").get(0);
         Path detailJson = Path.of(task.get("detail_json").asText());
         Path reportMd = Path.of(task.get("report_md").asText());
         Path qualitySummaryJson = Path.of(task.get("quality_summary_json").asText());
         assertThat(detailJson).exists();
-        assertThat(reportMd).hasContent(GitReportConstants.AUTHOR_REPORT_MARKER + "\n");
-        assertThat(qualitySummaryJson).hasContent(GitReportConstants.QUALITY_SUMMARY_MARKER + "\n");
+        String personReport = Files.readString(reportMd);
+        assertThat(personReport).contains("# 个人代码提交量报告：Alice <alice@example.com>", "{{WORKLOAD_STRUCTURE_ANALYSIS}}");
+        assertThat(personReport).doesNotContain(GitReportConstants.AUTHOR_REPORT_MARKER);
+        JsonNode qualitySummary = objectMapper.readTree(qualitySummaryJson.toFile());
+        assertThat(qualitySummary.get("author").asText()).isEqualTo("Alice <alice@example.com>");
+        assertThat(qualitySummary.get("status").asText()).isEqualTo("pending");
+        assertThat(qualitySummary.get("summary").asText()).isEqualTo("{{QUALITY_SUMMARY}}");
         assertThat(task.get("report_markdown_link").asText()).startsWith("[person-report.md](reports/");
+        assertThat(task.has("report_marker")).isFalse();
+        assertThat(task.has("quality_summary_marker")).isFalse();
         JsonNode detail = objectMapper.readTree(detailJson.toFile());
         assertThat(detail.get("metadata").get("project_id").asText()).isEqualTo("upfs-production");
+        assertThat(detail.has("files")).isFalse();
+        assertThat(detail.get("top_files")).hasSizeLessThanOrEqualTo(7);
+        assertThat(detail.get("commits")).hasSizeLessThanOrEqualTo(3);
         assertThat(detail.get("execution_worklist")).hasSize(10);
+        assertThat(detail.at("/output/report_placeholders").isArray()).isTrue();
+        assertThat(detail.at("/output/quality_summary_status_required").asText()).isEqualTo("completed");
     }
 }

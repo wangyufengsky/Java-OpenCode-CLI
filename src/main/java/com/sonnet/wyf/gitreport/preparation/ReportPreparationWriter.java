@@ -1,11 +1,14 @@
 package com.sonnet.wyf.gitreport.preparation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.core.GitReportConstants;
+import com.sonnet.wyf.gitreport.GitReportProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -15,6 +18,28 @@ import java.util.Map;
 
 public class ReportPreparationWriter {
     private static final Logger log = LoggerFactory.getLogger(ReportPreparationWriter.class);
+    private static final String PERSON_REPORT_TEMPLATE = "git-report-prompt-pack/templates/person-code-contribution-report.md";
+    private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
+    private static final List<String> PERSON_REPORT_PLACEHOLDERS = List.of(
+            "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
+            "{{TOP_FILES_ROWS}}",
+            "{{EXTENSION_ROWS}}",
+            "{{COMMIT_ROWS}}",
+            "{{BIAS_NOTES}}",
+            "{{QUALITY_FINDING_ROWS}}",
+            "{{POSITIVE_SIGNALS}}",
+            "{{RISK_SIGNALS}}",
+            "{{LOW_QUALITY_SNIPPETS}}",
+            "{{UNVERIFIED_ITEMS}}"
+    );
+    private static final List<String> FINAL_REPORT_PLACEHOLDERS = List.of(
+            "{{RANKING_ROWS}}",
+            "{{AI_ANALYSIS}}",
+            "{{PERSON_REPORT_LINK_ROWS}}",
+            "{{INCOMPLETE_REPORT_ROWS}}",
+            "{{RISK_AND_BIAS}}",
+            "{{LOW_QUALITY_SNIPPETS}}"
+    );
 
     private final ObjectMapper objectMapper;
 
@@ -22,17 +47,18 @@ public class ReportPreparationWriter {
         this.objectMapper = objectMapper;
     }
 
-    void write(Path out, Map<String, Object> data) throws IOException {
+    void write(Path out, Map<String, Object> data, GitReportProperties.DetailInput detailInput) throws IOException {
         Files.createDirectories(out);
+        GitReportProperties.DetailInput limits = detailInput == null ? new GitReportProperties.DetailInput() : detailInput;
         attachOutputPaths(out.toAbsolutePath().normalize(), data);
         log.info("Writing git report preparation files to {}", out.toAbsolutePath().normalize());
-        writeAuthorOutputs(out, data);
+        writeAuthorOutputs(out, data, limits);
         writeJson(out.resolve("details.json"), data);
         writeJson(out.resolve("summary.json"), buildSummary(data));
         writeJson(out.resolve("index_inputs.json"), buildIndexInputs(data));
         Files.writeString(out.resolve("index.md"), "# 代码提交量统计数据预览\n\n请查看 `summary.json` 和 `index_inputs.json`。\n");
-        Files.writeString(out.resolve("code-contribution-report.md"), GitReportConstants.REPORT_MARKER + "\n");
-        log.info("Prepared summary.json, index_inputs.json, details.json, final report marker, and {} author task(s)", authors(data).size());
+        Files.writeString(out.resolve("code-contribution-report.md"), renderFinalReportTemplate(data));
+        log.info("Prepared summary.json, index_inputs.json, details.json, final report template, and {} author task(s)", authors(data).size());
     }
 
     private void attachOutputPaths(Path out, Map<String, Object> data) {
@@ -51,7 +77,7 @@ public class ReportPreparationWriter {
             author.put("quality_summary_json", qualitySummaryJson.toString());
             author.put("person_report_relative_path", relativePath);
             author.put("person_report_markdown_link", markdownLink);
-            author.put("person_report_marker", GitReportConstants.AUTHOR_REPORT_MARKER);
+            author.put("person_report_placeholders", PERSON_REPORT_PLACEHOLDERS);
             List<Map<String, Object>> worklist = buildExecutionWorklist(detailJson, reportMd, qualitySummaryJson);
             author.put("execution_worklist", worklist);
             Map<String, Object> task = new LinkedHashMap<>();
@@ -63,15 +89,15 @@ public class ReportPreparationWriter {
             task.put("quality_summary_json", qualitySummaryJson.toString());
             task.put("report_relative_path", relativePath);
             task.put("report_markdown_link", markdownLink);
-            task.put("report_marker", GitReportConstants.AUTHOR_REPORT_MARKER);
-            task.put("quality_summary_marker", GitReportConstants.QUALITY_SUMMARY_MARKER);
+            task.put("report_placeholders", PERSON_REPORT_PLACEHOLDERS);
+            task.put("quality_summary_required_status", "completed");
             task.put("execution_worklist", worklist);
             tasks.add(task);
         }
         data.put("tasks", tasks);
     }
 
-    private void writeAuthorOutputs(Path out, Map<String, Object> data) throws IOException {
+    private void writeAuthorOutputs(Path out, Map<String, Object> data, GitReportProperties.DetailInput limits) throws IOException {
         for (Map<String, Object> author : authors(data)) {
             Path detailPath = Path.of(author.get("detail_json").toString());
             Path reportPath = Path.of(author.get("person_report_md").toString());
@@ -84,22 +110,21 @@ public class ReportPreparationWriter {
             detail.put("rank", author.get("rank"));
             detail.put("author", author.get("author"));
             detail.put("summary", summaryFields(author));
-            detail.put("top_files", author.get("top_files"));
+            detail.put("top_files", limitedList(author.get("top_files"), limits.getTopFiles()));
             detail.put("extensions", author.get("extensions"));
-            detail.put("commits", author.get("commits"));
-            detail.put("files", author.get("files"));
+            detail.put("commits", limitedList(author.get("commits"), limits.getCommits()));
             detail.put("execution_worklist", author.get("execution_worklist"));
             detail.put("output", Map.of(
                     "person_report_md", author.get("person_report_md"),
                     "quality_summary_json", author.get("quality_summary_json"),
                     "person_report_relative_path", author.get("person_report_relative_path"),
                     "person_report_markdown_link", author.get("person_report_markdown_link"),
-                    "report_marker", GitReportConstants.AUTHOR_REPORT_MARKER,
-                    "quality_summary_marker", GitReportConstants.QUALITY_SUMMARY_MARKER
+                    "report_placeholders", PERSON_REPORT_PLACEHOLDERS,
+                    "quality_summary_status_required", "completed"
             ));
             writeJson(detailPath, detail);
-            Files.writeString(reportPath, GitReportConstants.AUTHOR_REPORT_MARKER + "\n");
-            Files.writeString(qualityPath, GitReportConstants.QUALITY_SUMMARY_MARKER + "\n");
+            Files.writeString(reportPath, renderPersonReportTemplate(author));
+            writeJson(qualityPath, initialQualitySummary(author));
         }
     }
 
@@ -117,9 +142,7 @@ public class ReportPreparationWriter {
         indexInputs.put("metadata", data.get("metadata"));
         indexInputs.put("totals", data.get("totals"));
         indexInputs.put("final_report", ((Map<?, ?>) data.get("metadata")).get("final_report"));
-        indexInputs.put("final_report_marker", GitReportConstants.REPORT_MARKER);
-        indexInputs.put("author_report_marker", GitReportConstants.AUTHOR_REPORT_MARKER);
-        indexInputs.put("quality_summary_marker", GitReportConstants.QUALITY_SUMMARY_MARKER);
+        indexInputs.put("final_report_placeholders", FINAL_REPORT_PLACEHOLDERS);
         indexInputs.put("tasks", data.get("tasks"));
         return indexInputs;
     }
@@ -142,7 +165,7 @@ public class ReportPreparationWriter {
         result.put("quality_summary_json", author.get("quality_summary_json"));
         result.put("person_report_relative_path", author.get("person_report_relative_path"));
         result.put("person_report_markdown_link", author.get("person_report_markdown_link"));
-        result.put("person_report_marker", author.get("person_report_marker"));
+        result.put("person_report_placeholders", author.get("person_report_placeholders"));
         return result;
     }
 
@@ -153,9 +176,9 @@ public class ReportPreparationWriter {
                 step(3, "inspect_top_files", null),
                 step(4, "collect_call_evidence", null),
                 step(5, "draft_person_report", reportMd),
-                stepWithMarker(6, "write_person_report", reportMd, GitReportConstants.AUTHOR_REPORT_MARKER),
+                stepWithPlaceholders(6, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
                 step(7, "draft_quality_summary", qualitySummaryJson),
-                stepWithMarker(8, "write_quality_summary", qualitySummaryJson, GitReportConstants.QUALITY_SUMMARY_MARKER),
+                step(8, "replace_quality_summary_json_fields", qualitySummaryJson),
                 Map.of("step", 9, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
                 Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"), "status", "pending")
         );
@@ -173,10 +196,87 @@ public class ReportPreparationWriter {
         return map;
     }
 
-    private Map<String, Object> stepWithMarker(int step, String action, Path target, String marker) {
+    private Map<String, Object> stepWithPlaceholders(int step, String action, Path target, List<String> placeholders) {
         Map<String, Object> map = step(step, action, target);
-        map.put("marker", marker);
+        map.put("placeholders", placeholders);
         return map;
+    }
+
+    private String renderPersonReportTemplate(Map<String, Object> author) {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("author", string(author.get("author")));
+        values.put("rank", string(author.get("rank")));
+        for (String key : List.of("commit_count", "file_change_count", "unique_file_count", "added", "deleted", "net", "non_comment_added", "non_comment_deleted", "non_comment_net", "non_comment_churn", "base_workload_score")) {
+            values.put(key, string(author.get(key)));
+        }
+        return renderTemplate(PERSON_REPORT_TEMPLATE, values);
+    }
+
+    private String renderFinalReportTemplate(Map<String, Object> data) {
+        Map<String, Object> metadata = map(data.get("metadata"));
+        Map<String, Object> totals = map(data.get("totals"));
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String key : List.of("repo", "revision", "since", "until", "include_merges", "generated_at")) {
+            values.put(key, string(metadata.get(key)));
+        }
+        values.put("default_include_rules", string(metadata.get("default_include")));
+        values.put("user_include_rules", string(metadata.get("user_include")));
+        values.put("default_exclude_rules", string(metadata.get("default_exclude")));
+        values.put("user_exclude_rules", string(metadata.get("user_exclude")));
+        for (String key : List.of("commit_count", "file_change_count", "unique_file_count", "added", "deleted", "net", "non_comment_added", "non_comment_deleted", "non_comment_net", "non_comment_churn")) {
+            values.put(key, string(totals.get(key)));
+        }
+        return renderTemplate(FINAL_REPORT_TEMPLATE, values);
+    }
+
+    private Map<String, Object> initialQualitySummary(Map<String, Object> author) {
+        Map<String, Object> quality = new LinkedHashMap<>();
+        quality.put("author", author.get("author"));
+        quality.put("status", "pending");
+        quality.put("findings", List.of());
+        quality.put("positive_signals", List.of());
+        quality.put("risk_signals", List.of());
+        quality.put("code_snippets", List.of());
+        quality.put("unverified", List.of());
+        quality.put("summary", "{{QUALITY_SUMMARY}}");
+        return quality;
+    }
+
+    private String renderTemplate(String resourcePath, Map<String, String> values) {
+        String template = readResource(resourcePath);
+        String rendered = template;
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            rendered = rendered.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        }
+        return rendered;
+    }
+
+    private String readResource(String resourcePath) {
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        try (InputStream inputStream = classLoader.getResourceAsStream(resourcePath)) {
+            if (inputStream == null) {
+                throw new IllegalStateException("resource missing: " + resourcePath);
+            }
+            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private String string(Object value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private List<?> limitedList(Object value, int limit) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream().limit(Math.max(0, limit)).toList();
     }
 
     private String makeAuthorKey(int rank, String author) {

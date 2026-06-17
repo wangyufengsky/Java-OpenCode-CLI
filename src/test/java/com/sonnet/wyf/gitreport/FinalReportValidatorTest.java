@@ -33,6 +33,11 @@ class FinalReportValidatorTest {
         FinalReportValidator.Validation missingRank = validator.validate(report);
         assertThat(missingRank.ok()).isFalse();
         assertThat(missingRank.error()).contains("初始排名");
+
+        Files.writeString(report, validReport().replace("内容", "{{AI_ANALYSIS}}"));
+        FinalReportValidator.Validation placeholder = validator.validate(report);
+        assertThat(placeholder.ok()).isFalse();
+        assertThat(placeholder.error()).contains("unresolved template placeholder");
     }
 
     @Test
