@@ -2,38 +2,38 @@
 
 ## 概览
 
-- 老项目：`{old_project}`
-- 重构项目：`{new_project}`
-- 交易数：`{transaction_count}`
-- 输出目录：`{out}`
+- 老项目：`{{old_project}}`
+- 重构项目：`{{new_project}}`
+- 交易数：`{{transaction_count}}`
+- 输出目录：`{{out}}`
 
 ## 总体结论
 
-{overall_conclusion}
+{{OVERALL_CONCLUSION}}
 
 ## 交易审查状态
 
 | 交易 | 说明 | 状态 | P0 | P1 | P2 | P3 | 详细报告 |
 | --- | --- | --- | ---: | ---: | ---: | ---: | --- |
-{transaction_rows}
+{{TRANSACTION_ROWS}}
 
 ## 高优先级问题
 
 | 严重级别 | 交易 | 标题 | 影响 | 详细报告 |
 | --- | --- | --- | --- | --- |
-{top_finding_rows}
+{{TOP_FINDING_ROWS}}
 
 ## 代码规范问题汇总
 
 | 交易 | 规范问题数量 | 最高严重级别 | 主要问题 | 详细报告 |
 | --- | ---: | --- | --- | --- |
-{code_standard_rows}
+{{CODE_STANDARD_ROWS}}
 
 ## 未完成或失败任务
 
 | 交易 | 状态 | 未完成范围 | 建议 |
 | --- | --- | --- | --- |
-{incomplete_rows}
+{{INCOMPLETE_ROWS}}
 
 ## 文档和协议依据
 
@@ -44,4 +44,4 @@
 
 ## 下一步
 
-{next_steps}
+{{NEXT_STEPS}}

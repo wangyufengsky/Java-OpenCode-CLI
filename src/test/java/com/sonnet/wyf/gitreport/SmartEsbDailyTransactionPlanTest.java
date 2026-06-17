@@ -41,6 +41,35 @@ class SmartEsbDailyTransactionPlanTest {
     }
 
     @Test
+    void loadsJuneSeventeenthTransactionsYamlFromResources() throws Exception {
+        SmartEsbDailyTransactionPlan plan = new SmartEsbDailyTransactionPlanLoader()
+                .load(Path.of("src/main/resources/smartesb-transactions"), LocalDate.of(2026, 6, 17));
+
+        assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 6, 17));
+        assertThat(plan.transactions()).extracting(SmartEsbDailyTransactionPlan.Transaction::name)
+                .containsExactly(
+                        "CaPayForAnother",
+                        "CaPreAuthComplCancel",
+                        "CaSecdThirdTransfer",
+                        "CaCollection",
+                        "CaTransferIn",
+                        "CaConsumeCancel",
+                        "CaReturnOfGoods",
+                        "CaPosAuthRev",
+                        "CaCancelCommRalation",
+                        "CaConsumeRev",
+                        "CaPosAuth",
+                        "CaWithDraw",
+                        "CaInquiryBalance",
+                        "CaTransferOuter",
+                        "CaCheckAcct",
+                        "CaScriptProcessResult",
+                        "CaScriptNotice",
+                        "CaInVTMquiryBalance"
+                );
+    }
+
+    @Test
     void failsWithLookedUpPathWhenDailyTransactionsFileIsMissing() {
         assertThatThrownBy(() -> new SmartEsbDailyTransactionPlanLoader()
                 .load(tempDir, LocalDate.of(2026, 6, 16)))

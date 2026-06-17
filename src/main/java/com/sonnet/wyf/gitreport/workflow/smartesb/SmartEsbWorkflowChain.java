@@ -297,8 +297,13 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     private boolean topLevelReady(Path indexMd, Path summaryMd) throws Exception {
         return Files.exists(indexMd)
                 && Files.exists(summaryMd)
-                && !Files.readString(indexMd).contains(SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_MARKERS.get("index_md"))
-                && !Files.readString(summaryMd).contains(SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_MARKERS.get("summary_md"));
+                && placeholdersReplaced(indexMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md"))
+                && placeholdersReplaced(summaryMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md"));
+    }
+
+    private boolean placeholdersReplaced(Path path, List<String> placeholders) throws Exception {
+        String content = Files.readString(path);
+        return placeholders.stream().noneMatch(content::contains);
     }
 
     private Path datedLocalOut(SmartEsbRewriteProperties properties, SmartEsbDailyTransactionPlan plan) {

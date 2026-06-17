@@ -1,21 +1,21 @@
-# 交易重构代码审查：{transaction}
+# 交易重构代码审查：{{transaction}}
 
 ## 问题摘要
 
 | 严重级别 | 标题 | 新代码位置 | 老代码位置 | 协议依据 | 业务影响 |
 | --- | --- | --- | --- | --- | --- |
-{finding_rows}
+{{FINDING_ROWS}}
 
 ## 审查范围
 
-- 交易：`{transaction}`
-- 说明：{description}
-- 老项目：`{old_project}`
-- 重构项目：`{new_project}`
-- 重构设计：`{reconstructed_design}`
-- 8583 文档：`{old_8583_doc}`
-- JSON 文档：`{json_doc}`
-- 映射文档：`{mapping_doc}`
+- 交易：`{{transaction}}`
+- 说明：{{description}}
+- 老项目：`{{old_project}}`
+- 重构项目：`{{new_project}}`
+- 重构设计：`{{reconstructed_design}}`
+- 8583 文档：`{{old_8583_doc}}`
+- JSON 文档：`{{json_doc}}`
+- 映射文档：`{{mapping_doc}}`
 
 ## 详细报告链接
 
@@ -31,12 +31,12 @@
 
 ## 未验证范围摘要
 
-{unverified_summary}
+{{UNVERIFIED_SUMMARY}}
 
 ## 最小验证测试
 
-{verification_tests_summary}
+{{VERIFICATION_TESTS_SUMMARY}}
 
 ## 总结
 
-{summary}
+{{SUMMARY}}

@@ -40,22 +40,40 @@ class SmartEsbPreparationTest {
 
         Path dayOut = tempDir.resolve("mirror/2026-06-16");
         assertThat(localOut).isEqualTo(dayOut);
-        assertThat(dayOut.resolve("index.md")).content().contains("<!-- OPENCODE_APPEND:index -->");
-        assertThat(dayOut.resolve("summary.md")).content().contains("<!-- OPENCODE_APPEND:summary -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content().contains("<!-- OPENCODE_APPEND:review -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/mapping-matrix.md")).content().contains("<!-- OPENCODE_APPEND:mapping-matrix -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/sections/06-code-standard.md")).content().contains("<!-- OPENCODE_APPEND:06-code-standard -->");
+        assertThat(dayOut.resolve("index.md")).content()
+                .contains("## 交易审查状态", "{{TRANSACTION_ROWS}}")
+                .doesNotContain("<!-- OPENCODE_APPEND:index -->");
+        assertThat(dayOut.resolve("summary.md")).content()
+                .contains("## 交易审查状态", "{{SUMMARY_TRANSACTION_ROWS}}")
+                .doesNotContain("<!-- OPENCODE_APPEND:summary -->");
+        assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
+                .contains("# 交易重构代码审查：CaRolloutRepeal", "{{FINDING_ROWS}}", "{{SUMMARY}}")
+                .doesNotContain("<!-- OPENCODE_APPEND:review -->");
+        assertThat(dayOut.resolve("reports/CaRolloutRepeal/mapping-matrix.md")).content()
+                .contains("8583 字段/来源", "{{MAPPING_ROWS}}")
+                .doesNotContain("<!-- OPENCODE_APPEND:mapping-matrix -->");
+        assertThat(dayOut.resolve("reports/CaRolloutRepeal/sections/06-code-standard.md")).content()
+                .contains("# 代码规范审查", "{{CODE_STANDARD_REVIEW}}")
+                .doesNotContain("<!-- OPENCODE_APPEND:06-code-standard -->");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/summary.json")).content().isEqualTo("{}\n");
 
         JsonNode task = objectMapper.readTree(dayOut.resolve("tasks/transaction-CaRolloutRepeal.json").toFile());
         assertThat(task.path("task_path").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\tasks\\transaction-CaRolloutRepeal.json");
         assertThat(task.at("/output/review_md").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\reports\\CaRolloutRepeal\\review.md");
-        assertThat(task.at("/output_markers/code_standard_md").asText()).isEqualTo("<!-- OPENCODE_APPEND:06-code-standard -->");
-        assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("idea_mcp");
+        assertThat(task.at("/output_placeholders/code_standard_md/0").asText()).isEqualTo("{{CODE_STANDARD_REVIEW}}");
+        assertThat(task.has("output_markers")).isFalse();
+        assertThat(task.at("/skill/preferred_reader").asText()).isEqualTo("opencode_native");
+        assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("opencode_native");
+        assertThat(task.at("/skill/fallback_file_tools").toString()).contains("intellij-idea_replace_text_in_file");
+        assertThat(task.at("/rules/writer_preference").asText()).contains("优先使用 OpenCode 原生文件编辑工具");
+        assertThat(task.at("/rules/writer_preference").asText()).contains("路径字段只能使用 filePath");
+        assertThat(task.at("/rules/template_contract").asText()).contains("只能替换 output_placeholders");
 
         JsonNode indexInputs = objectMapper.readTree(dayOut.resolve("index_inputs.json").toFile());
         assertThat(indexInputs.at("/tasks/0/transaction").asText()).isEqualTo("CaRolloutRepeal");
         assertThat(indexInputs.at("/output/index_md").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\index.md");
+        assertThat(indexInputs.at("/output_placeholders/index_md/0").asText()).isEqualTo("{{OVERALL_CONCLUSION}}");
+        assertThat(indexInputs.has("output_markers")).isFalse();
     }
 
     @Test
@@ -80,6 +98,10 @@ class SmartEsbPreparationTest {
         assertThat(task.path("task_path").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/tasks/transaction-CaRolloutRepeal.json");
         assertThat(task.at("/output/review_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/reports/CaRolloutRepeal/review.md");
         assertThat(task.at("/documents/old_8583").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/8583.md");
+        assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("opencode_native");
+        assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
+                .contains("- 老项目：`/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc`")
+                .contains("- 8583 文档：`/home/wangyufeng/upfs-nl-json/doc/docment/8583.md`");
 
         JsonNode indexInputs = objectMapper.readTree(dayOut.resolve("index_inputs.json").toFile());
         assertThat(indexInputs.at("/output/index_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/index.md");

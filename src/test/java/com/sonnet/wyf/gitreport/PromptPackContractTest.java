@@ -44,6 +44,8 @@ class PromptPackContractTest {
         );
         assertThat(worker).contains(
                 "写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "禁止使用 `pathInProject`、`file_path`、`path`",
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
@@ -54,6 +56,8 @@ class PromptPackContractTest {
         assertThat(synthesis).contains(
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
                 "写入最终报告时，优先使用 OpenCode 原生文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "禁止使用 `pathInProject`、`file_path`、`path`",
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
@@ -65,6 +69,46 @@ class PromptPackContractTest {
         assertThat(worker).doesNotContain("替换 `detail.output.report_marker`", "保留 marker", "移除 marker");
         assertThat(synthesis).doesNotContain("final_report_marker", "保留 marker", "移除 marker");
         assertThat(synthesis).doesNotContain("每个开发人员最多 2 个", "总报告最多 10 个", "每个片段最多 12 行");
+    }
+
+    @Test
+    void smartEsbPromptPackUsesLinuxReadyControlledReadWriteContract() throws Exception {
+        Path promptPack = Path.of("src/main/resources/smartesb-rewrite-code-review-prompt-pack");
+
+        String worker = Files.readString(promptPack.resolve("prompts/run-transaction-review.md"));
+        String rerun = Files.readString(promptPack.resolve("prompts/rerun-single-transaction.md"));
+        String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-index.md"));
+
+        assertThat(worker).contains(
+                "读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具",
+                "写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "禁止使用 `pathInProject`、`file_path`、`path`",
+                "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
+                "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
+                "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
+                "只能替换 task JSON 中 `output_placeholders` 列出的占位符",
+                "写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符"
+        );
+        assertThat(rerun).contains(
+                "写文件优先使用 OpenCode 原生文件编辑工具",
+                "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "只能替换 `output_placeholders` 中列出的占位符"
+        );
+        assertThat(synthesis).contains(
+                "读取汇总输入和交易摘要时，优先使用 OpenCode 原生文件读取工具",
+                "写入 `index.md` 和 `summary.md` 时，优先使用 OpenCode 原生文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
+                "只能替换 `index_inputs.output_placeholders` 中列出的占位符"
+        );
+        assertThat(worker).doesNotContain("IDEA MCP 写文件不可用");
+        assertThat(rerun).doesNotContain("写文件必须使用 IDEA MCP");
+        assertThat(synthesis).doesNotContain("IDEA MCP 不可用");
+        assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
+        assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
+        assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
     }
 
     @Test

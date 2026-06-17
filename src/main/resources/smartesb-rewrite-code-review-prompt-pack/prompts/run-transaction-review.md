@@ -11,10 +11,11 @@
 - `output.matrix_md`
 - `output.sections_dir`
 - `output.code_standard_md`
-- `output_markers`
+- `output_placeholders`
 - `skill.summary_schema`
+- `skill.preferred_reader`
 - `skill.preferred_writer`
-- `skill.idea_mcp_write_tools`
+- `skill.fallback_file_tools`
 - `rules.precreated_outputs`
 
 ## 严格边界
@@ -24,7 +25,8 @@
 - 不读取全量源码或全量文档。
 - 不把大段代码和大段文档粘进上下文。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
-- 先按小块写入 `review.md`、`sections/*.md` 和 `mapping-matrix.md`，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
+- 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
+- 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
 
 ## 输出语言
 
@@ -32,9 +34,19 @@
 
 允许保留原文的内容仅限代码标识符、类名、方法名、包名、文件路径、行号、SQL 片段、8583 域号、JSON path、协议字段名、枚举值、错误码、工具名和命令名。`summary_json` 的 key 保持模板要求，便于主 agent 汇总；其中面向用户阅读的 value 必须使用中文。
 
-## MCP 优先行为矩阵
+## 受控读写与取证规则
 
-除读取 task JSON 和必要的准备脚本输出外，默认优先使用 MCP：
+读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+
+写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+
+如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
+
+两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+
+不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件或协议文档。
+
+代码定位、调用链取证和数据库证据仍按 MCP 优先：
 
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
@@ -43,7 +55,7 @@
 | 定位老项目代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字扩大搜索。 |
 | 读取老项目代码 | `intellij-index_ide_read_file` | MCP 不可用时该范围标记未验证；禁止使用 shell。 |
 | 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到新增文件或明显索引过期时先同步，再重试一次。 |
-| 写 Markdown/JSON 报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
+| 写 Markdown/JSON 报告 | OpenCode 原生文件编辑工具，fallback 为 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
 
 禁止把源码读取、报告写入、索引同步、数据库证据获取交给 shell。
@@ -54,52 +66,53 @@
 
 - 每次写入不超过 `rules.markdown_max_chars_per_write` 字符，默认 6000。
 - 每次写入不超过 `rules.markdown_max_lines_per_write` 行，默认 120。
-- 只使用 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` 写入已存在文件，不要调用 shell。
+- 优先使用 OpenCode 原生文件编辑工具写入已存在文件；如需 fallback，只使用 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file`，不要调用 shell。
 
-### IDEA MCP 写入方式
+### 受控文件写入方式
 
 1. 先确认目标输出文件已经存在：`output.review_md`、`output.matrix_md`、`output.findings_md`、`output.code_chains_md`、`output.protocol_review_md`、`output.behavior_review_md`、`output.verification_md`、`output.code_standard_md`、`output.summary_json`。
-2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要调用 `intellij-idea_create_new_file`，不要用 shell 创建。
-3. 每个 Markdown 文件初始内容必须包含一个唯一追加标记。不要猜标记；必须使用 task JSON 的 `output_markers`：
+2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要调用文件创建工具，不要用 shell 创建。
+3. 每个 Markdown 文件初始内容必须是准备器写入的完整模板，并包含 task JSON 中 `output_placeholders` 列出的占位符。不要猜占位符，不要新增占位符：
 
-- `output.review_md` 使用 `output_markers.review_md`
-- `output.matrix_md` 使用 `output_markers.matrix_md`
-- `output.findings_md` 使用 `output_markers.findings_md`
-- `output.code_chains_md` 使用 `output_markers.code_chains_md`
-- `output.protocol_review_md` 使用 `output_markers.protocol_review_md`
-- `output.behavior_review_md` 使用 `output_markers.behavior_review_md`
-- `output.verification_md` 使用 `output_markers.verification_md`
-- `output.code_standard_md` 使用 `output_markers.code_standard_md`
+- `output.review_md` 只替换 `output_placeholders.review_md`
+- `output.matrix_md` 只替换 `output_placeholders.matrix_md`
+- `output.findings_md` 只替换 `output_placeholders.findings_md`
+- `output.code_chains_md` 只替换 `output_placeholders.code_chains_md`
+- `output.protocol_review_md` 只替换 `output_placeholders.protocol_review_md`
+- `output.behavior_review_md` 只替换 `output_placeholders.behavior_review_md`
+- `output.verification_md` 只替换 `output_placeholders.verification_md`
+- `output.code_standard_md` 只替换 `output_placeholders.code_standard_md`
 
 示例格式：
 
 ```text
-<!-- OPENCODE_APPEND:01-findings -->
+{{FINDINGS_DETAIL}}
 ```
 
-4. 追加内容时，用 `intellij-idea_replace_text_undoable` 替换对应文件的 exact marker：
+4. 写入内容时，用 OpenCode 原生文件编辑工具替换对应文件的 exact placeholder；如果原生编辑工具不可用，再用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file`：
 
 ```text
-oldText: "<output_markers 中该文件的 marker>"
-newText: "<小块中文内容>\n\n<同一个 marker>"
+oldText: "<output_placeholders 中该文件的 placeholder>"
+newText: "<小块中文内容>"
 ```
 
-5. `summary_json` 初始内容为 `{}`，用 `intellij-idea_replace_text_in_file` 将整个 `{}` 替换为合法 JSON。
-6. `projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
+5. `summary_json` 初始内容为 `{}`，用受控文件编辑工具将整个 `{}` 替换为合法 JSON。
+6. 使用 IntelliJ MCP fallback 时，`projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
+7. 写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符；发现残留必须立即继续替换或返回 `BLOCKED`。
 
 ### 写入失败处理
 
-IDEA MCP 写文件不可用、目标路径不可写或 MCP 返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
+OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标路径不可写或工具返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
 
 如果一个章节超过限制，按 finding、表格行分组、调用链阶段或协议域分组拆分。不要把完整报告、完整矩阵或大段代码一次性写入一个 heredoc。
 
 ## Shell 工具禁止规则
 
-子 agent 不允许使用 shell、bash 或 PowerShell 做源码读取、报告写入、文件创建、索引同步或数据库取证。遇到 MCP 不可用时，按“写入失败处理”或 `unverified` 规则处理。
+子 agent 不允许使用 shell、bash、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 做源码读取、报告写入、文件创建、索引同步或数据库取证。遇到受控读写工具或 MCP 不可用时，按“写入失败处理”或 `unverified` 规则处理。
 
 ## 审查顺序
 
-以下每一步默认按“`intellij-index` 定位/读取，`intellij-idea` 写入，`intellij-db` 取数据库证据”的 MCP 顺序执行；MCP 不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
+以下每一步默认按“`intellij-index` 定位/读取代码，受控文件编辑工具写报告，`intellij-db` 取数据库证据”的顺序执行；受控工具不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
 
 1. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `new_project` 中定位重构交易代码。
    - 优先 `intellij-index_ide_find_class` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
