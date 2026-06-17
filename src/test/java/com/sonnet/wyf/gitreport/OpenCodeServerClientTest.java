@@ -16,9 +16,10 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class OpenCodeServerClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final List<String> requests = new ArrayList<>();
+    private final List<String> requests = new CopyOnWriteArrayList<>();
     private HttpServer server;
 
     @TempDir
@@ -92,6 +93,7 @@ class OpenCodeServerClientTest {
         assertThat(client.isHealthy(serverUrl)).isTrue();
         OpenCodeSession session = client.createSession(serverUrl, tempDir, "git-report-author", "spdb-new-api/minimax-m2.7", 60);
         client.sendPromptAsync(serverUrl, tempDir, session.id(), "hello prompt", "spdb-new-api/minimax-m2.7", 60);
+        waitUntil(() -> requests.stream().anyMatch(request -> request.startsWith("POST /session/session-1/prompt_async")));
         assertThat(client.getSessionStatus(serverUrl, tempDir, session.id())).isEqualTo("idle");
         assertThat(client.abortSession(serverUrl, tempDir, session.id())).isFalse();
 
@@ -200,6 +202,37 @@ class OpenCodeServerClientTest {
     }
 
     @Test
+    void promptAsyncSubmissionDoesNotWaitForResponseCompletion() throws Exception {
+        AtomicInteger promptRequests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(Executors.newCachedThreadPool());
+        server.createContext("/session/session-1/prompt_async", exchange -> {
+            promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            JsonNode json = objectMapper.readTree(body);
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory")
+                    + " text=" + json.at("/parts/0/text").asText());
+            sleep(5_000);
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        URI serverUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+
+        assertTimeoutPreemptively(Duration.ofMillis(500),
+                () -> client.sendPromptAsync(serverUrl, tempDir, "session-1", "hello prompt", "", 10));
+
+        waitUntil(() -> promptRequests.get() == 1);
+        assertThat(promptRequests).hasValue(1);
+        assertThat(requests).containsExactly(
+                "POST /session/session-1/prompt_async directoryHeader=" + tempDir.toAbsolutePath().normalize() + " text=hello prompt"
+        );
+    }
+
+    @Test
     void infersSubmittedWhenV2MessageListHasNoAssistantMessage() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/session/session-1/message", exchange -> respond(exchange, 200, """
@@ -265,5 +298,16 @@ class OpenCodeServerClientTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(exception);
         }
+    }
+
+    private void waitUntil(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            sleep(20);
+        }
+        throw new AssertionError("condition was not met before timeout");
     }
 }

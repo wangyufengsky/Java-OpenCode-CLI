@@ -95,4 +95,54 @@ class SynthesisInputWriterTest {
         assertThat(root.path("code_snippets")).hasSize(1);
         assertThat(author.path("code_snippets").get(0).path("snippet").asText().lines().count()).isLessThanOrEqualTo(3);
     }
+
+    @Test
+    void keepsCurrentSnippetCompressionConfigurationWhenRequested() throws Exception {
+        Path out = tempDir.resolve("out-current-limits");
+        Files.createDirectories(out.resolve("reports/author-001-alice"));
+        Path personReport = out.resolve("reports/author-001-alice/person-report.md");
+        Path qualitySummary = out.resolve("reports/author-001-alice/quality-summary.json");
+        Files.writeString(personReport, "个人报告内容\n");
+        objectMapper.writeValue(qualitySummary.toFile(), Map.of(
+                "author", "Alice <alice@example.com>",
+                "status", "completed",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "unverified", List.of(),
+                "summary", "无",
+                "code_snippets", List.of(
+                        Map.of("file", "A.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "A", "suggestion", "fix", "snippet", "a\n".repeat(40)),
+                        Map.of("file", "B.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "B", "suggestion", "fix", "snippet", "b\n".repeat(40)),
+                        Map.of("file", "C.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "C", "suggestion", "fix", "snippet", "c\n".repeat(40)),
+                        Map.of("file", "D.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "D", "suggestion", "fix", "snippet", "d\n".repeat(40)),
+                        Map.of("file", "E.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "E", "suggestion", "fix", "snippet", "e\n".repeat(40)),
+                        Map.of("file", "F.java", "line_start", 1, "line_end", 20, "dimension", "risk_control", "severity", "medium", "reason", "F", "suggestion", "fix", "snippet", "f\n".repeat(40))
+                )
+        ));
+
+        SynthesisInput options = new SynthesisInput();
+        options.setSnippetsPerAuthor(5);
+        options.setSnippetsTotal(30);
+        options.setSnippetLines(20);
+
+        Path output = new SynthesisInputWriter(objectMapper).write(
+                out.resolve("runs/synthesis/synthesis-inputs.json"),
+                Map.of("metadata", Map.of("project_id", "demo", "project_name", "Demo"), "totals", Map.of(), "ranking", List.of()),
+                Map.of("tasks", List.of(Map.of(
+                        "author_key", "author-001-alice",
+                        "author", "Alice <alice@example.com>",
+                        "report_md", personReport.toString(),
+                        "quality_summary_json", qualitySummary.toString(),
+                        "report_markdown_link", "[person-report.md](reports/author-001-alice/person-report.md)"
+                ))),
+                Map.of("rankings", List.of()),
+                options
+        );
+
+        JsonNode root = objectMapper.readTree(output.toFile());
+        JsonNode snippets = root.path("code_snippets");
+        assertThat(snippets).hasSize(5);
+        assertThat(snippets.get(0).path("snippet").asText().lines().count()).isLessThanOrEqualTo(20);
+    }
 }

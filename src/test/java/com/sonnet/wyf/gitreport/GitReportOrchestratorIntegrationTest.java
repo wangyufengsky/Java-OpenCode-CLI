@@ -20,6 +20,7 @@ import com.sonnet.wyf.gitreport.scoring.QualityScoreCalculator;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
+import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -96,7 +97,7 @@ class GitReportOrchestratorIntegrationTest {
         orchestrator().run(properties);
 
         assertThat(out.resolve("quality-scores.json")).exists();
-        assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
+        assertThat(Files.readString(out.resolve("code-contribution-report.md"))).contains("# 代码提交量统计报告");
         JsonNode qualityScores = objectMapper.readTree(out.resolve("quality-scores.json").toFile());
         assertThat(qualityScores.get("rankings")).hasSize(1);
         JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
@@ -238,7 +239,7 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
         assertThat(out.resolve("quality-scores.json")).exists();
-        assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
+        assertThat(Files.readString(out.resolve("code-contribution-report.md"))).contains("# 代码提交量统计报告");
     }
 
     @Test
@@ -304,7 +305,7 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json: " + bobDetail));
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
         assertThat(out.resolve("quality-scores.json")).exists();
-        assertThat(out.resolve("code-contribution-report.md")).hasContent("最终中文总报告\n");
+        assertThat(Files.readString(out.resolve("code-contribution-report.md"))).contains("# 代码提交量统计报告");
         assertThat(bobReport).hasContent("Bob 个人报告\n");
     }
 
@@ -325,6 +326,7 @@ class GitReportOrchestratorIntegrationTest {
                 new OpenCodeServerManager(client, scheduledProbeWaiter),
                 new OpenCodeServerTaskRunner(client, scheduledProbeWaiter),
                 new AuthorOutputValidator(objectMapper),
+                new FinalReportValidator(),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new SynthesisInputWriter(objectMapper),
                 new RunStatusRepository(objectMapper),
@@ -490,7 +492,39 @@ class GitReportOrchestratorIntegrationTest {
         }
         Path synthesisInputsPath = Path.of(extractPath(prompt, "synthesis_inputs_json:"));
         JsonNode synthesisInputs = objectMapper.readTree(synthesisInputsPath.toFile());
-        Files.writeString(Path.of(synthesisInputs.path("final_report").asText()), "最终中文总报告\n");
+        Files.writeString(Path.of(synthesisInputs.path("final_report").asText()), validFinalReport());
+    }
+
+    private String validFinalReport() {
+        return """
+                # 代码提交量统计报告
+
+                ## 1. 统计范围
+                内容
+
+                ## 2. 总体汇总
+                内容
+
+                ## 3. 人员工作量排名与分析
+                | 最终排名 | 初始排名 | 开发人员 |
+                | ---: | ---: | --- |
+                | 1 | 1 | Alice |
+
+                ## 4. 个人报告链接
+                [person-report.md](reports/author-001-alice/person-report.md)
+
+                ## 5. 未完成个人报告
+                无
+
+                ## 6. 统计口径
+                内容
+
+                ## 7. 风险与偏差
+                内容
+
+                ## 8. 典型低质量代码片段
+                无
+                """;
     }
 
     private void writeAuthorDetail(Path detailPath, String author, Path personReport, Path qualitySummary) throws IOException {

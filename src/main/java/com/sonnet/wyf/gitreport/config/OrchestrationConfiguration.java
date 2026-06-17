@@ -11,6 +11,7 @@ import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
 import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
+import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -20,6 +21,11 @@ public class OrchestrationConfiguration {
     @Bean
     AuthorOutputValidator authorOutputValidator(ObjectMapper objectMapper) {
         return new AuthorOutputValidator(objectMapper);
+    }
+
+    @Bean
+    FinalReportValidator finalReportValidator() {
+        return new FinalReportValidator();
     }
 
     @Bean
@@ -40,6 +46,7 @@ public class OrchestrationConfiguration {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
+            FinalReportValidator finalReportValidator,
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
@@ -53,6 +60,7 @@ public class OrchestrationConfiguration {
                 serverManager,
                 taskRunner,
                 outputValidator,
+                finalReportValidator,
                 qualityScoresWriter,
                 synthesisInputWriter,
                 statusRepository,

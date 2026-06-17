@@ -14,6 +14,7 @@ import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
 import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
 import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
+import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -41,6 +42,7 @@ public class GitReportOrchestrator {
     private final OpenCodeServerManager serverManager;
     private final OpenCodeServerTaskRunner taskRunner;
     private final AuthorOutputValidator outputValidator;
+    private final FinalReportValidator finalReportValidator;
     private final QualityScoresWriter qualityScoresWriter;
     private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
@@ -54,6 +56,7 @@ public class GitReportOrchestrator {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
+            FinalReportValidator finalReportValidator,
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
@@ -66,6 +69,7 @@ public class GitReportOrchestrator {
         this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.outputValidator = outputValidator;
+        this.finalReportValidator = finalReportValidator;
         this.qualityScoresWriter = qualityScoresWriter;
         this.synthesisInputWriter = synthesisInputWriter;
         this.statusRepository = statusRepository;
@@ -261,6 +265,9 @@ public class GitReportOrchestrator {
                     }
                     state = timedOut ? "timeout" : "failed";
                     error = validation.error();
+                    if (runResult != null) {
+                        error = appendAuthorRerunHint(error, authorKey);
+                    }
                     if (!error.isBlank()) {
                         log.warn("AUTHOR_VALIDATION_FAILED reason=\"{}\" authorKey={} author={} attempt={}", error, authorKey, author, attempt);
                     }
@@ -268,6 +275,9 @@ public class GitReportOrchestrator {
                     error = sanitizeOpenCodeError(exception);
                     log.warn("AUTHOR_ATTEMPT_EXCEPTION reason=\"{}\" authorKey={} author={} attempt={}",
                             error, authorKey, author, attempt, exception);
+                }
+                if (runResult != null) {
+                    error = appendAuthorRerunHint(error, authorKey);
                 }
                 lastError = error;
                 writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, error);
@@ -333,14 +343,15 @@ public class GitReportOrchestrator {
                 promptFile,
                 properties.getOpencode().getSynthesisMessage(),
                 runDir,
-                () -> finalReportReady(finalReport),
+                () -> finalReportValidator.validate(finalReport).ok(),
                 properties.getOpencode().getSessionModel(),
                 properties.getOpencode().getCreateSessionTimeoutSeconds(),
                 properties.getOpencode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 properties.getOpencode().getTimeoutMinutes()
         );
-        boolean ok = waitForFinalReport(finalReport, properties.getOpencode().getOutputWaitSeconds());
+        FinalReportValidator.Validation finalReportValidation = waitForFinalReport(finalReport, properties.getOpencode().getOutputWaitSeconds());
+        boolean ok = finalReportValidation.ok();
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("state", ok ? "completed" : "failed");
         status.put("sessionId", result.sessionId());
@@ -351,33 +362,39 @@ public class GitReportOrchestrator {
         status.put("aborted", result.aborted());
         status.put("serverState", result.serverState());
         status.put("finalReportOk", ok);
+        status.put("finalReportError", finalReportValidation.error());
         status.put("synthesisInputs", synthesisInputs.toString());
         status.put("finishedAt", OffsetDateTime.now().toString());
         statusRepository.write(runDir.resolve("status.json"), status);
         if (!ok) {
-            log.error("Synthesis failed: sessionId={}, timedOut={}, finalReportOk={}, status={}",
+            log.error("Synthesis failed: sessionId={}, timedOut={}, finalReportOk={}, error=\"{}\", status={}",
                     result.sessionId(),
                     result.timedOut(),
                     ok,
+                    finalReportValidation.error(),
                     runDir.resolve("status.json"));
-            throw new IllegalStateException("synthesis failed");
+            throw new IllegalStateException("synthesis failed: " + finalReportValidation.error());
         }
         log.info("Synthesis completed: finalReport={}", finalReport);
     }
 
-    private boolean waitForFinalReport(Path finalReport, int outputWaitSeconds) throws Exception {
+    private FinalReportValidator.Validation waitForFinalReport(Path finalReport, int outputWaitSeconds) throws Exception {
         return outputWaiter.waitFor(
-                () -> finalReportReady(finalReport),
-                Boolean::booleanValue,
-                () -> false,
+                () -> finalReportValidator.validate(finalReport),
+                FinalReportValidator.Validation::ok,
+                () -> finalReportValidator.validate(finalReport),
                 Duration.ofSeconds(Math.max(0, outputWaitSeconds)),
                 Duration.ofSeconds(2)
         );
     }
 
-    private boolean finalReportReady(Path finalReport) throws IOException {
-        String report = Files.exists(finalReport) ? Files.readString(finalReport) : "";
-        return !report.isBlank() && !report.contains(GitReportConstants.REPORT_MARKER);
+    private String appendAuthorRerunHint(String error, String authorKey) {
+        String hint = "rerun with mode=rerun rerun.type=author rerun.id=" + authorKey;
+        String base = error == null ? "" : error;
+        if (base.contains("rerun.type=author")) {
+            return base;
+        }
+        return base.isBlank() ? hint : base + "; " + hint;
     }
 
     private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, OpenCodeRunResult runResult, String error) throws IOException {

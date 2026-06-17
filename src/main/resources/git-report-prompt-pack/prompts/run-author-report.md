@@ -23,6 +23,22 @@ detail_json: <path>
 - 按 `detail.execution_worklist` 的 `step` 升序执行，不得把 worklist 当作最终响应。
 - 不得在 `quality-summary.json` 中写入 `quality_adjustment_percent` 或 `components[].score`；质量评分由 Java 统一计算。
 
+## MCP 读写与取证规则
+
+- 读取 `detail_json`、Top 文件和候选代码片段时，必须使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入个人报告和质量摘要时，必须使用 `intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- 不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content` 读取或写入报告、质量摘要或代码文件。
+- MCP 写入不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 公共代码取证优先使用 `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
+- 代码取证 MCP 不足时写入 `unverified`，不要写无证据 finding。
+
+## Markdown 表格安全
+
+- 将 `|` 转义为 `\|`。
+- 单元格换行压缩为短语或 `<br>`。
+- 长表格分块写入时每块重复表头。
+- marker 不得放在表格内部，必须放在表格块之间或文末。
+
 ## 写入规则
 
 - 必须立即调用可用的文件读取/写入工具完成读写，不要只回复计划、摘要或“准备写入”。
@@ -102,4 +118,21 @@ DONE person_report_md=<path> quality_summary_json=<path>
 - `rule_id` 必须稳定、可聚合。
 - `evidence` 必须写明证据，不得只写结论。
 - 缺少证据的维度不要写 finding，写入 `unverified` 说明原因。
-- `code_snippets` 只记录低质量代码片段，每个人最多 3 个，每个片段最多 12 行，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号。
+- `code_snippets` 只记录可安全摘录的低质量代码片段，数量和长度以 Java 生成与压缩后的输入为准，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；确需说明敏感内容时用 `[REDACTED]`。
+
+`code_snippets[]` 中对象字段：
+
+```json
+{
+  "file": "",
+  "line_start": 0,
+  "line_end": 0,
+  "dimension": "risk_control",
+  "severity": "medium",
+  "reason": "",
+  "suggestion": "",
+  "snippet": ""
+}
+```
+
+每个 `code_snippets[]` 必须能对应同文件或同维度的负向 finding；否则不要写入片段。

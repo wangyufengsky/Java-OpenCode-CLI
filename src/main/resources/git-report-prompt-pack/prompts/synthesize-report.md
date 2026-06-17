@@ -38,7 +38,21 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 - 个人报告链接必须直接使用 `synthesis_inputs.authors[].report_markdown_link`，禁止写绝对路径。
 - 统计口径必须以 `synthesis_inputs.metadata.include` 和 `synthesis_inputs.metadata.exclude` 为准。
 - Markdown、Office、普通文档、媒体和归档文件不得写入统计依据、质量依据或分数依据。
-- 从 `synthesis_inputs.code_snippets` 中汇总典型低质量代码片段；该列表已由 Java 限制为每个开发人员最多 2 个、总报告最多 10 个、每个片段最多 12 行。
+- 从 `synthesis_inputs.code_snippets` 中汇总典型低质量代码片段；以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准。
+
+## MCP 读写规则
+
+- 读取 `synthesis_inputs_json` 时，必须使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入最终报告时，必须使用 `intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- 不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content` 读取或写入最终报告、输入 JSON 或个人报告。
+- MCP 写入不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+
+## Markdown 表格安全
+
+- 将 `|` 转义为 `\|`。
+- 单元格换行压缩为短语或 `<br>`。
+- 排名表、个人报告链接表、未完成个人报告表分块写入时每块重复表头。
+- marker 不得放在表格内部，必须放在表格块之间或文末。
 
 ## 输出要求
 

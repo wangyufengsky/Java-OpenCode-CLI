@@ -89,6 +89,133 @@ class AuthorOutputValidatorAndQualityScoresTest {
     }
 
     @Test
+    void validatorRejectsInvalidFindingEnumAndMissingSnippetFields() throws Exception {
+        Path report = tempDir.resolve("person-report.md");
+        Path quality = tempDir.resolve("quality-summary.json");
+        Files.writeString(report, "个人报告内容\n");
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [
+                    {"dimension": "tests", "polarity": "negative", "severity": "medium", "rule_id": "bad", "file": "A.java", "line_start": 1, "line_end": 1, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
+                  ],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+        AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
+
+        AuthorValidationResult enumResult = validator.validate(report, quality);
+
+        assertThat(enumResult.ok()).isFalse();
+        assertThat(enumResult.error()).contains("dimension");
+
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [
+                    {"file": "A.java", "dimension": "risk_control", "severity": "medium", "reason": "原因", "suggestion": "建议", "snippet": "code"}
+                  ],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+
+        AuthorValidationResult snippetResult = validator.validate(report, quality);
+
+        assertThat(snippetResult.ok()).isFalse();
+        assertThat(snippetResult.error()).contains("line_start");
+    }
+
+    @Test
+    void validatorRejectsUnredactedSensitiveSnippetAndSnippetWithoutNegativeFinding() throws Exception {
+        Path report = tempDir.resolve("person-report.md");
+        Path quality = tempDir.resolve("quality-summary.json");
+        Files.writeString(report, "个人报告内容\n");
+        AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
+
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [
+                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "secret", "file": "A.java", "line_start": 1, "line_end": 1, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
+                  ],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [
+                    {"file": "A.java", "line_start": 1, "line_end": 1, "dimension": "risk_control", "severity": "medium", "reason": "原因", "suggestion": "建议", "snippet": "password = \\"plain-secret\\""}
+                  ],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+
+        AuthorValidationResult sensitiveResult = validator.validate(report, quality);
+
+        assertThat(sensitiveResult.ok()).isFalse();
+        assertThat(sensitiveResult.error()).contains("sensitive");
+
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [
+                    {"id": "F1", "dimension": "risk_control", "polarity": "positive", "severity": "medium", "rule_id": "good", "file": "A.java", "line_start": 1, "line_end": 1, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
+                  ],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [
+                    {"file": "A.java", "line_start": 1, "line_end": 1, "dimension": "risk_control", "severity": "medium", "reason": "原因", "suggestion": "建议", "snippet": "[REDACTED]"}
+                  ],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+
+        AuthorValidationResult findingResult = validator.validate(report, quality);
+
+        assertThat(findingResult.ok()).isFalse();
+        assertThat(findingResult.error()).contains("negative finding");
+    }
+
+    @Test
+    void validatorAcceptsValidQualitySummaryWithSnippetEvidence() throws Exception {
+        Path report = tempDir.resolve("person-report.md");
+        Path quality = tempDir.resolve("quality-summary.json");
+        Files.writeString(report, "个人报告内容\n");
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [
+                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check", "file": "A.java", "line_start": 1, "line_end": 3, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
+                  ],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [
+                    {"file": "A.java", "line_start": 1, "line_end": 3, "dimension": "risk_control", "severity": "medium", "reason": "原因", "suggestion": "建议", "snippet": "if (input == null) return;"}
+                  ],
+                  "unverified": [],
+                  "summary": "无"
+                }
+                """);
+        AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
+
+        AuthorValidationResult result = validator.validate(report, quality);
+
+        assertThat(result.ok()).isTrue();
+    }
+
+    @Test
     void qualityScoresWriterCreatesFinalRankingFromJavaScores() throws Exception {
         Path quality = tempDir.resolve("quality-summary.json");
         Files.writeString(quality, """

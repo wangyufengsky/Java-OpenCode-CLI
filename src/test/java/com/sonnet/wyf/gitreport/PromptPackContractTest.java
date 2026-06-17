@@ -25,6 +25,39 @@ class PromptPackContractTest {
     }
 
     @Test
+    void javaPromptPackEmbedsMcpAndMarkdownSafetyContract() throws Exception {
+        Path promptPack = Path.of("src/main/resources/git-report-prompt-pack");
+
+        String worker = Files.readString(promptPack.resolve("prompts/run-author-report.md"));
+        String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-report.md"));
+        String combined = worker + "\n" + synthesis;
+
+        assertThat(combined).contains(
+                "intellij-idea_read_file",
+                "intellij-idea_get_file_text_by_path",
+                "intellij-idea_replace_text_in_file",
+                "intellij-idea_replace_text_undoable",
+                "intellij-index_ide_find_references",
+                "intellij-index_ide_call_hierarchy",
+                "intellij-index_ide_type_hierarchy",
+                "intellij-index_ide_find_implementations"
+        );
+        assertThat(worker).contains(
+                "不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content`",
+                "MCP 写入不可用时必须返回 `BLOCKED`",
+                "代码取证 MCP 不足时写入 `unverified`",
+                "将 `|` 转义为 `\\|`",
+                "marker 不得放在表格内部"
+        );
+        assertThat(synthesis).contains(
+                "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
+                "不得使用 shell、PowerShell、Python、`cat`、`type` 或 `Get-Content`",
+                "将 `|` 转义为 `\\|`"
+        );
+        assertThat(synthesis).doesNotContain("每个开发人员最多 2 个", "总报告最多 10 个", "每个片段最多 12 行");
+    }
+
+    @Test
     void promptBuilderLoadsClasspathResourcesAndEmbedsTemplates() throws Exception {
         PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
 

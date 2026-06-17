@@ -105,8 +105,7 @@ public class OpenCodeServerTaskRunner {
             return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, state);
         }
         if (isTerminalSuccess(state)) {
-            monitor.write("server_terminal_success", state, false, false);
-            return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, false, false, state);
+            monitor.write("server_terminal_success_waiting_for_output", state, false, false);
         }
         return null;
     }

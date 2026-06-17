@@ -21,6 +21,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -310,7 +311,41 @@ public class OpenCodeServerClient {
                 .build();
         log.info("OpenCode API prompt request: endpoint={}, sessionId={}, textChars={}, timeoutSeconds={}",
                 request.uri(), sessionId, text.length(), requestTimeoutSeconds);
-        sendJson(request);
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .whenComplete((response, failure) -> logPromptSubmissionResult(request, sessionId, response, failure));
+    }
+
+    private void logPromptSubmissionResult(HttpRequest request, String sessionId, HttpResponse<String> response, Throwable failure) {
+        if (failure != null) {
+            Throwable cause = unwrapCompletionException(failure);
+            if (cause instanceof HttpTimeoutException) {
+                log.info("OpenCode prompt_async response timed out after submission; continuing with session polling: endpoint={}, sessionId={}, reason={}",
+                        request.uri(),
+                        sessionId,
+                        cause.toString());
+            } else {
+                log.warn("OpenCode prompt_async request completed exceptionally after submission: endpoint={}, sessionId={}, reason={}",
+                        request.uri(),
+                        sessionId,
+                        cause.toString());
+            }
+            return;
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            log.warn("OpenCode prompt_async request returned non-success after submission: endpoint={}, sessionId={}, status={}, body={}",
+                    request.uri(),
+                    sessionId,
+                    response.statusCode(),
+                    response.body());
+        }
+    }
+
+    private Throwable unwrapCompletionException(Throwable failure) {
+        Throwable current = failure;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     public String getSessionStatus(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {

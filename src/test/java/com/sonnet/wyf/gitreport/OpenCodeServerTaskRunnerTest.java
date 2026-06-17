@@ -94,6 +94,56 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
+    void waitsForOutputWhenAsyncPromptSubmissionReturnsBeforeServerLeavesIdle() throws Exception {
+        Path output = tempDir.resolve("delayed-done.txt");
+        AtomicInteger statusRequests = new AtomicInteger();
+        httpExecutor = Executors.newCachedThreadPool();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(httpExecutor);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"idle-race-session\"}"));
+        server.createContext("/session/idle-race-session/prompt_async", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            sleep(300);
+            Files.writeString(output, "done");
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/idle-race-session/message", exchange -> {
+            statusRequests.incrementAndGet();
+            respond(exchange, 200, """
+                    [
+                        {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                        {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"finish":"stop","time":{"created":2,"completed":3}}
+                    ]
+                    """);
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("worker-prompt.md");
+        Files.writeString(promptFile, "delayed output");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "idle-race-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("idle-race-run"),
+                () -> Files.exists(output),
+                "",
+                60,
+                60,
+                50,
+                1
+        );
+
+        assertThat(result.sessionId()).isEqualTo("idle-race-session");
+        assertThat(result.completedByOutput()).isTrue();
+        assertThat(statusRequests.get()).isGreaterThan(1);
+    }
+
+    @Test
     void recordsTimeoutWithoutAbortWhenUsingOpenCodeV2Api() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"timeout-session\"}"));
@@ -236,6 +286,60 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
+    void continuesPollingWhenPromptAsyncResponseTimesOutAfterSubmission() throws Exception {
+        Path output = tempDir.resolve("prompt-timeout-done.txt");
+        AtomicInteger promptRequests = new AtomicInteger();
+        httpExecutor = Executors.newCachedThreadPool();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(httpExecutor);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"prompt-timeout-session\"}"));
+        server.createContext("/session/prompt-timeout-session/prompt_async", exchange -> {
+            promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (body.contains("worker message") && body.contains("submitted before response")) {
+                try {
+                    Thread.sleep(1_500);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                Files.writeString(output, "done");
+            }
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/prompt-timeout-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}}
+                ]
+                """));
+        server.start();
+
+        Path promptFile = tempDir.resolve("worker-prompt.md");
+        Files.writeString(promptFile, "submitted before response");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "prompt-timeout-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("prompt-timeout-run"),
+                () -> Files.exists(output),
+                "",
+                60,
+                1,
+                50,
+                1
+        );
+
+        assertThat(result.sessionId()).isEqualTo("prompt-timeout-session");
+        assertThat(result.completedByOutput()).isTrue();
+        assertThat(promptRequests).hasValue(1);
+    }
+
+    @Test
     void pollingUsesSpringTaskSchedulerInsteadOfThreadSleep() throws Exception {
         Path source = Path.of("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
         String code = Files.readString(source);
@@ -270,5 +374,14 @@ class OpenCodeServerTaskRunnerTest {
 
     private ScheduledProbeWaiter scheduledProbeWaiter() {
         return new ScheduledProbeWaiter(taskScheduler());
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 }
