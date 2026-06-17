@@ -5,13 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.file.Path;
 
 public class SmartEsbRewriteProperties {
-    private String out = "D:\\review-output\\smartesb-rewrite-review";
+    private String out = "/home/wangyufeng/review-output/smartesb-rewrite-review";
     private Path localOut;
     private Path transactionPlanDir = Path.of("smartesb-transactions");
-    private String oldProject = "D:\\upfs\\qianzhi\\upfs-cloud-xc";
-    private String newProject = "D:\\upfs-nl-json";
-    private String legacyIndex = "D:\\upfs-nl-json\\doc\\index.md";
-    private String docRoot = "D:\\upfs-nl-json\\doc\\docment";
+    private String oldProject = "/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc";
+    private String newProject = "/home/wangyufeng/upfs-nl-json";
+    private String legacyIndex = "/home/wangyufeng/upfs-nl-json/doc/index.md";
+    private String docRoot = "/home/wangyufeng/upfs-nl-json/doc/docment";
     @JsonProperty("old-8583-doc")
     private String old8583Doc;
     private String jsonDoc;

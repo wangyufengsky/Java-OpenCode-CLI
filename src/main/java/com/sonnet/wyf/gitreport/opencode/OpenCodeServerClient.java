@@ -61,13 +61,10 @@ public class OpenCodeServerClient {
         if (title != null && !title.isBlank()) {
             body.put("title", title);
         }
-        if (sessionModel != null && !sessionModel.isBlank()) {
-            body.put("model", sessionModelObject(sessionModel));
-        }
         String requestBody = objectMapper.writeValueAsString(body);
         URI endpoint = resolveWithDirectory(serverUrl, "/session", directory, "");
-        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, sessionModel={}, timeoutSeconds={}, body={}",
-                endpoint, directory, title, sessionModel, requestTimeoutSeconds, requestBody);
+        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, timeoutSeconds={}, body={}",
+                endpoint, directory, title, requestTimeoutSeconds, requestBody);
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .timeout(requestTimeout(requestTimeoutSeconds))
                 .header("content-type", "application/json")
@@ -78,6 +75,10 @@ public class OpenCodeServerClient {
         try {
             json = sendJson(request);
         } catch (HttpTimeoutException exception) {
+            String recoveredSessionId = recoverCreatedSessionAfterTimeout(serverUrl, directory, title, requestTimeoutSeconds, exception);
+            if (!recoveredSessionId.isBlank()) {
+                return new OpenCodeSession(recoveredSessionId);
+            }
             throw new IllegalStateException("OpenCode /session timed out after "
                     + Math.max(1, requestTimeoutSeconds)
                     + "s, directory=" + directory
@@ -96,16 +97,42 @@ public class OpenCodeServerClient {
         return new OpenCodeSession(id);
     }
 
-    private Map<String, Object> sessionModelObject(String model) {
-        String trimmed = model.trim();
-        int slash = trimmed.indexOf('/');
-        if (slash <= 0 || slash == trimmed.length() - 1) {
-            throw new IllegalArgumentException("opencode session-model must use provider/model format when set: " + model);
+    private String recoverCreatedSessionAfterTimeout(URI serverUrl, String directory, String title, int requestTimeoutSeconds, HttpTimeoutException timeout) throws InterruptedException {
+        if (title == null || title.isBlank()) {
+            return "";
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("providerID", trimmed.substring(0, slash));
-        result.put("id", trimmed.substring(slash + 1));
-        return result;
+        try {
+            URI endpoint = resolveWithDirectory(serverUrl, "/session", directory, "");
+            HttpRequest request = HttpRequest.newBuilder(endpoint)
+                    .timeout(Duration.ofSeconds(Math.max(2, Math.min(10, requestTimeoutSeconds))))
+                    .GET()
+                    .build();
+            log.warn("OpenCode /session create timed out; checking whether session was created anyway: endpoint={}, title={}",
+                    endpoint, title);
+            JsonNode response = sendJson(request);
+            JsonNode sessions = response.isArray() ? response : response.path("data");
+            if (!sessions.isArray()) {
+                return "";
+            }
+            for (JsonNode session : sessions) {
+                if (title.equals(firstText(session, "title"))) {
+                    String id = firstText(session, "id");
+                    if (!id.isBlank()) {
+                        log.warn("Recovered OpenCode session after create timeout: sessionId={}, title={}", id, title);
+                        return id;
+                    }
+                }
+            }
+            return "";
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw exception;
+        } catch (Exception recoveryException) {
+            timeout.addSuppressed(recoveryException);
+            log.warn("OpenCode session recovery after create timeout failed: title={}, reason={}",
+                    title, recoveryException.toString());
+            return "";
+        }
     }
 
     private Map<String, Object> promptModelObject(String model) {

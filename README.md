@@ -82,7 +82,7 @@ opencode-runner:
 - `rerun.type`：补跑类型。
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
-- `opencode.session-model`：可选，创建 OpenCode session 时显式指定模型，格式 `provider/model`。内网自定义 provider 建议配置，例如 `spdb-new-api/minimax-m2.7`。
+- `opencode.session-model`：可选，向 OpenCode 提交 prompt 时显式指定模型，格式 `provider/model`。内网自定义 provider 建议配置，例如 `spdb-new-api/minimax-m2.7`。
 - `opencode.request-timeout-seconds`：单次调用 OpenCode Server API 的 HTTP 超时，例如创建 session、提交 prompt；和整个任务的 `timeout-minutes` 不是同一个超时。
 - `opencode.environment`：Java 托管启动 `opencode serve` 时注入的环境变量。内网/离线环境默认设置 `OPENCODE_DISABLE_MODELS_FETCH=true`，避免 OpenCode 创建 session 时联网拉取 `models.dev`。
 
@@ -181,8 +181,8 @@ project:
   run-id:
 
 paths:
-  repo: "D:/workspace/upfs-production"
-  out: "D:/reports/git-code-contribution/2026-06-15"
+  repo: "/home/wangyufeng/workspace/upfs-production"
+  out: "/home/wangyufeng/reports/git-code-contribution/2026-06-15"
 
 git:
   since: "2026-06-01"
@@ -219,13 +219,13 @@ synthesis-input:
 核心字段：
 
 ```yaml
-out: "D:/review-output/smartesb-rewrite-review"
+out: "/home/wangyufeng/review-output/smartesb-rewrite-review"
 local-out:
 transaction-plan-dir: "src/main/resources/smartesb-transactions"
-old-project: "D:/upfs/qianzhi/upfs-cloud-xc"
-new-project: "D:/upfs-nl-json"
-legacy-index: "D:/upfs-nl-json/doc/index.md"
-doc-root: "D:/upfs-nl-json/doc/docment"
+old-project: "/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc"
+new-project: "/home/wangyufeng/upfs-nl-json"
+legacy-index: "/home/wangyufeng/upfs-nl-json/doc/index.md"
+doc-root: "/home/wangyufeng/upfs-nl-json/doc/docment"
 old-8583-doc:
 json-doc:
 mapping-doc:
@@ -282,7 +282,7 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 会在创建 session 时按 `opencode.session-model` 写入模型，并在 prompt 请求中继续带同一个模型；创建 session 的模型字段为 `model.providerID` + `model.id`，prompt 请求的模型字段为 `model.providerID` + `model.modelID`。
+OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 创建 session 时只写入 `title`，模型只在 prompt 请求中按 `opencode.session-model` 写入；prompt 请求的模型字段为 `model.providerID` + `model.modelID`。
 
 内网自定义 provider 推荐显式配置：
 
@@ -311,8 +311,8 @@ opencode-runner:
 
 如果手工启动 OpenCode Server，需要在启动前设置同一个环境变量：
 
-```powershell
-$env:OPENCODE_DISABLE_MODELS_FETCH = "true"
+```bash
+export OPENCODE_DISABLE_MODELS_FETCH=true
 opencode serve --port 4096 --hostname 127.0.0.1 --print-logs --log-level DEBUG
 ```
 
@@ -323,7 +323,7 @@ opencode-runner:
   opencode:
     environment:
       OPENCODE_DISABLE_MODELS_FETCH: "true"
-      OPENCODE_MODELS_PATH: "D:/opencode/models.json"
+      OPENCODE_MODELS_PATH: "/home/wangyufeng/opencode/models.json"
 ```
 
 ## Session 监控

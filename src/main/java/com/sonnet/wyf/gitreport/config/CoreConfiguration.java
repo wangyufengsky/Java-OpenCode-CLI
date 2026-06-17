@@ -1,8 +1,8 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.GitReportProperties;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
+import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
@@ -31,7 +31,7 @@ public class CoreConfiguration {
     }
 
     @Bean(destroyMethod = "shutdown")
-    ThreadPoolTaskExecutor authorTaskExecutor(GitReportProperties properties) {
+    ThreadPoolTaskExecutor authorTaskExecutor(OpenCodeRunnerProperties properties) {
         int concurrency = Math.max(1, Math.min(
                 properties.getOpencode().getConcurrency(),
                 properties.getOpencode().getMaxConcurrency()

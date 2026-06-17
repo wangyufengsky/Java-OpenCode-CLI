@@ -29,6 +29,7 @@ class GitReportPropertiesTest {
                         "git-report.opencode.server-url=http://127.0.0.1:4097",
                         "git-report.opencode.manage-server=false",
                         "git-report.opencode.server-start-timeout-seconds=12",
+                        "git-report.opencode.create-session-timeout-seconds=11",
                         "git-report.opencode.request-timeout-seconds=90",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
                         "git-report.synthesis-input.snippets-per-author=5",
@@ -50,6 +51,7 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getServerUrl()).isEqualTo("http://127.0.0.1:4097");
                     assertThat(properties.getOpencode().isManageServer()).isFalse();
                     assertThat(properties.getOpencode().getServerStartTimeoutSeconds()).isEqualTo(12);
+                    assertThat(properties.getOpencode().getCreateSessionTimeoutSeconds()).isEqualTo(11);
                     assertThat(properties.getOpencode().getRequestTimeoutSeconds()).isEqualTo(90);
                     assertThat(properties.getOpencode().getConcurrency()).isEqualTo(6);
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);

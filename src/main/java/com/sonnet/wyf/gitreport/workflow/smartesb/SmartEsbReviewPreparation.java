@@ -33,10 +33,10 @@ public class SmartEsbReviewPreparation {
     }
 
     public Path prepare(SmartEsbRewriteProperties properties, SmartEsbDailyTransactionPlan plan, boolean overwrite) throws IOException {
-        if (!isWindowsAbsolutePath(properties.getOut())) {
-            throw new IllegalArgumentException("SmartESB out must be a Windows absolute path: " + properties.getOut());
+        if (!isAbsoluteLogicalPath(properties.getOut())) {
+            throw new IllegalArgumentException("SmartESB out must be an absolute path: " + properties.getOut());
         }
-        String logicalOut = appendWindows(properties.getOut(), plan.date().toString());
+        String logicalOut = appendLogical(properties.getOut(), plan.date().toString());
         Path out = properties.getLocalOut() == null ? Path.of(logicalOut) : properties.getLocalOut().resolve(plan.date().toString());
         if (Files.exists(out) && anyChild(out) && !overwrite) {
             throw new IllegalStateException("SmartESB output already exists and is not empty: " + out);
@@ -60,8 +60,8 @@ public class SmartEsbReviewPreparation {
         summary.put("transaction_plan", plan.source().toString());
         summary.put("out", logicalOut);
         summary.put("local_out", properties.getLocalOut() == null ? null : out.toString());
-        summary.put("old_project", normalizeWindows(properties.getOldProject()));
-        summary.put("new_project", normalizeWindows(properties.getNewProject()));
+        summary.put("old_project", normalizeLogical(properties.getOldProject()));
+        summary.put("new_project", normalizeLogical(properties.getNewProject()));
         summary.put("transaction_count", tasks.size());
         summary.put("transactions", tasks.stream().map(task -> Map.of(
                 "transaction", task.get("transaction"),
@@ -80,8 +80,8 @@ public class SmartEsbReviewPreparation {
                 "transaction_review", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md"
         ));
         indexInputs.put("output", Map.of(
-                "index_md", appendWindows(logicalOut, "index.md"),
-                "summary_md", appendWindows(logicalOut, "summary.md")
+                "index_md", appendLogical(logicalOut, "index.md"),
+                "summary_md", appendLogical(logicalOut, "summary.md")
         ));
         indexInputs.put("output_markers", TOP_LEVEL_OUTPUT_MARKERS);
         indexInputs.put("prompts", Map.of(
@@ -110,9 +110,9 @@ public class SmartEsbReviewPreparation {
             boolean overwrite
     ) throws IOException {
         String slug = slugify(transaction.name());
-        String logicalReportDir = appendWindows(logicalOut, "reports", slug);
-        String logicalSectionsDir = appendWindows(logicalReportDir, "sections");
-        String logicalTaskPath = appendWindows(logicalOut, "tasks", "transaction-" + slug + ".json");
+        String logicalReportDir = appendLogical(logicalOut, "reports", slug);
+        String logicalSectionsDir = appendLogical(logicalReportDir, "sections");
+        String logicalTaskPath = appendLogical(logicalOut, "tasks", "transaction-" + slug + ".json");
         Path reportDir = localOut.resolve("reports").resolve(slug);
         Path sectionsDir = reportDir.resolve("sections");
         Files.createDirectories(sectionsDir);
@@ -138,27 +138,27 @@ public class SmartEsbReviewPreparation {
         writeTextIfMissing(files.get("summary_json"), "{}\n", overwrite);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("dir", logicalReportDir);
-        output.put("review_md", appendWindows(logicalReportDir, "review.md"));
-        output.put("summary_json", appendWindows(logicalReportDir, "summary.json"));
-        output.put("matrix_md", appendWindows(logicalReportDir, "mapping-matrix.md"));
+        output.put("review_md", appendLogical(logicalReportDir, "review.md"));
+        output.put("summary_json", appendLogical(logicalReportDir, "summary.json"));
+        output.put("matrix_md", appendLogical(logicalReportDir, "mapping-matrix.md"));
         output.put("sections_dir", logicalSectionsDir);
-        output.put("findings_md", appendWindows(logicalSectionsDir, "01-findings.md"));
-        output.put("code_chains_md", appendWindows(logicalSectionsDir, "02-code-chains.md"));
-        output.put("protocol_review_md", appendWindows(logicalSectionsDir, "03-protocol-review.md"));
-        output.put("behavior_review_md", appendWindows(logicalSectionsDir, "04-behavior-review.md"));
-        output.put("verification_md", appendWindows(logicalSectionsDir, "05-verification.md"));
-        output.put("code_standard_md", appendWindows(logicalSectionsDir, "06-code-standard.md"));
+        output.put("findings_md", appendLogical(logicalSectionsDir, "01-findings.md"));
+        output.put("code_chains_md", appendLogical(logicalSectionsDir, "02-code-chains.md"));
+        output.put("protocol_review_md", appendLogical(logicalSectionsDir, "03-protocol-review.md"));
+        output.put("behavior_review_md", appendLogical(logicalSectionsDir, "04-behavior-review.md"));
+        output.put("verification_md", appendLogical(logicalSectionsDir, "05-verification.md"));
+        output.put("code_standard_md", appendLogical(logicalSectionsDir, "06-code-standard.md"));
         Map<String, Object> task = new LinkedHashMap<>();
         task.put("transaction", transaction.name());
         task.put("description", transaction.description());
-        task.put("old_project", normalizeWindows(properties.getOldProject()));
-        task.put("new_project", normalizeWindows(properties.getNewProject()));
+        task.put("old_project", normalizeLogical(properties.getOldProject()));
+        task.put("new_project", normalizeLogical(properties.getNewProject()));
         task.put("documents", Map.of(
-                "legacy_index", normalizeWindows(properties.getLegacyIndex()),
-                "old_8583", normalizeWindows(firstNonBlank(properties.getOld8583Doc(), appendWindows(properties.getDocRoot(), "8583.md"))),
-                "json", normalizeWindows(firstNonBlank(properties.getJsonDoc(), appendWindows(properties.getDocRoot(), "json.md"))),
-                "mapping_8583_to_json", normalizeWindows(firstNonBlank(properties.getMappingDoc(), appendWindows(properties.getDocRoot(), "8583 to json.md"))),
-                "reconstructed_design", normalizeWindows(firstNonBlank(properties.getReconstructedDesign(), appendWindows(properties.getDocRoot(), "重构项目详细设计文档.md")))
+                "legacy_index", normalizeLogical(properties.getLegacyIndex()),
+                "old_8583", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "8583.md"))),
+                "json", normalizeLogical(firstNonBlank(properties.getJsonDoc(), appendLogical(properties.getDocRoot(), "json.md"))),
+                "mapping_8583_to_json", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))),
+                "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md")))
         ));
         task.put("skill", Map.of(
                 "prompt", "classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-transaction-review.md",
@@ -193,27 +193,35 @@ public class SmartEsbReviewPreparation {
         return slug.isBlank() ? "transaction" : slug;
     }
 
-    static boolean isWindowsAbsolutePath(String path) {
-        return path != null && path.matches("^[A-Za-z]:[\\\\/].*");
+    static boolean isAbsoluteLogicalPath(String path) {
+        return path != null && (path.startsWith("/") || path.matches("^[A-Za-z]:[\\\\/].*"));
     }
 
-    static String appendWindows(String base, String... segments) {
-        String result = normalizeWindows(base);
+    static String appendLogical(String base, String... segments) {
+        String result = normalizeLogical(base);
+        String separator = usesWindowsSeparators(result) ? "\\" : "/";
         for (String segment : segments) {
-            String normalized = normalizeWindows(segment);
-            while (normalized.startsWith("\\")) {
+            String normalized = normalizeLogical(segment);
+            while (normalized.startsWith("/") || normalized.startsWith("\\")) {
                 normalized = normalized.substring(1);
             }
-            if (!result.endsWith("\\")) {
-                result += "\\";
+            if (!result.endsWith(separator)) {
+                result += separator;
             }
             result += normalized;
         }
         return result;
     }
 
-    private static String normalizeWindows(String value) {
-        return value == null ? "" : value.replace('/', '\\');
+    private static String normalizeLogical(String value) {
+        if (value == null) {
+            return "";
+        }
+        return usesWindowsSeparators(value) ? value.replace('/', '\\') : value.replace('\\', '/');
+    }
+
+    private static boolean usesWindowsSeparators(String value) {
+        return value != null && value.matches("^[A-Za-z]:[\\\\/].*");
     }
 
     private static String firstNonBlank(String preferred, String fallback) {

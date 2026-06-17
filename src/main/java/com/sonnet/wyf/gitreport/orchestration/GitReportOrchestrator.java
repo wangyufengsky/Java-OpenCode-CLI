@@ -218,6 +218,7 @@ public class GitReportOrchestrator {
                             runDir,
                             () -> outputValidator.validate(reportMd, qualitySummaryJson).ok(),
                             properties.getOpencode().getSessionModel(),
+                            properties.getOpencode().getCreateSessionTimeoutSeconds(),
                             properties.getOpencode().getRequestTimeoutSeconds(),
                             OPENCODE_POLL_MILLIS,
                             properties.getOpencode().getTimeoutMinutes()
@@ -309,6 +310,7 @@ public class GitReportOrchestrator {
                 runDir,
                 () -> finalReportReady(finalReport),
                 properties.getOpencode().getSessionModel(),
+                properties.getOpencode().getCreateSessionTimeoutSeconds(),
                 properties.getOpencode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 properties.getOpencode().getTimeoutMinutes()

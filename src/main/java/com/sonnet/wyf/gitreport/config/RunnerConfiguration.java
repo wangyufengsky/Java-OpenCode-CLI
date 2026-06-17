@@ -17,6 +17,7 @@ import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbSummaryValidator;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbWorkflowChain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.io.ResourceLoader;
 
 import java.util.List;
@@ -64,9 +65,10 @@ public class RunnerConfiguration {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             ScheduledProbeWaiter scheduledProbeWaiter,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AsyncTaskExecutor authorTaskExecutor
     ) {
-        return new SmartEsbWorkflowChain(chainConfigLoader, runnerProperties, planLoader, preparation, promptBuilder, summaryValidator, serverManager, taskRunner, scheduledProbeWaiter, objectMapper);
+        return new SmartEsbWorkflowChain(chainConfigLoader, runnerProperties, planLoader, preparation, promptBuilder, summaryValidator, serverManager, taskRunner, scheduledProbeWaiter, objectMapper, authorTaskExecutor);
     }
 
     @Bean

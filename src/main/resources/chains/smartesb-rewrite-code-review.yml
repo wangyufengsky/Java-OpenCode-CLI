@@ -1,10 +1,10 @@
-out: "D:/review-output/smartesb-rewrite-review"
+out: "/home/wangyufeng/review-output/smartesb-rewrite-review"
 local-out:
 transaction-plan-dir: "src/main/resources/smartesb-transactions"
-old-project: "D:/upfs/qianzhi/upfs-cloud-xc"
-new-project: "D:/upfs-nl-json"
-legacy-index: "D:/upfs-nl-json/doc/index.md"
-doc-root: "D:/upfs-nl-json/doc/docment"
+old-project: "/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc"
+new-project: "/home/wangyufeng/upfs-nl-json"
+legacy-index: "/home/wangyufeng/upfs-nl-json/doc/index.md"
+doc-root: "/home/wangyufeng/upfs-nl-json/doc/docment"
 old-8583-doc:
 json-doc:
 mapping-doc:

@@ -50,8 +50,8 @@ class ArchitectureConventionsTest {
         assertThat(client).doesNotContain("/api/session");
         assertThat(client).doesNotContain("x-opencode-directory");
         assertThat(client).contains("result.put(\"providerID\"");
-        assertThat(client).contains("result.put(\"id\"");
         assertThat(client).contains("result.put(\"modelID\"");
+        assertThat(client).doesNotContain("body.put(\"model\", sessionModelObject");
         assertThat(application).doesNotContain("\n    model:");
         assertThat(example).doesNotContain("\n    model:");
     }

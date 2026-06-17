@@ -51,6 +51,7 @@ public class GitReportWorkflowChain implements WorkflowChain {
         properties.getOpencode().setServerUrl(settings.getServerUrl());
         properties.getOpencode().setManageServer(settings.isManageServer());
         properties.getOpencode().setServerStartTimeoutSeconds(settings.getServerStartTimeoutSeconds());
+        properties.getOpencode().setCreateSessionTimeoutSeconds(settings.getCreateSessionTimeoutSeconds());
         properties.getOpencode().setRequestTimeoutSeconds(settings.getRequestTimeoutSeconds());
         properties.getOpencode().setConcurrency(settings.getConcurrency());
         properties.getOpencode().setTimeoutMinutes(settings.getTimeoutMinutes());

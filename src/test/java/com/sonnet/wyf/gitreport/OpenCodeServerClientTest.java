@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,9 +48,7 @@ class OpenCodeServerClientTest {
                     + " " + exchange.getRequestURI().getPath()
                     + " query=" + exchange.getRequestURI().getRawQuery()
                     + " title=" + json.at("/title").asText()
-                    + " modelProvider=" + json.at("/model/providerID").asText()
-                    + " modelId=" + json.at("/model/id").asText()
-                    + " hasLegacyModelId=" + json.at("/model/modelID").isTextual());
+                    + " hasModel=" + json.has("model"));
             respond(exchange, 200, "{\"id\":\"session-1\"}");
         });
         server.createContext("/session/session-1/prompt_async", exchange -> {
@@ -84,9 +83,46 @@ class OpenCodeServerClientTest {
         assertThat(client.abortSession(serverUrl, tempDir, session.id())).isFalse();
 
         assertThat(requests).containsExactly(
-                "POST /session query=directory=" + urlEncodedTempDir() + " title=git-report-author modelProvider=spdb-new-api modelId=minimax-m2.7 hasLegacyModelId=false",
+                "POST /session query=directory=" + urlEncodedTempDir() + " title=git-report-author hasModel=false",
                 "POST /session/session-1/prompt_async query=directory=" + urlEncodedTempDir() + " text=hello prompt modelProvider=spdb-new-api modelId=minimax-m2.7",
                 "GET /session/session-1/message query=directory=" + urlEncodedTempDir() + "&limit=100"
+        );
+    }
+
+    @Test
+    void recoversCreatedSessionWhenCreateResponseTimesOutButSessionIsListed() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(Executors.newCachedThreadPool());
+        server.createContext("/session", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                requests.add(exchange.getRequestMethod()
+                        + " " + exchange.getRequestURI().getPath()
+                        + " query=" + exchange.getRequestURI().getRawQuery());
+                sleep(1_500);
+                respond(exchange, 200, "{\"id\":\"late-session\"}");
+                return;
+            }
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery());
+            respond(exchange, 200, """
+                    [
+                      {"id":"recovered-session","title":"git-report-author-timeout","time":{"created":2}},
+                      {"id":"older-session","title":"git-report-author-timeout","time":{"created":1}}
+                    ]
+                    """);
+        });
+        server.start();
+
+        URI serverUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+
+        OpenCodeSession session = client.createSession(serverUrl, tempDir, "git-report-author-timeout", "", 1);
+
+        assertThat(session.id()).isEqualTo("recovered-session");
+        assertThat(requests).containsExactly(
+                "POST /session query=directory=" + urlEncodedTempDir(),
+                "GET /session query=directory=" + urlEncodedTempDir()
         );
     }
 
@@ -147,6 +183,15 @@ class OpenCodeServerClientTest {
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String urlEncodedTempDir() {

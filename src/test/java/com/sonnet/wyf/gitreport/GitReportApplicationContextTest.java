@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,5 +34,20 @@ class GitReportApplicationContextTest {
             assertThat(context.getBean("authorTaskExecutor")).isInstanceOf(AsyncTaskExecutor.class);
             assertThat(context.getBean("openCodeTaskScheduler")).isInstanceOf(TaskScheduler.class);
         });
+    }
+
+    @Test
+    void authorExecutorUsesRunnerOpenCodeConcurrency() {
+        contextRunner
+                .withPropertyValues(
+                        "opencode-runner.opencode.concurrency=2",
+                        "opencode-runner.opencode.max-concurrency=5"
+                )
+                .run(context -> {
+                    ThreadPoolTaskExecutor executor = context.getBean("authorTaskExecutor", ThreadPoolTaskExecutor.class);
+
+                    assertThat(executor.getCorePoolSize()).isEqualTo(2);
+                    assertThat(executor.getMaxPoolSize()).isEqualTo(2);
+                });
     }
 }

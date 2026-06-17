@@ -15,11 +15,13 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    # OpenCode 可能已创建 session 但 /session 响应不结束；短超时用于尽快进入 session 列表恢复。
+    create-session-timeout-seconds: 10
     request-timeout-seconds: 60
     opencode-bin: "opencode"
-    # 可选。OpenCode 1.17 的 /session 允许指定 model；格式 provider/model。
-    # 内网自定义 provider 建议显式配置，避免 OpenCode 创建 session 时解析默认模型。
-    session-model: ""
+    # 可选。OpenCode 1.17 的 /prompt_async 允许指定 model；格式 provider/model。
+    # 内网自定义 provider 建议显式配置，避免 OpenCode 提交 prompt 时解析默认模型。
+    session-model: "spdb-new-api/minimax-m2.7"
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30

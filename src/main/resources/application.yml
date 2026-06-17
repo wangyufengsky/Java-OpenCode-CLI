@@ -1,5 +1,5 @@
 opencode-runner:
-  enabled: false
+  enabled: true
   active-chain: "git-code-contribution-report"
   mode: "full"
   run-date:
@@ -11,8 +11,10 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    create-session-timeout-seconds: 10
     request-timeout-seconds: 60
     opencode-bin: "opencode"
+    session-model: "spdb-new-api/minimax-m2.7"
     concurrency: 6
     timeout-minutes: 40
     output-wait-seconds: 30

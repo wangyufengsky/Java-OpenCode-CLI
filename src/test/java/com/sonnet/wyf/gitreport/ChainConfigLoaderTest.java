@@ -25,7 +25,7 @@ class ChainConfigLoaderTest {
         SmartEsbRewriteProperties properties = new ChainConfigLoader(new DefaultResourceLoader())
                 .load("classpath:chains", "smartesb-rewrite-code-review", SmartEsbRewriteProperties.class);
 
-        assertThat(properties.getOut()).isEqualTo("D:/review-output/smartesb-rewrite-review");
+        assertThat(properties.getOut()).isEqualTo("/home/wangyufeng/review-output/smartesb-rewrite-review");
         assertThat(properties.getTransactionPlanDir()).hasToString("src/main/resources/smartesb-transactions");
         assertThat(properties.getBatchSize()).isEqualTo(5);
     }

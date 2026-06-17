@@ -41,6 +41,7 @@ public class OpenCodeServerTaskRunner {
             Path runDir,
             CompletionProbe completionProbe,
             String sessionModel,
+            int createSessionTimeoutSeconds,
             int requestTimeoutSeconds,
             int pollMillis,
             int timeoutMinutes
@@ -48,7 +49,7 @@ public class OpenCodeServerTaskRunner {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
-        OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, requestTimeoutSeconds);
+        OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, createSessionTimeoutSeconds);
         RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
         monitor.write("created", "unknown", false, false);

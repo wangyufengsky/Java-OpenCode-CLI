@@ -4,8 +4,8 @@ project:
   run-id:
 
 paths:
-  repo: "D:/workspace/upfs-production"
-  out: "D:/reports/git-code-contribution/2026-06-15"
+  repo: "/home/wangyufeng/workspace/upfs-production"
+  out: "/home/wangyufeng/reports/git-code-contribution/2026-06-15"
 
 git:
   since: "2026-06-01"

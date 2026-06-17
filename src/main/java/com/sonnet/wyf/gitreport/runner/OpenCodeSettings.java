@@ -7,6 +7,7 @@ public class OpenCodeSettings {
     private String serverUrl = "http://127.0.0.1:4096";
     private boolean manageServer = true;
     private int serverStartTimeoutSeconds = 30;
+    private int createSessionTimeoutSeconds = 10;
     private int requestTimeoutSeconds = 60;
     private int concurrency = 6;
     private int timeoutMinutes = 40;
@@ -53,6 +54,14 @@ public class OpenCodeSettings {
 
     public void setRequestTimeoutSeconds(int requestTimeoutSeconds) {
         this.requestTimeoutSeconds = requestTimeoutSeconds;
+    }
+
+    public int getCreateSessionTimeoutSeconds() {
+        return createSessionTimeoutSeconds;
+    }
+
+    public void setCreateSessionTimeoutSeconds(int createSessionTimeoutSeconds) {
+        this.createSessionTimeoutSeconds = createSessionTimeoutSeconds;
     }
 
     public int getConcurrency() {

@@ -13,6 +13,7 @@ import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
 
 public class SmartEsbWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-rewrite-code-review";
@@ -36,6 +39,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     private final OpenCodeServerTaskRunner taskRunner;
     private final ScheduledProbeWaiter outputWaiter;
     private final ObjectMapper objectMapper;
+    private final AsyncTaskExecutor transactionTaskExecutor;
 
     public SmartEsbWorkflowChain(
             ChainConfigLoader configLoader,
@@ -47,7 +51,8 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             ScheduledProbeWaiter outputWaiter,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AsyncTaskExecutor transactionTaskExecutor
     ) {
         this.configLoader = configLoader;
         this.runnerProperties = runnerProperties;
@@ -59,6 +64,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         this.taskRunner = taskRunner;
         this.outputWaiter = outputWaiter;
         this.objectMapper = objectMapper;
+        this.transactionTaskExecutor = transactionTaskExecutor;
     }
 
     @Override
@@ -106,42 +112,80 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     ) throws Exception {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
-        List<String> failures = new ArrayList<>();
+        int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
+        log.info("Starting SmartESB transaction reviews: taskCount={}, concurrency={}", transactions.size(), concurrency);
+        List<Future<String>> futures = new ArrayList<>();
         for (SmartEsbDailyTransactionPlan.Transaction transaction : transactions) {
-            Map<String, Object> task = taskByTransaction(indexInputs, transaction.name());
-            Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(transaction.name()));
-            Files.createDirectories(runDir);
-            Path promptFile = runDir.resolve("worker-prompt.md");
-            String summarySchema = ((Map<?, ?>) indexInputs.get("schemas")).get("transaction_summary").toString();
-            Files.writeString(promptFile, promptBuilder.buildTransactionPrompt(task.get("task_path").toString(), summarySchema));
-            Path summaryJson = localSummaryPath(out, transaction.name());
-            OpenCodeRunResult result = taskRunner.runUntil(
-                    server,
-                    Path.of(properties.getNewProject()),
-                    "smartesb-review-" + transaction.name(),
-                    promptFile,
-                    properties.getWorkerMessage(),
-                    runDir,
-                    () -> summaryValidator.validate(summaryJson).ok(),
-                    request.openCode().getSessionModel(),
-                    request.openCode().getRequestTimeoutSeconds(),
-                    OPENCODE_POLL_MILLIS,
-                    request.openCode().getTimeoutMinutes()
-            );
-            SmartEsbSummaryValidator.Validation validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
-            if (!validation.ok()) {
-                log.warn("SmartESB transaction review failed once, rerunning: transaction={}, reason={}, sessionId={}, timedOut={}",
-                        transaction.name(), validation.error(), result.sessionId(), result.timedOut());
-                rerunTransaction(properties, request, server, out, transaction, task, summarySchema, summaryJson);
-                validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
-            }
-            if (!validation.ok()) {
-                failures.add(transaction.name() + ": " + validation.error());
+            futures.add(transactionTaskExecutor.submit(transactionCallable(properties, request, out, indexInputs, server, transaction)));
+        }
+        List<String> failures = new ArrayList<>();
+        for (Future<String> future : futures) {
+            String failure = future.get();
+            if (failure != null && !failure.isBlank()) {
+                failures.add(failure);
             }
         }
         if (!failures.isEmpty()) {
             throw new IllegalStateException("SmartESB transaction review failed: " + String.join("; ", failures));
         }
+    }
+
+    private Callable<String> transactionCallable(
+            SmartEsbRewriteProperties properties,
+            WorkflowRunRequest request,
+            Path out,
+            Map<String, Object> indexInputs,
+            OpenCodeServerHandle server,
+            SmartEsbDailyTransactionPlan.Transaction transaction
+    ) {
+        return () -> {
+            try {
+                return runTransaction(properties, request, out, indexInputs, server, transaction);
+            } catch (Exception exception) {
+                log.warn("SmartESB transaction review failed: transaction={}, reason={}",
+                        transaction.name(), exception.toString());
+                return transaction.name() + ": " + exception.getMessage();
+            }
+        };
+    }
+
+    private String runTransaction(
+            SmartEsbRewriteProperties properties,
+            WorkflowRunRequest request,
+            Path out,
+            Map<String, Object> indexInputs,
+            OpenCodeServerHandle server,
+            SmartEsbDailyTransactionPlan.Transaction transaction
+    ) throws Exception {
+        Map<String, Object> task = taskByTransaction(indexInputs, transaction.name());
+        Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(transaction.name()));
+        Files.createDirectories(runDir);
+        Path promptFile = runDir.resolve("worker-prompt.md");
+        String summarySchema = ((Map<?, ?>) indexInputs.get("schemas")).get("transaction_summary").toString();
+        Files.writeString(promptFile, promptBuilder.buildTransactionPrompt(task.get("task_path").toString(), summarySchema));
+        Path summaryJson = localSummaryPath(out, transaction.name());
+        OpenCodeRunResult result = taskRunner.runUntil(
+                server,
+                Path.of(properties.getNewProject()),
+                "smartesb-review-" + transaction.name(),
+                promptFile,
+                properties.getWorkerMessage(),
+                runDir,
+                () -> summaryValidator.validate(summaryJson).ok(),
+                request.openCode().getSessionModel(),
+                request.openCode().getCreateSessionTimeoutSeconds(),
+                request.openCode().getRequestTimeoutSeconds(),
+                OPENCODE_POLL_MILLIS,
+                request.openCode().getTimeoutMinutes()
+        );
+        SmartEsbSummaryValidator.Validation validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
+        if (!validation.ok()) {
+            log.warn("SmartESB transaction review failed once, rerunning: transaction={}, reason={}, sessionId={}, timedOut={}",
+                    transaction.name(), validation.error(), result.sessionId(), result.timedOut());
+            rerunTransaction(properties, request, server, out, transaction, task, summarySchema, summaryJson);
+            validation = waitForSummary(summaryJson, request.openCode().getOutputWaitSeconds());
+        }
+        return validation.ok() ? "" : transaction.name() + ": " + validation.error();
     }
 
     private void rerunTransaction(
@@ -171,6 +215,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 runDir,
                 () -> summaryValidator.validate(summaryJson).ok(),
                 request.openCode().getSessionModel(),
+                request.openCode().getCreateSessionTimeoutSeconds(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
@@ -206,6 +251,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 runDir,
                 () -> topLevelReady(indexMd, summaryMd),
                 request.openCode().getSessionModel(),
+                request.openCode().getCreateSessionTimeoutSeconds(),
                 request.openCode().getRequestTimeoutSeconds(),
                 OPENCODE_POLL_MILLIS,
                 request.openCode().getTimeoutMinutes()
@@ -243,7 +289,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         if (properties.getLocalOut() != null) {
             return properties.getLocalOut().resolve(plan.date().toString());
         }
-        return Path.of(SmartEsbReviewPreparation.appendWindows(properties.getOut(), plan.date().toString()));
+        return Path.of(SmartEsbReviewPreparation.appendLogical(properties.getOut(), plan.date().toString()));
     }
 
     private Map<String, Object> taskByTransaction(Map<String, Object> indexInputs, String transaction) {

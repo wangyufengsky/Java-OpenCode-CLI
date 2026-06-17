@@ -18,6 +18,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenCodeServerTaskRunnerTest {
     private HttpServer server;
     private ThreadPoolTaskScheduler taskScheduler;
+    private ExecutorService httpExecutor;
 
     @TempDir
     Path tempDir;
@@ -36,6 +39,9 @@ class OpenCodeServerTaskRunnerTest {
         }
         if (taskScheduler != null) {
             taskScheduler.shutdown();
+        }
+        if (httpExecutor != null) {
+            httpExecutor.shutdownNow();
         }
     }
 
@@ -73,6 +79,7 @@ class OpenCodeServerTaskRunnerTest {
                 tempDir.resolve("run"),
                 () -> Files.exists(output),
                 "",
+                60,
                 60,
                 50,
                 1
@@ -112,6 +119,7 @@ class OpenCodeServerTaskRunnerTest {
                 tempDir.resolve("run"),
                 () -> false,
                 "",
+                60,
                 60,
                 50,
                 0
@@ -154,6 +162,7 @@ class OpenCodeServerTaskRunnerTest {
                 () -> statusRequests.get() >= 2,
                 "",
                 60,
+                60,
                 50,
                 1
         );
@@ -165,6 +174,61 @@ class OpenCodeServerTaskRunnerTest {
         assertThat(status).contains("\"phase\" : \"completed_by_output\"");
         assertThat(status).contains("\"serverState\" : \"running\"");
         assertThat(status).contains("\"pollCount\" : 2");
+    }
+
+    @Test
+    void usesShortCreateTimeoutForSessionRecoveryWithoutShorteningOtherRequests() throws Exception {
+        Path output = tempDir.resolve("recovered-done.txt");
+        AtomicInteger promptRequests = new AtomicInteger();
+        httpExecutor = Executors.newCachedThreadPool();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(httpExecutor);
+        server.createContext("/session", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                exchange.getRequestBody().readAllBytes();
+                try {
+                    Thread.sleep(1_500);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                respond(exchange, 200, "{\"id\":\"late-session\",\"title\":\"late-title\"}");
+                return;
+            }
+            respond(exchange, 200, "[{\"id\":\"late-session\",\"title\":\"late-title\"}]");
+        });
+        server.createContext("/session/late-session/prompt_async", exchange -> {
+            promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (body.contains("worker message") && body.contains("recover me")) {
+                Files.writeString(output, "done");
+            }
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("worker-prompt.md");
+        Files.writeString(promptFile, "recover me");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "late-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("recover-run"),
+                () -> Files.exists(output),
+                "",
+                1,
+                90,
+                50,
+                1
+        );
+
+        assertThat(result.sessionId()).isEqualTo("late-session");
+        assertThat(result.completedByOutput()).isTrue();
+        assertThat(promptRequests).hasValue(1);
     }
 
     @Test
