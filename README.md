@@ -21,6 +21,7 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     opencode-bin: "opencode"
+    create-session-timeout-seconds: 10
     request-timeout-seconds: 60
     timeout-minutes: 40
 ```
@@ -60,6 +61,7 @@ opencode-runner:
     server-url: "http://127.0.0.1:4096"
     manage-server: true
     server-start-timeout-seconds: 30
+    create-session-timeout-seconds: 10
     request-timeout-seconds: 60
     opencode-bin: "opencode"
     session-model: ""
@@ -83,7 +85,8 @@ opencode-runner:
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
 - `opencode.session-model`：可选，向 OpenCode 提交 prompt 时显式指定模型，格式 `provider/model`。内网自定义 provider 建议配置，例如 `spdb-new-api/minimax-m2.7`。
-- `opencode.request-timeout-seconds`：单次调用 OpenCode Server API 的 HTTP 超时，例如创建 session、提交 prompt；和整个任务的 `timeout-minutes` 不是同一个超时。
+- `opencode.create-session-timeout-seconds`：创建 session 的 HTTP 上限。Runner 会给 OpenCode session title 追加时间戳，并在 `POST /session` 未返回时并行查询 session 列表；只要发现这个唯一 title 的 session，就立即取得 sessionId 并继续提交 prompt。超时后的恢复查询只是兜底，不是主路径；不要把它当作任务运行时长配置，通常保持 10 秒左右。
+- `opencode.request-timeout-seconds`：提交 prompt 等普通 OpenCode Server API 的 HTTP 超时；和整个任务的 `timeout-minutes` 不是同一个超时。
 - `opencode.environment`：Java 托管启动 `opencode serve` 时注入的环境变量。内网/离线环境默认设置 `OPENCODE_DISABLE_MODELS_FETCH=true`，避免 OpenCode 创建 session 时联网拉取 `models.dev`。
 
 ## 运行模式
@@ -282,7 +285,7 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 创建 session 时只写入 `title`，模型只在 prompt 请求中按 `opencode.session-model` 写入；prompt 请求的模型字段为 `model.providerID` + `model.modelID`。
+OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 创建 session 时会把业务 title 扩展成带时间戳的唯一 title，并在 `/session` 响应未结束时并行用该唯一 title 查询 session 列表；这样服务端已创建 session 但 HTTP 连接未返回时，Java 也能拿到 sessionId 并提交 prompt。配置 `opencode.session-model` 后，Runner 会在创建 session 时写入 create-session 形态的模型字段 `model.providerID` + `model.id`，避免 OpenCode 在创建阶段解析默认模型；提交 prompt 时仍按 prompt 形态写入 `model.providerID` + `model.modelID`。
 
 内网自定义 provider 推荐显式配置：
 

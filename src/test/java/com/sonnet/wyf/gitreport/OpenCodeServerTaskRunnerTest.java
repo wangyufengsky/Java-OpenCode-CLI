@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -180,21 +181,24 @@ class OpenCodeServerTaskRunnerTest {
     void usesShortCreateTimeoutForSessionRecoveryWithoutShorteningOtherRequests() throws Exception {
         Path output = tempDir.resolve("recovered-done.txt");
         AtomicInteger promptRequests = new AtomicInteger();
+        AtomicReference<String> sessionTitle = new AtomicReference<>("late-title");
+        ObjectMapper objectMapper = new ObjectMapper();
         httpExecutor = Executors.newCachedThreadPool();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(httpExecutor);
         server.createContext("/session", exchange -> {
             if ("POST".equals(exchange.getRequestMethod())) {
-                exchange.getRequestBody().readAllBytes();
+                String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                sessionTitle.set(objectMapper.readTree(body).at("/title").asText());
                 try {
                     Thread.sleep(1_500);
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                 }
-                respond(exchange, 200, "{\"id\":\"late-session\",\"title\":\"late-title\"}");
+                respond(exchange, 200, "{\"id\":\"late-session\",\"title\":\"" + sessionTitle.get() + "\"}");
                 return;
             }
-            respond(exchange, 200, "[{\"id\":\"late-session\",\"title\":\"late-title\"}]");
+            respond(exchange, 200, "[{\"id\":\"late-session\",\"title\":\"" + sessionTitle.get() + "\"}]");
         });
         server.createContext("/session/late-session/prompt_async", exchange -> {
             promptRequests.incrementAndGet();
@@ -208,7 +212,7 @@ class OpenCodeServerTaskRunnerTest {
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, "recover me");
-        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
         OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
 
         OpenCodeRunResult result = runner.runUntil(

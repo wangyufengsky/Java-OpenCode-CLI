@@ -16,11 +16,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class OpenCodeServerClient {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerClient.class);
+    private static final DateTimeFormatter SESSION_TITLE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").withZone(ZoneOffset.UTC);
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -57,34 +64,25 @@ public class OpenCodeServerClient {
 
     public OpenCodeSession createSession(URI serverUrl, Path repo, String title, String sessionModel, int requestTimeoutSeconds) throws IOException, InterruptedException {
         String directory = repo.toAbsolutePath().normalize().toString();
+        String sessionTitle = uniqueSessionTitle(title);
         Map<String, Object> body = new LinkedHashMap<>();
-        if (title != null && !title.isBlank()) {
-            body.put("title", title);
+        if (sessionTitle != null && !sessionTitle.isBlank()) {
+            body.put("title", sessionTitle);
+        }
+        if (sessionModel != null && !sessionModel.isBlank()) {
+            body.put("model", sessionModelObject(sessionModel));
         }
         String requestBody = objectMapper.writeValueAsString(body);
         URI endpoint = resolveWithDirectory(serverUrl, "/session", directory, "");
-        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, timeoutSeconds={}, body={}",
-                endpoint, directory, title, requestTimeoutSeconds, requestBody);
+        log.info("OpenCode API create session request: endpoint={}, directory={}, title={}, sessionTitle={}, timeoutSeconds={}, body={}",
+                endpoint, directory, title, sessionTitle, requestTimeoutSeconds, requestBody);
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .timeout(requestTimeout(requestTimeoutSeconds))
                 .header("content-type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
                 .build();
         Instant started = Instant.now();
-        JsonNode json;
-        try {
-            json = sendJson(request);
-        } catch (HttpTimeoutException exception) {
-            String recoveredSessionId = recoverCreatedSessionAfterTimeout(serverUrl, directory, title, requestTimeoutSeconds, exception);
-            if (!recoveredSessionId.isBlank()) {
-                return new OpenCodeSession(recoveredSessionId);
-            }
-            throw new IllegalStateException("OpenCode /session timed out after "
-                    + Math.max(1, requestTimeoutSeconds)
-                    + "s, directory=" + directory
-                    + ", body=" + requestBody
-                    + ". The server is healthy but did not complete session creation; check opencode-server stderr.log and whether this directory can be opened by `opencode` directly.", exception);
-        }
+        JsonNode json = sendCreateSessionWithInFlightDiscovery(request, serverUrl, directory, sessionTitle, requestTimeoutSeconds, requestBody);
         String id = firstText(json, "id");
         if (id.isBlank()) {
             id = firstText(json.path("data"), "id");
@@ -97,12 +95,77 @@ public class OpenCodeServerClient {
         return new OpenCodeSession(id);
     }
 
+    private JsonNode sendCreateSessionWithInFlightDiscovery(
+            HttpRequest request,
+            URI serverUrl,
+            String directory,
+            String sessionTitle,
+            int requestTimeoutSeconds,
+            String requestBody
+    ) throws IOException, InterruptedException {
+        CompletableFuture<HttpResponse<String>> createFuture = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        long deadlineNanos = System.nanoTime() + requestTimeout(requestTimeoutSeconds).toNanos();
+        try {
+            while (true) {
+                try {
+                    HttpResponse<String> response = createFuture.get(250, TimeUnit.MILLISECONDS);
+                    return parseJsonResponse(request, response);
+                } catch (TimeoutException ignored) {
+                    String discoveredSessionId = findSessionIdByTitle(serverUrl, directory, sessionTitle, requestTimeoutSeconds);
+                    if (!discoveredSessionId.isBlank()) {
+                        createFuture.cancel(true);
+                        log.warn("Discovered OpenCode session before /session response completed: sessionId={}, title={}",
+                                discoveredSessionId, sessionTitle);
+                        return objectMapper.createObjectNode().put("id", discoveredSessionId);
+                    }
+                    if (System.nanoTime() >= deadlineNanos) {
+                        createFuture.cancel(true);
+                        HttpTimeoutException timeout = new HttpTimeoutException("OpenCode /session request timed out");
+                        return recoverOrThrowAfterCreateTimeout(serverUrl, directory, sessionTitle, requestTimeoutSeconds, requestBody, timeout);
+                    }
+                } catch (ExecutionException exception) {
+                    Throwable cause = exception.getCause();
+                    if (cause instanceof HttpTimeoutException timeout) {
+                        return recoverOrThrowAfterCreateTimeout(serverUrl, directory, sessionTitle, requestTimeoutSeconds, requestBody, timeout);
+                    }
+                    if (cause instanceof IOException ioException) {
+                        throw ioException;
+                    }
+                    throw new IllegalStateException("OpenCode /session request failed: " + cause, cause);
+                }
+            }
+        } catch (InterruptedException exception) {
+            createFuture.cancel(true);
+            Thread.currentThread().interrupt();
+            throw exception;
+        }
+    }
+
+    private JsonNode recoverOrThrowAfterCreateTimeout(
+            URI serverUrl,
+            String directory,
+            String title,
+            int requestTimeoutSeconds,
+            String requestBody,
+            HttpTimeoutException timeout
+    ) throws InterruptedException {
+        String recoveredSessionId = recoverCreatedSessionAfterTimeout(serverUrl, directory, title, requestTimeoutSeconds, timeout);
+        if (!recoveredSessionId.isBlank()) {
+            return objectMapper.createObjectNode().put("id", recoveredSessionId);
+        }
+        throw new IllegalStateException("OpenCode /session timed out after "
+                + Math.max(1, requestTimeoutSeconds)
+                + "s, directory=" + directory
+                + ", body=" + requestBody
+                + ". The server is healthy but did not complete session creation; check opencode-server stderr.log and whether this directory can be opened by `opencode` directly.", timeout);
+    }
+
     private String recoverCreatedSessionAfterTimeout(URI serverUrl, String directory, String title, int requestTimeoutSeconds, HttpTimeoutException timeout) throws InterruptedException {
         if (title == null || title.isBlank()) {
             return "";
         }
         try {
-            URI endpoint = resolveWithDirectory(serverUrl, "/session", directory, "");
+            URI endpoint = sessionsByTitleEndpoint(serverUrl, directory, title);
             HttpRequest request = HttpRequest.newBuilder(endpoint)
                     .timeout(Duration.ofSeconds(Math.max(2, Math.min(10, requestTimeoutSeconds))))
                     .GET()
@@ -135,16 +198,80 @@ public class OpenCodeServerClient {
         }
     }
 
-    private Map<String, Object> promptModelObject(String model) {
+    private String findSessionIdByTitle(URI serverUrl, String directory, String title, int requestTimeoutSeconds) throws InterruptedException {
+        if (title == null || title.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode sessions = listSessionsByTitle(serverUrl, directory, title, Duration.ofSeconds(Math.max(1, Math.min(2, requestTimeoutSeconds))));
+            for (JsonNode session : sessions) {
+                if (title.equals(firstText(session, "title"))) {
+                    String id = firstText(session, "id");
+                    if (!id.isBlank()) {
+                        return id;
+                    }
+                }
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw exception;
+        } catch (Exception exception) {
+            log.debug("Unable to discover OpenCode session while create response is pending: title={}, reason={}", title, exception.toString());
+        }
+        return "";
+    }
+
+    private JsonNode listSessionsByTitle(URI serverUrl, String directory, String title, Duration timeout) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(sessionsByTitleEndpoint(serverUrl, directory, title))
+                .timeout(timeout)
+                .GET()
+                .build();
+        JsonNode response = sendJson(request);
+        JsonNode sessions = response.isArray() ? response : response.path("data");
+        if (!sessions.isArray()) {
+            return objectMapper.createArrayNode();
+        }
+        return sessions;
+    }
+
+    private URI sessionsByTitleEndpoint(URI serverUrl, String directory, String title) {
+        String suffix = title == null || title.isBlank() ? "limit=100" : "search=" + queryEncode(title) + "&limit=100";
+        return resolveWithDirectory(serverUrl, "/session", directory, suffix);
+    }
+
+    private String uniqueSessionTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return title;
+        }
+        return title + "-" + SESSION_TITLE_TIMESTAMP.format(Instant.now());
+    }
+
+    private ModelRef parseModelRef(String model) {
         String trimmed = model.trim();
         int slash = trimmed.indexOf('/');
         if (slash <= 0 || slash == trimmed.length() - 1) {
             throw new IllegalArgumentException("opencode session-model must use provider/model format when set: " + model);
         }
+        return new ModelRef(trimmed.substring(0, slash), trimmed.substring(slash + 1));
+    }
+
+    private Map<String, Object> sessionModelObject(String model) {
+        ModelRef ref = parseModelRef(model);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("providerID", trimmed.substring(0, slash));
-        result.put("modelID", trimmed.substring(slash + 1));
+        result.put("providerID", ref.providerId());
+        result.put("id", ref.modelId());
         return result;
+    }
+
+    private Map<String, Object> promptModelObject(String model) {
+        ModelRef ref = parseModelRef(model);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("providerID", ref.providerId());
+        result.put("modelID", ref.modelId());
+        return result;
+    }
+
+    private record ModelRef(String providerId, String modelId) {
     }
 
     public void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text) throws IOException, InterruptedException {
@@ -184,6 +311,10 @@ public class OpenCodeServerClient {
 
     private JsonNode sendJson(HttpRequest request) throws IOException, InterruptedException {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return parseJsonResponse(request, response);
+    }
+
+    private JsonNode parseJsonResponse(HttpRequest request, HttpResponse<String> response) throws IOException {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalStateException("OpenCode Server request failed: " + request.method() + " " + request.uri() + " status=" + response.statusCode() + " body=" + response.body());
         }
