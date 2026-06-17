@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 public class SmartEsbWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-rewrite-code-review";
@@ -114,9 +115,13 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
         int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
         log.info("Starting SmartESB transaction reviews: taskCount={}, concurrency={}", transactions.size(), concurrency);
+        Semaphore transactionSlots = new Semaphore(concurrency);
         List<Future<String>> futures = new ArrayList<>();
         for (SmartEsbDailyTransactionPlan.Transaction transaction : transactions) {
-            futures.add(transactionTaskExecutor.submit(transactionCallable(properties, request, out, indexInputs, server, transaction)));
+            futures.add(transactionTaskExecutor.submit(limitedTransactionCallable(
+                    transactionSlots,
+                    transactionCallable(properties, request, out, indexInputs, server, transaction)
+            )));
         }
         List<String> failures = new ArrayList<>();
         for (Future<String> future : futures) {
@@ -128,6 +133,17 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         if (!failures.isEmpty()) {
             throw new IllegalStateException("SmartESB transaction review failed: " + String.join("; ", failures));
         }
+    }
+
+    private Callable<String> limitedTransactionCallable(Semaphore transactionSlots, Callable<String> delegate) {
+        return () -> {
+            transactionSlots.acquire();
+            try {
+                return delegate.call();
+            } finally {
+                transactionSlots.release();
+            }
+        };
     }
 
     private Callable<String> transactionCallable(

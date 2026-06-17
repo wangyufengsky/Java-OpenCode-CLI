@@ -38,9 +38,12 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitReportOrchestratorIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -48,6 +51,7 @@ class GitReportOrchestratorIntegrationTest {
     private HttpServer server;
     private ThreadPoolTaskScheduler taskScheduler;
     private ThreadPoolTaskExecutor authorTaskExecutor;
+    private ExecutorService delayedOutputExecutor;
 
     @TempDir
     Path tempDir;
@@ -62,6 +66,9 @@ class GitReportOrchestratorIntegrationTest {
         }
         if (authorTaskExecutor != null) {
             authorTaskExecutor.shutdown();
+        }
+        if (delayedOutputExecutor != null) {
+            delayedOutputExecutor.shutdownNow();
         }
     }
 
@@ -100,6 +107,76 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(synthesisStatus.path("sessionId").asText()).isNotBlank();
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
+    }
+
+    @Test
+    void doesNotCreateAnotherAuthorSessionAfterPromptWasSubmitted() throws Exception {
+        Path repo = tempDir.resolve("repo-no-auto-retry-after-submit");
+        Path out = tempDir.resolve("out-no-auto-retry-after-submit");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
+        GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
+        Files.writeString(repo.resolve("Demo.java"), "class Demo {\n  int a = 1;\n}\n");
+        GitTestSupport.run(repo, "git", "add", "Demo.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
+
+        AtomicInteger sessions = startFakeOpenCodeServerWithoutOutputs();
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
+        properties.getOpencode().setMaxRetries(2);
+        properties.getOpencode().setTimeoutMinutes(0);
+        properties.getOpencode().setOutputWaitSeconds(0);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+
+        assertThatThrownBy(() -> orchestrator().run(properties))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("author task failed");
+
+        assertThat(sessions).hasValue(1);
+        assertThat(prompts).hasSize(1);
+    }
+
+    @Test
+    void authorConcurrencyLimitsActiveOpenCodeSessionsUntilOutputsComplete() throws Exception {
+        Path repo = tempDir.resolve("repo-concurrency");
+        Path out = tempDir.resolve("out-concurrency");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
+        GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
+        Files.writeString(repo.resolve("Alice.java"), "class Alice {}\n");
+        GitTestSupport.run(repo, "git", "add", "Alice.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add alice");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Bob");
+        GitTestSupport.run(repo, "git", "config", "user.email", "bob@example.com");
+        Files.writeString(repo.resolve("Bob.java"), "class Bob {}\n");
+        GitTestSupport.run(repo, "git", "add", "Bob.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add bob");
+
+        AtomicInteger maxActiveOpenCodeTasks = startFakeOpenCodeServerWithDelayedOutputs(250);
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
+        properties.getOpencode().setConcurrency(1);
+        properties.getOpencode().setMaxConcurrency(1);
+        properties.getOpencode().setTimeoutMinutes(1);
+        properties.getOpencode().setOutputWaitSeconds(2);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+
+        orchestrator().run(properties);
+
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(2);
+        assertThat(maxActiveOpenCodeTasks).hasValue(1);
     }
 
     @Test
@@ -314,6 +391,84 @@ class GitReportOrchestratorIntegrationTest {
             }
         });
         server.start();
+    }
+
+    private AtomicInteger startFakeOpenCodeServerWithoutOutputs() throws IOException {
+        AtomicInteger ids = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/prompt_async")) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    prompts.add(objectMapper.readTree(body).at("/parts/0/text").asText());
+                    respond(exchange, 204, "");
+                    return;
+                }
+                if (path.matches("/session/[^/]+/message")) {
+                    respond(exchange, 200, """
+                            [
+                                {"id":"msg_1","type":"user","text":"ok","time":{"created":1}}
+                            ]
+                            """);
+                    return;
+                }
+                respond(exchange, 404, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
+        server.start();
+        return ids;
+    }
+
+    private AtomicInteger startFakeOpenCodeServerWithDelayedOutputs(long delayMillis) throws IOException {
+        AtomicInteger ids = new AtomicInteger();
+        AtomicInteger activeOpenCodeTasks = new AtomicInteger();
+        AtomicInteger maxActiveOpenCodeTasks = new AtomicInteger();
+        delayedOutputExecutor = Executors.newCachedThreadPool();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/prompt_async")) {
+                    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    prompts.add(prompt);
+                    int active = activeOpenCodeTasks.incrementAndGet();
+                    maxActiveOpenCodeTasks.accumulateAndGet(active, Math::max);
+                    delayedOutputExecutor.submit(() -> {
+                        try {
+                            Thread.sleep(delayMillis);
+                            writeFakeOpenCodeOutput(prompt);
+                        } catch (Exception exception) {
+                            throw new IllegalStateException(exception);
+                        } finally {
+                            activeOpenCodeTasks.decrementAndGet();
+                        }
+                    });
+                    respond(exchange, 204, "");
+                    return;
+                }
+                if (path.matches("/session/[^/]+/message")) {
+                    respond(exchange, 200, """
+                            [
+                                {"id":"msg_1","type":"user","text":"ok","time":{"created":1}}
+                            ]
+                            """);
+                    return;
+                }
+                respond(exchange, 404, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
+        server.start();
+        return maxActiveOpenCodeTasks;
     }
 
     private void writeFakeOpenCodeOutput(String prompt) throws IOException {

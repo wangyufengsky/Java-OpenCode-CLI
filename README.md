@@ -285,7 +285,7 @@ opencode serve --port <server-url中的端口>
 opencode serve --port 4096
 ```
 
-OpenCode 1.17 的 session API 使用 `/session?directory=...` 创建会话，并使用 `/session/{id}/prompt_async?directory=...` 异步提交任务。Runner 创建 session 时会把业务 title 扩展成带时间戳的唯一 title，并在 `/session` 响应未结束时并行用该唯一 title 查询 session 列表；这样服务端已创建 session 但 HTTP 连接未返回时，Java 也能拿到 sessionId 并提交 prompt。配置 `opencode.session-model` 后，Runner 会在创建 session 时写入 create-session 形态的模型字段 `model.providerID` + `model.id`，避免 OpenCode 在创建阶段解析默认模型；提交 prompt 时仍按 prompt 形态写入 `model.providerID` + `model.modelID`。
+OpenCode 1.17 的 session API 使用 `POST /session` 创建会话，并通过请求头 `X-OpenCode-Directory: <repoPath>` 指定工作目录；异步提交任务使用 `POST /session/{id}/prompt_async`，同样携带该目录头。Runner 创建 session 时会把业务 title 扩展成带时间戳的唯一 title，并在 `/session` 响应未结束时并行用 `GET /session?search=<uniqueTitle>&limit=100` 查询 session 列表；这样服务端已创建 session 但 HTTP 连接未返回时，Java 也能拿到 sessionId 并提交 prompt。配置 `opencode.session-model` 后，Runner 会在创建 session 时写入 create-session 形态的模型字段 `model.providerID` + `model.id`，避免 OpenCode 在创建阶段解析默认模型；提交 prompt 时仍按 prompt 形态写入 `model.providerID` + `model.modelID`。
 
 内网自定义 provider 推荐显式配置：
 

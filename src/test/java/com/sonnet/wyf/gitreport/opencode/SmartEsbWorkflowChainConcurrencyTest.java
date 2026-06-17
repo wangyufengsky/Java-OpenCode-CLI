@@ -67,7 +67,7 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 taskRunner,
                 scheduledProbeWaiter(),
                 objectMapper,
-                authorTaskExecutor(2)
+                authorTaskExecutor(3)
         );
 
         chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings));

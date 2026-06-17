@@ -52,6 +52,7 @@ class OpenCodeServerClientTest {
             requests.add(exchange.getRequestMethod()
                     + " " + exchange.getRequestURI().getPath()
                     + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory")
                     + " titlePrefix=" + actualTitle.startsWith("git-report-author-")
                     + " titleChanged=" + !actualTitle.equals("git-report-author")
                     + " modelProvider=" + json.at("/model/providerID").asText()
@@ -65,13 +66,17 @@ class OpenCodeServerClientTest {
             requests.add(exchange.getRequestMethod()
                     + " " + exchange.getRequestURI().getPath()
                     + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory")
                     + " text=" + json.at("/parts/0/text").asText()
                     + " modelProvider=" + json.at("/model/providerID").asText()
                     + " modelId=" + json.at("/model/modelID").asText());
             respond(exchange, 204, "");
         });
         server.createContext("/session/session-1/message", exchange -> {
-            requests.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath() + " query=" + exchange.getRequestURI().getRawQuery());
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
             respond(exchange, 200, """
                     [
                         {"id":"msg_1","type":"user","text":"hello prompt","time":{"created":1}},
@@ -91,9 +96,9 @@ class OpenCodeServerClientTest {
         assertThat(client.abortSession(serverUrl, tempDir, session.id())).isFalse();
 
         assertThat(requests).containsExactly(
-                "POST /session query=directory=" + urlEncodedTempDir() + " titlePrefix=true titleChanged=true modelProvider=spdb-new-api modelId=minimax-m2.7 hasPromptModelId=false",
-                "POST /session/session-1/prompt_async query=directory=" + urlEncodedTempDir() + " text=hello prompt modelProvider=spdb-new-api modelId=minimax-m2.7",
-                "GET /session/session-1/message query=directory=" + urlEncodedTempDir() + "&limit=100"
+                "POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize() + " titlePrefix=true titleChanged=true modelProvider=spdb-new-api modelId=minimax-m2.7 hasPromptModelId=false",
+                "POST /session/session-1/prompt_async query=null directoryHeader=" + tempDir.toAbsolutePath().normalize() + " text=hello prompt modelProvider=spdb-new-api modelId=minimax-m2.7",
+                "GET /session/session-1/message query=limit=100 directoryHeader=" + tempDir.toAbsolutePath().normalize()
         );
     }
 
@@ -108,14 +113,16 @@ class OpenCodeServerClientTest {
                 sessionTitle.set(objectMapper.readTree(body).at("/title").asText());
                 requests.add(exchange.getRequestMethod()
                         + " " + exchange.getRequestURI().getPath()
-                        + " query=" + exchange.getRequestURI().getRawQuery());
+                        + " query=" + exchange.getRequestURI().getRawQuery()
+                        + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
                 sleep(1_500);
                 respond(exchange, 200, "{\"id\":\"late-session\"}");
                 return;
             }
             requests.add(exchange.getRequestMethod()
                     + " " + exchange.getRequestURI().getPath()
-                    + " query=" + exchange.getRequestURI().getRawQuery());
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
             respond(exchange, 200, """
                     [
                       {"id":"recovered-session","title":"%s","time":{"created":2}},
@@ -131,10 +138,11 @@ class OpenCodeServerClientTest {
         OpenCodeSession session = client.createSession(serverUrl, tempDir, "git-report-author-timeout", "", 1);
 
         assertThat(session.id()).isEqualTo("recovered-session");
-        assertThat(requests).contains("POST /session query=directory=" + urlEncodedTempDir());
+        assertThat(requests).contains("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize());
         assertThat(requests).anySatisfy(request -> assertThat(request)
-                .startsWith("GET /session query=directory=" + urlEncodedTempDir() + "&search=git-report-author-timeout-")
-                .endsWith("&limit=100"));
+                .startsWith("GET /session query=search=git-report-author-timeout-")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize())
+                .contains("&limit=100"));
     }
 
     @Test
@@ -150,14 +158,16 @@ class OpenCodeServerClientTest {
                 createStarted.set(true);
                 requests.add(exchange.getRequestMethod()
                         + " " + exchange.getRequestURI().getPath()
-                        + " query=" + exchange.getRequestURI().getRawQuery());
+                        + " query=" + exchange.getRequestURI().getRawQuery()
+                        + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
                 sleep(5_000);
                 respond(exchange, 200, "{\"id\":\"never-wait-for-this-response\"}");
                 return;
             }
             requests.add(exchange.getRequestMethod()
                     + " " + exchange.getRequestURI().getPath()
-                    + " query=" + exchange.getRequestURI().getRawQuery());
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
             if (createStarted.get()) {
                 respond(exchange, 200, """
                         [
@@ -182,10 +192,11 @@ class OpenCodeServerClientTest {
                 () -> client.createSession(serverUrl, tempDir, "git-report-author-inflight", "", 30));
 
         assertThat(session.id()).isEqualTo("listed-before-response");
-        assertThat(requests).contains("POST /session query=directory=" + urlEncodedTempDir());
+        assertThat(requests).contains("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize());
         assertThat(requests).anySatisfy(request -> assertThat(request)
-                .startsWith("GET /session query=directory=" + urlEncodedTempDir() + "&search=git-report-author-inflight-")
-                .endsWith("&limit=100"));
+                .startsWith("GET /session query=search=git-report-author-inflight-")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize())
+                .contains("&limit=100"));
     }
 
     @Test
@@ -254,9 +265,5 @@ class OpenCodeServerClientTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(exception);
         }
-    }
-
-    private String urlEncodedTempDir() {
-        return tempDir.toString().replace("/", "%2F");
     }
 }

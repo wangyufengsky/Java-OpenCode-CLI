@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
@@ -165,9 +166,10 @@ public class GitReportOrchestrator {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
         int concurrency = Math.max(1, Math.min(properties.getOpencode().getConcurrency(), properties.getOpencode().getMaxConcurrency()));
         log.info("Starting author tasks: taskCount={}, concurrency={}", tasks.size(), concurrency);
+        Semaphore authorSlots = new Semaphore(concurrency);
         List<Future<AuthorTaskResult>> futures = new ArrayList<>();
         for (Map<String, Object> task : tasks) {
-            futures.add(authorTaskExecutor.submit(authorCallable(properties, out, task, server)));
+            futures.add(authorTaskExecutor.submit(limitedAuthorCallable(authorSlots, authorCallable(properties, out, task, server))));
         }
         List<AuthorTaskResult> failures = new ArrayList<>();
         for (Future<AuthorTaskResult> future : futures) {
@@ -188,6 +190,17 @@ public class GitReportOrchestrator {
         log.info("All author tasks completed successfully");
     }
 
+    private Callable<AuthorTaskResult> limitedAuthorCallable(Semaphore authorSlots, Callable<AuthorTaskResult> delegate) {
+        return () -> {
+            authorSlots.acquire();
+            try {
+                return delegate.call();
+            } finally {
+                authorSlots.release();
+            }
+        };
+    }
+
     private Callable<AuthorTaskResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
         return () -> {
             String authorKey = task.get("author_key").toString();
@@ -195,8 +208,10 @@ public class GitReportOrchestrator {
             Path runDir = out.resolve("runs").resolve(authorKey);
             Path statusPath = runDir.resolve("status.json");
             int attempts = Math.max(1, properties.getOpencode().getMaxRetries() + 1);
+            int attemptsRun = 0;
             String lastError = "";
             for (int attempt = 1; attempt <= attempts; attempt++) {
+                attemptsRun = attempt;
                 log.info("Author task started: authorKey={}, author={}, attempt={}/{}", authorKey, author, attempt, attempts);
                 String state = "failed";
                 String error = "";
@@ -258,8 +273,18 @@ public class GitReportOrchestrator {
                 writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, error);
                 log.warn("AUTHOR_ATTEMPT_FAILED reason=\"{}\" state={} timedOut={} authorKey={} author={} attempt={}",
                         error, state, timedOut, authorKey, author, attempt);
+                if (runResult != null) {
+                    log.warn("AUTHOR_AUTO_RETRY_SKIPPED_AFTER_PROMPT_SUBMITTED sessionId={} authorKey={} author={} attempt={} configuredAttempts={} reason=\"{}\"",
+                            runResult.sessionId(),
+                            authorKey,
+                            author,
+                            attempt,
+                            attempts,
+                            error);
+                    break;
+                }
             }
-            log.error("AUTHOR_FAILED reason=\"{}\" status={} authorKey={} author={} attempts={}", lastError, statusPath, authorKey, author, attempts);
+            log.error("AUTHOR_FAILED reason=\"{}\" status={} authorKey={} author={} attempts={}", lastError, statusPath, authorKey, author, attemptsRun);
             return AuthorTaskResult.failed(authorKey, author, statusPath, lastError);
         };
     }
