@@ -12,8 +12,6 @@
 
 ## Output Files
 
-`quality-summary.json` 已由统计脚本预生成；子 agent 不得写入 `detail.output.quality_summary_json`。个人报告只替换 `detail.output.report_placeholders` 中列出的分析类占位符。
-
 脚本输出：
 
 - `summary.json`：总体统计、人员排名摘要、统计范围和输出路径。
@@ -22,25 +20,24 @@
 - `index.md`：脚本生成的数据预览，不是最终报告。
 - `code-contribution-report.md`：脚本预创建的总报告占位文件，包含唯一 marker。
 - `details\author-*.json`：每个开发人员一个 detail，供对应子 agent 读取。
-- `reports\author-*\person-report.md`：每个开发人员一个个人报告半成品，固定表格和低质量代码片段已由脚本或 Java 生成，供对应子 agent 替换分析类占位符。
-- `reports\author-*\quality-summary.json`：每个开发人员一个预生成质量摘要 JSON，状态为 completed，子 agent 不得写入 `detail.output.quality_summary_json`。
+- `reports\author-*\person-report.md`：每个开发人员一个个人报告占位文件，供对应子 agent 写入。
+- `reports\author-*\quality-summary.json`：每个开发人员一个质量摘要占位文件，初始内容为 quality-summary.json 专用 marker，供对应子 agent 替换。
 
 `index_inputs.json.tasks[]` 中的个人报告链接字段必须保持一致：
 
 - `execution_worklist`：脚本生成的子 agent 固定执行清单；子 agent 必须按 `step` 升序逐项执行，不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - `report_md`：个人报告的 Windows/本机绝对路径，仅供 MCP 读取和写入文件。
-- `quality_summary_json`：质量摘要 JSON 的 Windows/本机绝对路径，仅供 MCP 读取和校验文件。
-- `report_placeholders`：个人报告中允许子 agent 替换的分析类占位符。
-- `quality_summary_status_required`：质量摘要必须保持的状态，当前为 `completed`。
+- `quality_summary_json`：质量摘要 JSON 的 Windows/本机绝对路径，仅供 MCP 读取和写入文件。
+- `quality_summary_marker`：quality-summary.json 专用 marker；子 agent 写质量摘要时只替换 `detail.output.quality_summary_marker`，不得使用 `detail.output.report_marker` 写 `quality_summary_json`。
 - `report_relative_path`：相对 `code-contribution-report.md` 所在目录的相对路径，例如 `reports/author-001-xxx/person-report.md`。
 - `report_markdown_link`：总报告中必须使用的可点击 Markdown 链接，例如 `[person-report.md](reports/author-001-xxx/person-report.md)`。
 
-`execution_worklist` 至少包含 `replace_analysis_placeholders`、`verify_outputs`、`final_response`。任一步无法执行、目标路径缺失、占位符不存在、写入失败或校验失败时，子 agent 最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+`execution_worklist` 至少包含 `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response`。任一步无法执行、目标路径缺失、marker 不存在、写入失败或校验失败时，子 agent 最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
 
 agent 输出：
 
 - `reports\author-*\person-report.md`：子 agent 写入的个人中文分析报告。
-- `reports\author-*\quality-summary.json`：脚本或 Java 预生成的质量摘要 JSON。
+- `reports\author-*\quality-summary.json`：子 agent 写入的质量摘要 JSON。
 - `code-contribution-report.md`：主 agent 汇总个人报告后写入的最终中文分析报告。
 
 ## Report Requirements
@@ -56,7 +53,7 @@ agent 输出：
 - 主要提交列表。
 - 偏差与注意事项。
 - 代码质量与风险信号。
-- 低质量代码片段；每个人最多 3 个，每个片段最多 12 行，同类扫描问题只展示一个代表片段并说明类似数量，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件；没有明确片段时写“未发现可安全摘录的低质量代码片段”。
+- 低质量代码片段；每个人最多 3 个，每个片段最多 12 行，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件；没有明确片段时写“未发现可安全摘录的低质量代码片段”。
 
 总报告必须包含：
 
@@ -68,7 +65,7 @@ agent 输出：
 - 未完成个人报告。
 - 统计口径说明。
 - 风险与偏差。
-- 典型低质量代码片段汇总；从各 `quality-summary.json.code_snippets` 中选取最多 10 个，每个开发人员最多引用 2 个，同类扫描问题只引用一个代表片段并说明类似数量，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件。
+- 典型低质量代码片段汇总；从各 `quality-summary.json.code_snippets` 中选取最多 10 个，每个开发人员最多引用 2 个，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件。
 
 ## AI Ranking Analysis Rules
 

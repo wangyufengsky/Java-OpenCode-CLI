@@ -275,8 +275,8 @@ class AuthorOutputValidatorAndQualityScoresTest {
         JsonNode root = objectMapper.readTree(output.toFile());
         JsonNode ranking = root.get("rankings").get(0);
         assertThat(ranking.get("author_key").asText()).isEqualTo("author-001-alice");
-        assertThat(ranking.get("quality_adjustment_percent").asDouble()).isEqualTo(-1.0);
-        assertThat(ranking.get("workload_score").asDouble()).isEqualTo(99.0);
+        assertThat(ranking.get("quality_adjustment_percent").asDouble()).isEqualTo(-5.0);
+        assertThat(ranking.get("workload_score").asDouble()).isEqualTo(95.0);
         assertThat(ranking.get("final_rank").asInt()).isEqualTo(1);
     }
 }

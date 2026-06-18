@@ -398,8 +398,9 @@ public class GitReportProperties {
     public static class StaticAnalysis {
         private boolean enabled = true;
         private boolean pmdEnabled = true;
+        private boolean spotbugsEnabled = true;
         private boolean failOnAnalysisError;
-        private String pmdRuleset = "pmd/git-report-java-quality.xml";
+        private String mavenBin = "mvn";
 
         public boolean isEnabled() {
             return enabled;
@@ -417,6 +418,14 @@ public class GitReportProperties {
             this.pmdEnabled = pmdEnabled;
         }
 
+        public boolean isSpotbugsEnabled() {
+            return spotbugsEnabled;
+        }
+
+        public void setSpotbugsEnabled(boolean spotbugsEnabled) {
+            this.spotbugsEnabled = spotbugsEnabled;
+        }
+
         public boolean isFailOnAnalysisError() {
             return failOnAnalysisError;
         }
@@ -425,14 +434,13 @@ public class GitReportProperties {
             this.failOnAnalysisError = failOnAnalysisError;
         }
 
-        public String getPmdRuleset() {
-            return pmdRuleset;
+        public String getMavenBin() {
+            return mavenBin;
         }
 
-        public void setPmdRuleset(String pmdRuleset) {
-            this.pmdRuleset = pmdRuleset == null || pmdRuleset.isBlank() ? "pmd/git-report-java-quality.xml" : pmdRuleset;
+        public void setMavenBin(String mavenBin) {
+            this.mavenBin = mavenBin;
         }
-
     }
 
 }

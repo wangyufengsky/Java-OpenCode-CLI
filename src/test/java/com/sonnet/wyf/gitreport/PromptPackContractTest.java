@@ -49,12 +49,7 @@ class PromptPackContractTest {
                 "intellij-index_ide_find_implementations"
         );
         assertThat(worker).contains(
-                "写入个人报告时，优先使用 OpenCode 原生文件编辑工具",
-                "detail.inputs.git_json",
-                "detail.inputs.pmd_json",
-                "不得写入 `detail.output.quality_summary_json`",
-                "固定表格、低质量代码片段和 `quality-summary.json` 已由 Java 生成",
-                "只替换 `detail.output.report_placeholders` 中列出的分析类占位符",
+                "写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具",
                 "路径字段只能使用 `filePath`",
                 "禁止使用 `pathInProject`、`file_path`、`path`",
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
@@ -64,8 +59,6 @@ class PromptPackContractTest {
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );
-        assertThat(worker).doesNotContain("complete_quality_summary_text_fields", "replace_quality_summary_json_fields", "写质量摘要");
-        assertThat(worker).doesNotContain("detail.attributed_findings", "detail.context_findings", "detail.scanner_status");
         assertThat(synthesis).contains(
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
                 "写入最终报告时，优先使用 OpenCode 原生文件编辑工具",
@@ -122,6 +115,24 @@ class PromptPackContractTest {
         assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
+
+        String combined = worker + "\n" + rerun + "\n" + synthesis;
+        assertThat(combined).contains(
+                "本链路不读取业务文档、协议文档或重构设计文档",
+                "交易审查只使用 task JSON、准备器输出、新老项目代码、配置、XML、SQL 和数据库证据"
+        );
+        assertThat(combined).doesNotContain(
+                "`documents`",
+                "documents.",
+                "documents.reconstructed_design",
+                "documents.old_8583",
+                "documents.json",
+                "documents.mapping_8583_to_json",
+                "重构项目详细设计文档.md",
+                "8583.md",
+                "json.md",
+                "8583 to json.md"
+        );
     }
 
     @Test
@@ -134,7 +145,6 @@ class PromptPackContractTest {
         assertThat(prompt).contains("## 个人报告模板");
         assertThat(prompt).contains("个人代码提交量报告");
         assertThat(prompt).contains("{{WORKLOAD_STRUCTURE_ANALYSIS}}");
-        assertThat(prompt).contains("{{OVERALL_EVALUATION}}");
         assertThat(prompt).doesNotContain("SKILL.md");
     }
 

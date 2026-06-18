@@ -97,11 +97,18 @@ class SmartEsbPreparationTest {
         JsonNode task = objectMapper.readTree(dayOut.resolve("tasks/transaction-CaRolloutRepeal.json").toFile());
         assertThat(task.path("task_path").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/tasks/transaction-CaRolloutRepeal.json");
         assertThat(task.at("/output/review_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/reports/CaRolloutRepeal/review.md");
-        assertThat(task.at("/documents/old_8583").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/8583.md");
+        assertThat(task.has("documents")).isFalse();
         assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("opencode_native");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
                 .contains("- 老项目：`/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc`")
-                .contains("- 8583 文档：`/home/wangyufeng/upfs-nl-json/doc/docment/8583.md`");
+                .doesNotContain(
+                        "重构设计：",
+                        "重构项目详细设计",
+                        "8583 文档",
+                        "JSON 文档",
+                        "映射文档",
+                        "/home/wangyufeng/upfs-nl-json/doc/docment/8583.md"
+                );
 
         JsonNode indexInputs = objectMapper.readTree(dayOut.resolve("index_inputs.json").toFile());
         assertThat(indexInputs.at("/output/index_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/index.md");

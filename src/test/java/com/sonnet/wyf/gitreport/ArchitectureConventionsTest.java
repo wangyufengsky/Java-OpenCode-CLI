@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -112,44 +111,6 @@ class ArchitectureConventionsTest {
                         });
             }
         }
-    }
-
-    @Test
-    void deprecatedStaticAnalyzerIsFullyRemovedFromProjectContracts() throws Exception {
-        String forbidden = "spot" + "bugs";
-        List<Path> roots = List.of(Path.of("pom.xml"), Path.of("src"));
-        try (Stream<Path> files = roots.stream().flatMap(root -> {
-            try {
-                return Files.isRegularFile(root) ? Stream.of(root) : Files.walk(root);
-            } catch (Exception exception) {
-                throw new RuntimeException(exception);
-            }
-        })) {
-            List<Path> offenders = files
-                    .filter(Files::isRegularFile)
-                    .filter(file -> !file.toString().contains("__pycache__"))
-                    .filter(file -> !file.toString().contains("/target/"))
-                    .filter(file -> {
-                        try {
-                            return Files.readString(file).toLowerCase().contains(forbidden);
-                        } catch (Exception exception) {
-                            throw new RuntimeException(exception);
-                        }
-                    })
-                    .toList();
-
-            assertThat(offenders).isEmpty();
-        }
-    }
-
-    @Test
-    void customPmdRulesetExcludesNoisyStructuralMetrics() throws Exception {
-        String ruleset = read("src/main/resources/pmd/git-report-java-quality.xml");
-
-        assertThat(ruleset)
-                .doesNotContain("DataClass")
-                .doesNotContain("TooManyFields")
-                .doesNotContain("TooManyMethods");
     }
 
     private String read(String path) throws Exception {

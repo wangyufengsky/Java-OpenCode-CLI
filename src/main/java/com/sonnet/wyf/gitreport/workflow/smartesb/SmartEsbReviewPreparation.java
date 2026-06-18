@@ -180,13 +180,6 @@ public class SmartEsbReviewPreparation {
         task.put("description", transaction.description());
         task.put("old_project", normalizeLogical(properties.getOldProject()));
         task.put("new_project", normalizeLogical(properties.getNewProject()));
-        task.put("documents", Map.of(
-                "legacy_index", normalizeLogical(properties.getLegacyIndex()),
-                "old_8583", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "8583.md"))),
-                "json", normalizeLogical(firstNonBlank(properties.getJsonDoc(), appendLogical(properties.getDocRoot(), "json.md"))),
-                "mapping_8583_to_json", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))),
-                "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md")))
-        ));
         task.put("skill", Map.of(
                 "prompt", "classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-transaction-review.md",
                 "transaction_template", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md",
@@ -285,10 +278,6 @@ public class SmartEsbReviewPreparation {
         values.put("description", transaction.description());
         values.put("old_project", normalizeLogical(properties.getOldProject()));
         values.put("new_project", normalizeLogical(properties.getNewProject()));
-        values.put("reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))));
-        values.put("old_8583_doc", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "8583.md"))));
-        values.put("json_doc", normalizeLogical(firstNonBlank(properties.getJsonDoc(), appendLogical(properties.getDocRoot(), "json.md"))));
-        values.put("mapping_doc", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))));
         return values;
     }
 

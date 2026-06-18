@@ -38,7 +38,7 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 - 个人报告链接必须直接使用 `synthesis_inputs.authors[].report_markdown_link`，禁止写绝对路径。
 - 统计口径必须以 `synthesis_inputs.metadata.include` 和 `synthesis_inputs.metadata.exclude` 为准。
 - Markdown、Office、普通文档、媒体和归档文件不得写入统计依据、质量依据或分数依据。
-- 从 `synthesis_inputs.code_snippets` 中汇总典型低质量代码片段；以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准。同类扫描问题只引用一个代表片段，并说明类似片段数量，不要展开重复代码块。
+- 从 `synthesis_inputs.code_snippets` 中汇总典型低质量代码片段；以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准。
 
 ## 受控读写规则
 

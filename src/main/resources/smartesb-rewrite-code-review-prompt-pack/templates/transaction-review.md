@@ -12,10 +12,7 @@
 - 说明：{{description}}
 - 老项目：`{{old_project}}`
 - 重构项目：`{{new_project}}`
-- 重构设计：`{{reconstructed_design}}`
-- 8583 文档：`{{old_8583_doc}}`
-- JSON 文档：`{{json_doc}}`
-- 映射文档：`{{mapping_doc}}`
+- 证据来源：仅使用新老项目代码、配置、XML、SQL 和数据库证据；不读取业务文档、协议文档或重构设计文档。
 
 ## 详细报告链接
 

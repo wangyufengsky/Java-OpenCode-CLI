@@ -64,7 +64,3 @@
 未验证项：
 
 {{UNVERIFIED_ITEMS}}
-
-## 8. 综合评价与结论
-
-{{OVERALL_EVALUATION}}

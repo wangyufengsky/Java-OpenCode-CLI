@@ -153,13 +153,6 @@ DEFAULT_EXCLUDE_PATTERNS = [
 REPORT_MARKER = "<!-- CODE_CONTRIBUTION_REPORT_CONTENT -->"
 AUTHOR_REPORT_MARKER = "<!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->"
 QUALITY_SUMMARY_MARKER = '"__QUALITY_SUMMARY_JSON_CONTENT__"'
-PERSON_REPORT_PLACEHOLDERS = [
-    "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
-    "{{BIAS_NOTES}}",
-    "{{POSITIVE_SIGNALS}}",
-    "{{RISK_SIGNALS}}",
-    "{{OVERALL_EVALUATION}}",
-]
 MAX_QUALITY_ADJUSTMENT_PERCENT = 30.0
 QUALITY_DIMENSION_LIMITS = {
     "code_standard": 8.0,
@@ -168,7 +161,7 @@ QUALITY_DIMENSION_LIMITS = {
     "reviewability": 6.0,
 }
 QUALITY_FINDING_SCORE_TABLE = {
-    "negative": {"low": 0.0, "medium": -1.0, "high": -2.0},
+    "negative": {"low": -2.0, "medium": -5.0, "high": -8.0},
     "positive": {"low": 1.0, "medium": 3.0, "high": 5.0},
 }
 
@@ -440,7 +433,6 @@ def calculate_quality_score(quality_summary: dict[str, Any]) -> dict[str, Any]:
     components_by_dimension = {dimension: 0.0 for dimension in QUALITY_DIMENSION_LIMITS}
     scored_findings: list[dict[str, Any]] = []
     scoring_notes: list[str] = []
-    scored_negative_scanner_rules: set[str] = set()
 
     findings = quality_summary.get("findings", [])
     if not isinstance(findings, list):
@@ -456,13 +448,6 @@ def calculate_quality_score(quality_summary: dict[str, Any]) -> dict[str, Any]:
             scoring_notes.append(note)
             continue
         assert scored is not None
-        if scored["polarity"] == "negative":
-            rule_key = scored.get("rule_id") or finding.get("scanner_rule") or ""
-            if rule_key and rule_key in scored_negative_scanner_rules:
-                scoring_notes.append(f"ignored duplicate negative scanner rule: {rule_key}")
-                continue
-            if rule_key:
-                scored_negative_scanner_rules.add(rule_key)
         dimension = scored["dimension"]
         components_by_dimension[dimension] = clamp_dimension_score(dimension, components_by_dimension[dimension] + scored["score"])
         scored_findings.append(scored)
@@ -714,7 +699,7 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def build_execution_worklist(detail_json: Path, git_json: Path, pmd_json: Path, report_md: Path, quality_summary_json: Path) -> list[dict[str, Any]]:
+def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary_json: Path) -> list[dict[str, Any]]:
     return [
         {
             "step": 1,
@@ -725,42 +710,50 @@ def build_execution_worklist(detail_json: Path, git_json: Path, pmd_json: Path, 
         },
         {
             "step": 2,
-            "action": "read_git_json",
+            "action": "read_person_report_template",
             "required": True,
-            "target_path": str(git_json),
+            "target_path": "templates/person-code-contribution-report.md",
             "status": "pending",
         },
         {
             "step": 3,
-            "action": "read_pmd_json",
+            "action": "draft_person_report",
             "required": True,
-            "target_path": str(pmd_json),
+            "target_path": str(report_md),
             "status": "pending",
         },
         {
             "step": 4,
-            "action": "draft_analysis_and_evaluation",
+            "action": "write_person_report",
             "required": True,
             "target_path": str(report_md),
+            "marker": AUTHOR_REPORT_MARKER,
             "status": "pending",
         },
         {
             "step": 5,
-            "action": "replace_analysis_placeholders",
+            "action": "draft_quality_summary",
             "required": True,
-            "target_path": str(report_md),
-            "placeholders": PERSON_REPORT_PLACEHOLDERS,
+            "target_path": str(quality_summary_json),
             "status": "pending",
         },
         {
             "step": 6,
+            "action": "write_quality_summary",
+            "required": True,
+            "target_path": str(quality_summary_json),
+            "marker": QUALITY_SUMMARY_MARKER,
+            "status": "pending",
+        },
+        {
+            "step": 7,
             "action": "verify_outputs",
             "required": True,
             "required_paths": [str(report_md), str(quality_summary_json)],
             "status": "pending",
         },
         {
-            "step": 7,
+            "step": 8,
             "action": "final_response",
             "required": True,
             "allowed": ["DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"],
@@ -774,23 +767,18 @@ def attach_output_paths(data: dict[str, Any], out: Path) -> dict[str, Any]:
     for author in data["authors"]:
         author_key = make_author_key(author["rank"], author["author"])
         detail_json = out / "details" / f"{author_key}.json"
-        detail_dir = out / "details" / author_key
-        git_json = detail_dir / "git.json"
-        pmd_json = detail_dir / "pmd.json"
         report_md = out / "reports" / author_key / "person-report.md"
         quality_summary_json = out / "reports" / author_key / "quality-summary.json"
         report_relative_path = f"reports/{author_key}/person-report.md"
         report_markdown_link = make_markdown_link("person-report.md", report_relative_path)
         author["author_key"] = author_key
         author["detail_json"] = str(detail_json)
-        author["git_json"] = str(git_json)
-        author["pmd_json"] = str(pmd_json)
         author["person_report_md"] = str(report_md)
         author["quality_summary_json"] = str(quality_summary_json)
         author["person_report_relative_path"] = report_relative_path
         author["person_report_markdown_link"] = report_markdown_link
-        author["person_report_placeholders"] = PERSON_REPORT_PLACEHOLDERS
-        execution_worklist = build_execution_worklist(detail_json.resolve(), git_json.resolve(), pmd_json.resolve(), report_md.resolve(), quality_summary_json.resolve())
+        author["person_report_marker"] = AUTHOR_REPORT_MARKER
+        execution_worklist = build_execution_worklist(detail_json.resolve(), report_md.resolve(), quality_summary_json.resolve())
         author["execution_worklist"] = execution_worklist
         tasks.append(
             {
@@ -798,179 +786,17 @@ def attach_output_paths(data: dict[str, Any], out: Path) -> dict[str, Any]:
                 "author": author["author"],
                 "author_key": author_key,
                 "detail_json": str(detail_json),
-                "git_json": str(git_json),
-                "pmd_json": str(pmd_json),
                 "report_md": str(report_md),
                 "quality_summary_json": str(quality_summary_json),
                 "report_relative_path": report_relative_path,
                 "report_markdown_link": report_markdown_link,
-                "report_placeholders": PERSON_REPORT_PLACEHOLDERS,
-                "quality_summary_status_required": "completed",
+                "report_marker": AUTHOR_REPORT_MARKER,
+                "quality_summary_marker": QUALITY_SUMMARY_MARKER,
                 "execution_worklist": execution_worklist,
             }
         )
     data["tasks"] = tasks
     return data
-
-
-def md_cell(value: Any) -> str:
-    return str(value if value is not None else "").replace("\r", " ").replace("\n", "<br>").replace("|", "\\|")
-
-
-def render_owned_change_rows(author: dict[str, Any]) -> str:
-    hunks = author.get("owned_hunks", [])
-    if not hunks:
-        return "| 无 | 无 | 无 | 0 | 无扫描规则归因 | legacy 脚本未生成可展示的归属 hunk。 |"
-    rows = []
-    for hunk in hunks:
-        rows.append(
-            "| {file} | {short_hash} | {line_start}-{line_end} | {non_comment_added} | 无扫描规则归因 | legacy 脚本已归属到该人员的变更片段，供 agent 结合上下文评价。 |".format(
-                file=md_cell(hunk.get("file")),
-                short_hash=md_cell(hunk.get("short_hash")),
-                line_start=md_cell(hunk.get("line_start")),
-                line_end=md_cell(hunk.get("line_end")),
-                non_comment_added=md_cell(hunk.get("non_comment_added")),
-            )
-        )
-    return "\n".join(rows)
-
-
-def render_extension_rows(author: dict[str, Any]) -> str:
-    extensions = author.get("extensions", {})
-    if not extensions:
-        return "| 无 | 0 | 0 | 0 | legacy 脚本未生成扩展名统计。 |"
-    rows = []
-    for extension, stats in sorted(extensions.items(), key=lambda item: item[1].get("non_comment_added", 0), reverse=True):
-        rows.append(
-            "| {extension} | {file_change_count} | {non_comment_added} | {non_comment_deleted} | legacy 脚本统计的扩展名维度变更，供 agent 判断工作类型。 |".format(
-                extension=md_cell(extension),
-                file_change_count=md_cell(stats.get("file_change_count")),
-                non_comment_added=md_cell(stats.get("non_comment_added")),
-                non_comment_deleted=md_cell(stats.get("non_comment_deleted")),
-            )
-        )
-    return "\n".join(rows)
-
-
-def render_commit_rows(author: dict[str, Any]) -> str:
-    commits = author.get("commits", [])
-    if not commits:
-        return "| 无 | 无 | 无 | legacy 脚本未生成主要提交。 |"
-    rows = []
-    for commit in commits:
-        rows.append(
-            "| {date} | {short_hash} | {subject} | legacy 脚本裁剪的主要提交，供 agent 归纳工作内容。 |".format(
-                date=md_cell(commit.get("date")),
-                short_hash=md_cell(commit.get("short_hash")),
-                subject=md_cell(commit.get("subject")),
-            )
-        )
-    return "\n".join(rows)
-
-
-def render_person_report(author: dict[str, Any]) -> str:
-    template = """# 个人代码提交量报告：{author}
-
-## 1. 基本统计
-
-| 指标 | 数值 |
-| --- | ---: |
-| 排名 | {rank} |
-| 提交数 | {commit_count} |
-| 文件修改次数 | {file_change_count} |
-| 去重文件数 | {unique_file_count} |
-| 原始新增行 | {added} |
-| 原始删除行 | {deleted} |
-| 原始净变更行 | {net} |
-| 去注释新增行 | {non_comment_added} |
-| 去注释删除行 | {non_comment_deleted} |
-| 去注释净变更行 | {non_comment_net} |
-| 去注释代码变更量 | {non_comment_churn} |
-| 基础工作量分 | {base_workload_score} |
-
-## 2. 工作量结构分析
-
-{{{{WORKLOAD_STRUCTURE_ANALYSIS}}}}
-
-## 3. 归属变更与扫描证据
-
-| 文件 | Commit | 归属行区间 | 去注释新增行 | 扫描归因 | 分析 |
-| --- | --- | ---: | ---: | --- | --- |
-{owned_change_rows}
-
-## 4. 扩展名分布
-
-| 扩展名 | 文件修改次数 | 去注释新增行 | 去注释删除行 | 分析 |
-| --- | ---: | ---: | ---: | --- |
-{extension_rows}
-
-## 5. 主要提交
-
-| 日期 | Commit | 主题 | 分析 |
-| --- | --- | --- | --- |
-{commit_rows}
-
-## 6. 偏差与注意事项
-
-{{{{BIAS_NOTES}}}}
-
-## 7. 代码质量与风险信号
-
-| 维度 | 类型 | 严重程度 | 规则 | 证据 |
-| --- | --- | --- | --- | --- |
-| 无 | 无 | 无 | 无 | legacy 脚本未归因到 PMD 负向质量发现。 |
-
-正向信号：
-
-{{{{POSITIVE_SIGNALS}}}}
-
-风险信号：
-
-{{{{RISK_SIGNALS}}}}
-
-### 7.1 低质量代码片段
-
-未发现可安全摘录的低质量代码片段。
-
-未验证项：
-
-- 无。
-
-## 8. 综合评价与结论
-
-{{{{OVERALL_EVALUATION}}}}
-"""
-    return template.format(
-        author=author["author"],
-        rank=author["rank"],
-        commit_count=author["commit_count"],
-        file_change_count=author["file_change_count"],
-        unique_file_count=author["unique_file_count"],
-        added=author["added"],
-        deleted=author["deleted"],
-        net=author["net"],
-        non_comment_added=author["non_comment_added"],
-        non_comment_deleted=author["non_comment_deleted"],
-        non_comment_net=author["non_comment_net"],
-        non_comment_churn=author["non_comment_churn"],
-        base_workload_score=author["base_workload_score"],
-        owned_change_rows=render_owned_change_rows(author),
-        extension_rows=render_extension_rows(author),
-        commit_rows=render_commit_rows(author),
-    )
-
-
-def initial_quality_summary(author: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "author": author["author"],
-        "status": "completed",
-        "findings": [],
-        "positive_signals": [],
-        "risk_signals": [],
-        "code_snippets": [],
-        "unverified": [],
-        "summary": "Python 已根据当前 legacy 统计生成质量摘要：未接入 PMD 静态扫描归因，负向发现 0 个，低质量代码片段 0 个。",
-    }
 
 
 def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
@@ -981,12 +807,9 @@ def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
 
     for author in data["authors"]:
         detail_path = Path(author["detail_json"])
-        git_path = Path(author["git_json"])
-        pmd_path = Path(author["pmd_json"])
         report_path = Path(author["person_report_md"])
         quality_path = Path(author["quality_summary_json"])
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        git_path.parent.mkdir(parents=True, exist_ok=True)
         detail = {
             "metadata": data["metadata"],
             "author_key": author["author_key"],
@@ -1007,46 +830,21 @@ def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
                 "quality_adjustment_percent": author["quality_adjustment_percent"],
                 "workload_score": author["workload_score"],
             },
-            "inputs": {
-                "git_json": author["git_json"],
-                "pmd_json": author["pmd_json"],
-            },
+            "extensions": author["extensions"],
+            "commits": author["commits"],
             "execution_worklist": author["execution_worklist"],
             "output": {
                 "person_report_md": author["person_report_md"],
                 "quality_summary_json": author["quality_summary_json"],
                 "person_report_relative_path": author["person_report_relative_path"],
                 "person_report_markdown_link": author["person_report_markdown_link"],
-                "report_placeholders": PERSON_REPORT_PLACEHOLDERS,
-                "quality_summary_status_required": "completed",
+                "report_marker": AUTHOR_REPORT_MARKER,
+                "quality_summary_marker": QUALITY_SUMMARY_MARKER,
             },
         }
-        git_detail = {
-            "metadata": data["metadata"],
-            "author_key": author["author_key"],
-            "rank": author["rank"],
-            "author": author["author"],
-            "summary": detail["summary"],
-            "extensions": author["extensions"],
-            "commits": author["commits"],
-            "owned_hunks": author.get("owned_hunks", []),
-        }
-        pmd_detail = {
-            "metadata": data["metadata"],
-            "author_key": author["author_key"],
-            "rank": author["rank"],
-            "author": author["author"],
-            "scanner": "pmd",
-            "scanner_status": {"enabled": False},
-            "attributed_findings": [],
-            "context_findings": [],
-            "code_snippets": [],
-        }
         write_json(detail_path, detail)
-        write_json(git_path, git_detail)
-        write_json(pmd_path, pmd_detail)
-        report_path.write_text(render_person_report(author), encoding="utf-8")
-        write_json(quality_path, initial_quality_summary(author))
+        report_path.write_text(AUTHOR_REPORT_MARKER + "\n", encoding="utf-8")
+        quality_path.write_text(QUALITY_SUMMARY_MARKER + "\n", encoding="utf-8")
 
 
 def build_index_inputs(data: dict[str, Any]) -> dict[str, Any]:
@@ -1056,7 +854,7 @@ def build_index_inputs(data: dict[str, Any]) -> dict[str, Any]:
         "final_report": data["metadata"]["final_report"],
         "final_report_marker": REPORT_MARKER,
         "author_report_marker": AUTHOR_REPORT_MARKER,
-        "quality_summary_status_required": "completed",
+        "quality_summary_marker": QUALITY_SUMMARY_MARKER,
         "tasks": data["tasks"],
     }
 
@@ -1104,7 +902,7 @@ def write_index(path: Path, data: dict[str, Any]) -> None:
 
 请让主 agent 读取 `summary.json` 和 `index_inputs.json`，按 `index_inputs.json.tasks[].detail_json` 为每个人派发子 agent。
 
-每个子 agent 只读取自己的 `detail_json` 和拆分证据文件，只替换个人报告中的分析类占位符。`quality-summary.json` 已由脚本预生成，主 agent 等待所有个人报告完成后，调用 `scripts/git_code_contribution_report.py score-quality <quality-summary.json>` 统一计算质量分，再按质量调整公式计算最终 `workload_score`，并按 `templates/code-contribution-report.md` 生成最终 `code-contribution-report.md`。
+每个子 agent 只读取自己的 `detail_json`，写入自己的 `report_md`，并通过替换 `quality_summary_marker` 写入自己的 `quality_summary_json`。主 agent 等待所有个人报告和质量摘要完成后，调用 `scripts/git_code_contribution_report.py score-quality <quality-summary.json>` 统一计算质量分，再按质量调整公式计算最终 `workload_score`，并按 `templates/code-contribution-report.md` 生成最终 `code-contribution-report.md`。
 """
     path.write_text(content, encoding="utf-8")
 
@@ -1129,13 +927,11 @@ def build_summary(data: dict[str, Any]) -> dict[str, Any]:
                 "workload_score": author["workload_score"],
                 "author_key": author.get("author_key"),
                 "detail_json": author.get("detail_json"),
-                "git_json": author.get("git_json"),
-                "pmd_json": author.get("pmd_json"),
                 "person_report_md": author.get("person_report_md"),
                 "quality_summary_json": author.get("quality_summary_json"),
                 "person_report_relative_path": author.get("person_report_relative_path"),
                 "person_report_markdown_link": author.get("person_report_markdown_link"),
-                "person_report_placeholders": author.get("person_report_placeholders"),
+                "person_report_marker": author.get("person_report_marker"),
             }
             for author in data["authors"]
         ],

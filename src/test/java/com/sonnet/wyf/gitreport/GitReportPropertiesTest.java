@@ -38,8 +38,8 @@ class GitReportPropertiesTest {
                         "git-report.detail-input.patch-excerpt-lines=13",
                         "git-report.static-analysis.enabled=true",
                         "git-report.static-analysis.pmd-enabled=true",
+                        "git-report.static-analysis.spotbugs-enabled=false",
                         "git-report.static-analysis.fail-on-analysis-error=true",
-                        "git-report.static-analysis.pmd-ruleset=pmd/custom-quality.xml",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
                         "git-report.synthesis-input.snippets-per-author=5",
                         "git-report.synthesis-input.snippets-total=30",
@@ -73,8 +73,8 @@ class GitReportPropertiesTest {
                     assertThat(properties.getDetailInput().getPatchExcerptLines()).isEqualTo(13);
                     assertThat(properties.getStaticAnalysis().isEnabled()).isTrue();
                     assertThat(properties.getStaticAnalysis().isPmdEnabled()).isTrue();
+                    assertThat(properties.getStaticAnalysis().isSpotbugsEnabled()).isFalse();
                     assertThat(properties.getStaticAnalysis().isFailOnAnalysisError()).isTrue();
-                    assertThat(properties.getStaticAnalysis().getPmdRuleset()).isEqualTo("pmd/custom-quality.xml");
                     assertThat(properties.getSynthesisInput().getPersonReportExcerptChars()).isEqualTo(8192);
                     assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
                     assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);

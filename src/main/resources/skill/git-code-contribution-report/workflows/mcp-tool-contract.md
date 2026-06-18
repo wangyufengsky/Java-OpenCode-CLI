@@ -65,4 +65,4 @@ reports\author-*\quality-summary.json
 - 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束。
 - 子 agent 分析完成后必须立即调用 MCP 写入工具；文本回复、计划、摘要或“准备写入”不算写入。
 - 子 agent 不要等待主会话继续提示；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 只有确认 `person-report.md` 写入成功且 `quality-summary.json` 已存在后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。

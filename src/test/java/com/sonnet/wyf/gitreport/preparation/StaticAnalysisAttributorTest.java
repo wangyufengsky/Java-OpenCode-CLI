@@ -24,11 +24,8 @@ class StaticAnalysisAttributorTest {
         Files.createDirectories(repo.resolve("target/site"));
         Files.writeString(repo.resolve("Demo.java"), """
                 class Demo {
-                  void risky() {
-                    try {
-                      System.out.println("x");
-                    } catch (Exception ignored) {
-                    }
+                  void a() {
+                    System.out.println("unsafe");
                   }
                 }
                 """);
@@ -36,25 +33,24 @@ class StaticAnalysisAttributorTest {
         properties.getPaths().setRepo(repo);
         properties.getGit().setSince(LocalDate.of(2026, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2026, 1, 2));
+        properties.getStaticAnalysis().setSpotbugsEnabled(false);
 
-        Map<String, Object> alice = author("author-001-alice", "Alice <alice@example.com>", "Demo.java", 5, 5);
+        Map<String, Object> alice = author("author-001-alice", "Alice <alice@example.com>", "Demo.java", 3, 3);
         Map<String, Object> bob = author("author-002-bob", "Bob <bob@example.com>", "Demo.java", 10, 10);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("authors", List.of(alice, bob));
 
-        new StaticAnalysisAttributor().apply(properties, data);
+        new StaticAnalysisAttributor(new PmdReportCommandExecutor()).apply(properties, data);
 
-        assertThat((List<?>) alice.get("attributed_findings")).isNotEmpty();
+        assertThat((List<?>) alice.get("attributed_findings")).hasSize(1);
         Map<?, ?> finding = (Map<?, ?>) ((List<?>) alice.get("attributed_findings")).get(0);
         assertThat(finding.get("source")).isEqualTo("scanner");
         assertThat(finding.get("attribution")).isEqualTo("owned_hunk");
         assertThat(finding.get("owned_hunk_id")).isEqualTo("h-alice");
-        assertThat((List<?>) alice.get("code_snippets")).isNotEmpty();
-        Map<?, ?> scannerStatus = (Map<?, ?>) alice.get("scanner_status");
-        assertThat(((Map<?, ?>) scannerStatus.get("pmd")).get("ruleset")).isEqualTo("pmd/git-report-java-quality.xml");
+        assertThat((List<?>) alice.get("code_snippets")).hasSize(1);
 
         assertThat((List<?>) bob.get("attributed_findings")).isEmpty();
-        assertThat((List<?>) bob.get("context_findings")).isNotEmpty();
+        assertThat((List<?>) bob.get("context_findings")).hasSize(1);
     }
 
     private Map<String, Object> author(String key, String name, String file, int start, int end) {
@@ -72,5 +68,20 @@ class StaticAnalysisAttributorTest {
         author.put("context_findings", new ArrayList<>());
         author.put("code_snippets", new ArrayList<>());
         return author;
+    }
+
+    private static class PmdReportCommandExecutor extends CommandExecutor {
+        @Override
+        String run(Path cwd, String... command) throws java.io.IOException {
+            Files.writeString(cwd.resolve("target/site/pmd.xml"), """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <pmd>
+                      <file name="Demo.java">
+                        <violation beginline="3" endline="3" priority="2" rule="SystemPrintln">Avoid console output</violation>
+                      </file>
+                    </pmd>
+                    """);
+            return "";
+        }
     }
 }

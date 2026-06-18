@@ -5,7 +5,6 @@
 - `transaction`
 - `old_project`
 - `new_project`
-- `documents`
 - `output.review_md`
 - `output.summary_json`
 - `output.matrix_md`
@@ -22,8 +21,10 @@
 
 - 只审查当前交易，不审查其他交易。
 - 不生成顶层 `index.md` 或 `summary.md`。
-- 不读取全量源码或全量文档。
-- 不把大段代码和大段文档粘进上下文。
+- 本链路不读取业务文档、协议文档或重构设计文档。
+- 交易审查只使用 task JSON、准备器输出、新老项目代码、配置、XML、SQL 和数据库证据。
+- 不读取全量源码。
+- 不把大段代码粘进上下文。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -44,7 +45,7 @@
 
 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 
-不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件或协议文档。
+不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、业务文档、协议文档或重构设计文档。
 
 代码定位、调用链取证和数据库证据仍按 MCP 优先：
 
@@ -120,16 +121,12 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
    - 用 `intellij-index_ide_read_file` 读取候选文件内容，读取时必须使用 IntelliJ-index 返回的相对路径原文。
    - 需要一次查找多类关键文件时，用 `intellij-index_ide_find_key_file`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
-2. 在 `documents.reconstructed_design` 中只检索当前交易和相关类名，提取重构架构依据。
-3. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `old_project` 中定位老 SmartESB 交易代码。
+2. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `old_project` 中定位老 SmartESB 交易代码。
    - 查询当前交易名、交易码、serviceId、类名、XML/biz 引用。
    - 建立老代码调用链和 8583 报文处理路径。
-4. 只针对当前交易检索：
-   - `documents.old_8583`
-   - `documents.json`
-   - `documents.mapping_8583_to_json`
-5. 建立 8583 到 JSON 映射矩阵。
-6. 根据代码和文档形成 findings。
+3. 只读取当前交易相关的代码、配置、XML、Mapper、SQL 和必要数据库证据；不要打开任何业务文档、协议文档或重构设计文档。
+4. 从新老代码和配置证据中建立 8583 到 JSON 映射矩阵。
+5. 根据代码、配置、XML、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读文档补齐。
 
 ## 代码规范审查规则
 
@@ -137,7 +134,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 
 重点检查重构项目代码：
 
-- 分层是否符合重构项目详细设计：入口、handler/controller、service、converter/assembler、DAO、外部 client 的职责不能混杂。
+- 分层是否清晰：入口、handler/controller、service、converter/assembler、DAO、外部 client 的职责不能混杂。
 - 命名是否清晰：类名、方法名、DTO/BO/DAO/枚举/常量名是否表达业务语义。
 - 方法职责是否单一，是否存在过长方法、过深嵌套、重复分支、复制粘贴逻辑。
 - 8583 到 JSON 转换逻辑是否集中、可追踪，是否散落在多个业务分支中。
@@ -200,8 +197,8 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 - 交易名。
 - 新代码位置。
 - 老代码位置。
-- 重构设计依据。
-- 协议依据：`8583.md`、`json.md` 或 `8583 to json.md`。
+- 代码或配置证据依据。
+- 协议依据来自新老代码、XML、Mapper、SQL 或数据库证据；证据不足时写入 `unverified`。
 - 实际问题。
 - 业务影响。
 - 建议修复。
@@ -239,5 +236,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
   "unverified": []
 }
 ```
+
+`documents_checked` 必须写空数组，因为本链路不读取业务文档、协议文档或重构设计文档。
 
 如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 IDEA MCP 覆盖修正，不要把不完整摘要留给汇总阶段。

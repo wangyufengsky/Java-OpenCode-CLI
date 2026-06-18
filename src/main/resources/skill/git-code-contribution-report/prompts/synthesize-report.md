@@ -58,7 +58,7 @@ final_report_template: <path-to-skill>\templates\code-contribution-report.md
 - 生成主报告之前，如果某个人的 `report_md` 仍只包含 marker、缺失或明显未完成，必须按子 agent workflow 补跑该人员一次；补跑校验仍未完成时，停止生成主报告并报告失败人员，不得伪造该人员分析。
 - 生成主报告之前，如果某个人的 `quality_summary_json` 缺失、仍为 `quality_summary_marker`、JSON 格式错误或字段不完整，必须按子 agent workflow 补跑该人员一次；补跑校验仍未完成时，停止生成主报告并报告失败人员，不得把该人员质量调整默认为 0 后继续汇总。
 - 最终报告的人员分析必须以个人报告中的结论为依据；不要重新读取 `details/*.json` 做个人分析。
-- 质量摘要中的 `"findings"`、`"polarity"`、`"severity"` 和 `"rule_id"` 是统一计分输入；子 agent 不得写入 `quality-summary.json`，子 agent 不得写入 `quality_adjustment_percent`，子 agent 不得写入 `components[].score`。
+- 质量摘要中的 `"findings"`、`"polarity"`、`"severity"` 和 `"rule_id"` 是统一计分输入；子 agent 不得写入 `quality_adjustment_percent`，子 agent 不得写入 `components[].score`。
 - 主 agent 必须使用脚本统一计算质量分，不得相信子 agent 手写分数：
 
 ```powershell
@@ -72,7 +72,7 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 - 统计口径必须以 `summary.metadata.include` 和 `summary.metadata.exclude` 为准，明确说明只有命中统计白名单且未命中排除规则的开发文件才进入统计。
 - Markdown、Office、普通文档、媒体和归档文件不得写入统计依据、质量依据或分数依据。
 - 总结总体工作量结构、排名、主要贡献类型、风险和统计偏差。
-- 从各 `quality-summary.json.code_snippets` 中汇总典型低质量代码片段；个人报告中的 `code_snippets` 每人最多 3 个，总报告每个开发人员最多引用 2 个，总报告最多 10 个，每个片段最多 12 行。同类扫描问题只引用一个代表片段，并说明类似片段数量，不要展开重复代码块。
+- 从各 `quality-summary.json.code_snippets` 中汇总典型低质量代码片段；个人报告中的 `code_snippets` 每人最多 3 个，总报告每个开发人员最多引用 2 个，总报告最多 10 个，每个片段最多 12 行。
 - 低质量代码片段不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件。
 - 每个开发人员必须有个人报告链接。
 - 个人报告链接必须直接使用 `index_inputs.tasks[].report_markdown_link`，包括“个人报告链接表”和“未完成个人报告”表。

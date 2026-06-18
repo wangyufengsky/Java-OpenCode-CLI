@@ -89,42 +89,11 @@ class RankingTest(unittest.TestCase):
 
         score = MODULE.calculate_quality_score(summary)
 
-        self.assertEqual(score["components_by_dimension"]["code_standard"], -2)
-        self.assertEqual(score["components_by_dimension"]["risk_control"], -1)
+        self.assertEqual(score["components_by_dimension"]["code_standard"], -8)
+        self.assertEqual(score["components_by_dimension"]["risk_control"], -5)
         self.assertEqual(score["components_by_dimension"]["maintainability"], 5)
         self.assertEqual(score["components_by_dimension"]["reviewability"], 0)
-        self.assertEqual(score["quality_adjustment_percent"], 2)
-
-    def test_duplicate_negative_scanner_rule_only_deducts_once(self):
-        summary = {
-            "findings": [
-                {
-                    "dimension": "maintainability",
-                    "polarity": "negative",
-                    "severity": "medium",
-                    "rule_id": "DataClass",
-                    "source": "scanner",
-                    "attribution": "owned_hunk",
-                    "owned_hunk_id": "h1",
-                },
-                {
-                    "dimension": "maintainability",
-                    "polarity": "negative",
-                    "severity": "medium",
-                    "rule_id": "DataClass",
-                    "source": "scanner",
-                    "attribution": "owned_hunk",
-                    "owned_hunk_id": "h2",
-                },
-            ],
-            "code_snippets": [],
-        }
-
-        score = MODULE.calculate_quality_score(summary)
-
-        self.assertEqual(score["quality_adjustment_percent"], -1)
-        self.assertEqual(len(score["scored_findings"]), 1)
-        self.assertIn("ignored duplicate negative scanner rule: DataClass", score["scoring_notes"])
+        self.assertEqual(score["quality_adjustment_percent"], -8)
 
     def test_low_quality_snippets_do_not_create_fallback_score(self):
         summary = {
@@ -276,92 +245,73 @@ class OutputLayoutTest(unittest.TestCase):
             self.assertEqual(index_inputs["final_report"], str((out / "code-contribution-report.md").resolve()))
             self.assertEqual(index_inputs["final_report_marker"], MODULE.REPORT_MARKER)
             self.assertEqual(index_inputs["author_report_marker"], MODULE.AUTHOR_REPORT_MARKER)
-            self.assertEqual(index_inputs["quality_summary_status_required"], "completed")
+            self.assertEqual(index_inputs["quality_summary_marker"], MODULE.QUALITY_SUMMARY_MARKER)
             self.assertTrue((out / "code-contribution-report.md").exists())
             self.assertEqual((out / "code-contribution-report.md").read_text(encoding="utf-8").strip(), MODULE.REPORT_MARKER)
 
             ranking_by_author = {row["author"]: row for row in summary["ranking"]}
             for task in index_inputs["tasks"]:
                 detail_path = pathlib.Path(task["detail_json"])
-                git_path = pathlib.Path(task["git_json"])
-                pmd_path = pathlib.Path(task["pmd_json"])
                 report_path = pathlib.Path(task["report_md"])
                 quality_path = pathlib.Path(task["quality_summary_json"])
                 detail = json.loads(detail_path.read_text(encoding="utf-8"))
-                git_detail = json.loads(git_path.read_text(encoding="utf-8"))
-                pmd_detail = json.loads(pmd_path.read_text(encoding="utf-8"))
                 ranking = ranking_by_author[task["author"]]
                 expected_relative_path = f"reports/{task['author_key']}/person-report.md"
                 expected_markdown_link = f"[person-report.md]({expected_relative_path})"
 
                 self.assertTrue(detail_path.exists())
-                self.assertTrue(git_path.exists())
-                self.assertTrue(pmd_path.exists())
                 self.assertTrue(report_path.exists())
                 self.assertTrue(quality_path.exists())
-                report_text = report_path.read_text(encoding="utf-8")
-                quality_summary = json.loads(quality_path.read_text(encoding="utf-8"))
-                self.assertIn("{{WORKLOAD_STRUCTURE_ANALYSIS}}", report_text)
-                self.assertIn("{{OVERALL_EVALUATION}}", report_text)
-                self.assertNotIn("{{OWNED_CHANGE_ROWS}}", report_text)
-                self.assertNotIn("{{LOW_QUALITY_SNIPPETS}}", report_text)
-                self.assertEqual(quality_summary["status"], "completed")
-                self.assertIn("Python 已根据当前 legacy 统计生成质量摘要", quality_summary["summary"])
+                self.assertEqual(report_path.read_text(encoding="utf-8").strip(), MODULE.AUTHOR_REPORT_MARKER)
+                self.assertEqual(quality_path.read_text(encoding="utf-8").strip(), MODULE.QUALITY_SUMMARY_MARKER)
                 self.assertEqual(detail["author"], task["author"])
                 self.assertEqual(detail["rank"], task["rank"])
                 self.assertEqual(detail["summary"]["base_workload_score"], detail["summary"]["workload_score"])
                 self.assertEqual(detail["summary"]["quality_adjustment_percent"], 0)
-                self.assertEqual(detail["inputs"]["git_json"], task["git_json"])
-                self.assertEqual(detail["inputs"]["pmd_json"], task["pmd_json"])
-                self.assertEqual(len(detail["inputs"]), 2)
-                self.assertEqual(git_detail["author"], task["author"])
-                self.assertIn("commits", git_detail)
-                self.assertIn("owned_hunks", git_detail)
-                self.assertEqual(pmd_detail["scanner"], "pmd")
                 self.assertEqual(detail["output"]["person_report_md"], task["report_md"])
                 self.assertEqual(detail["output"]["quality_summary_json"], task["quality_summary_json"])
-                self.assertEqual(detail["output"]["report_placeholders"], task["report_placeholders"])
-                self.assertEqual(detail["output"]["quality_summary_status_required"], "completed")
+                self.assertEqual(detail["output"]["report_marker"], task["report_marker"])
+                self.assertEqual(detail["output"]["quality_summary_marker"], task["quality_summary_marker"])
                 self.assertEqual(task["report_relative_path"], expected_relative_path)
                 self.assertEqual(task["report_markdown_link"], expected_markdown_link)
-                self.assertEqual(task["quality_summary_status_required"], "completed")
+                self.assertEqual(task["quality_summary_marker"], MODULE.QUALITY_SUMMARY_MARKER)
                 self.assertEqual(detail["execution_worklist"], task["execution_worklist"])
                 self.assertEqual(
                     [item["action"] for item in task["execution_worklist"]],
                     [
                         "read_detail_json",
-                        "read_git_json",
-                        "read_pmd_json",
-                        "draft_analysis_and_evaluation",
-                        "replace_analysis_placeholders",
+                        "read_person_report_template",
+                        "draft_person_report",
+                        "write_person_report",
+                        "draft_quality_summary",
+                        "write_quality_summary",
                         "verify_outputs",
                         "final_response",
                     ],
                 )
-                self.assertEqual([item["step"] for item in task["execution_worklist"]], list(range(1, 8)))
-                self.assertEqual(task["execution_worklist"][4]["target_path"], task["report_md"])
+                self.assertEqual([item["step"] for item in task["execution_worklist"]], list(range(1, 9)))
+                self.assertEqual(task["execution_worklist"][3]["target_path"], task["report_md"])
+                self.assertEqual(task["execution_worklist"][3]["marker"], MODULE.AUTHOR_REPORT_MARKER)
+                self.assertEqual(task["execution_worklist"][5]["target_path"], task["quality_summary_json"])
+                self.assertEqual(task["execution_worklist"][5]["marker"], MODULE.QUALITY_SUMMARY_MARKER)
                 self.assertEqual(
-                    task["execution_worklist"][5]["required_paths"],
+                    task["execution_worklist"][6]["required_paths"],
                     [task["report_md"], task["quality_summary_json"]],
                 )
                 self.assertFalse(pathlib.Path(task["report_relative_path"]).is_absolute())
                 self.assertEqual(detail["output"]["person_report_relative_path"], expected_relative_path)
                 self.assertEqual(detail["output"]["person_report_markdown_link"], expected_markdown_link)
                 self.assertEqual(ranking["detail_json"], task["detail_json"])
-                self.assertEqual(ranking["git_json"], task["git_json"])
-                self.assertEqual(ranking["pmd_json"], task["pmd_json"])
                 self.assertEqual(ranking["person_report_md"], task["report_md"])
                 self.assertEqual(ranking["quality_summary_json"], task["quality_summary_json"])
                 self.assertEqual(ranking["base_workload_score"], ranking["workload_score"])
                 self.assertEqual(ranking["quality_adjustment_percent"], 0)
-                self.assertEqual(ranking["person_report_placeholders"], task["report_placeholders"])
+                self.assertEqual(ranking["person_report_marker"], task["report_marker"])
                 self.assertEqual(ranking["person_report_relative_path"], task["report_relative_path"])
                 self.assertEqual(ranking["person_report_markdown_link"], task["report_markdown_link"])
                 self.assertNotIn("top_files", detail)
-                self.assertNotIn("extensions", detail)
-                self.assertNotIn("commits", detail)
                 excluded_suffixes = {".md", ".markdown", ".mdown", ".mkd", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".txt"}
-                self.assertTrue(excluded_suffixes.isdisjoint(git_detail["extensions"]))
+                self.assertTrue(excluded_suffixes.isdisjoint(detail["extensions"]))
 
 
 class PromptContractTest(unittest.TestCase):
@@ -414,8 +364,8 @@ class PromptContractTest(unittest.TestCase):
         skill_dir = SCRIPT_PATH.parents[1]
         required_terms = [
             "不得读取业务代码",
-            "pmdDetail.attributed_findings",
-            "pmdDetail.code_snippets",
+            "detail.attributed_findings",
+            "detail.code_snippets",
             "不新增负向扣分 finding",
         ]
 
@@ -588,7 +538,7 @@ class PromptContractTest(unittest.TestCase):
             "prompts/run-author-report.md",
         ]
         required_terms = [
-            "`code_snippets` 由统计脚本或 Java 扫描归因预生成",
+            "只要写入 `code_snippets`",
             "脚本不会根据片段自动补充扣分 finding",
         ]
 
@@ -604,8 +554,8 @@ class PromptContractTest(unittest.TestCase):
             '"polarity"',
             '"severity"',
             '"rule_id"',
-            "子 agent 不得写入 `quality-summary.json`",
             "子 agent 不得写入 `quality_adjustment_percent`",
+            "子 agent 不得写入 `components[].score`",
             "主 agent 必须使用脚本统一计算质量分",
             "python <path-to-this-skill>\\scripts\\git_code_contribution_report.py score-quality",
         ]
@@ -625,12 +575,13 @@ class PromptContractTest(unittest.TestCase):
             for term in forbidden_terms:
                 self.assertNotIn(term, content, relative_path)
 
-    def test_quality_summary_is_precreated_and_not_written_by_subagent(self):
+    def test_quality_summary_uses_its_own_marker(self):
         skill_dir = SCRIPT_PATH.parents[1]
         required_terms = [
-            "`quality-summary.json` 已由统计脚本预生成",
-            "不得写入 `detail.output.quality_summary_json`",
-            "只替换 `detail.output.report_placeholders`",
+            "quality_summary_marker",
+            "只替换 `detail.output.quality_summary_marker`",
+            "不得使用 `detail.output.report_marker` 写 `quality_summary_json`",
+            "quality-summary.json 专用 marker",
         ]
 
         for relative_path in [
@@ -648,7 +599,7 @@ class PromptContractTest(unittest.TestCase):
             "禁止在写文件前输出进度说明",
             "不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束",
             "必须立即调用 MCP 写入工具",
-            "只有确认 `person-report.md` 写入成功且 `quality-summary.json` 已存在后，最终响应只能是 `DONE` 或 `BLOCKED`",
+            "只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`",
         ]
 
         for relative_path in [
@@ -668,7 +619,8 @@ class PromptContractTest(unittest.TestCase):
             "不得把 worklist 作为最终响应",
             "不得在生成 worklist 后停止",
             "BLOCKED step=<step> action=<action> path=<path> reason=<reason>",
-            "replace_analysis_placeholders",
+            "write_person_report",
+            "write_quality_summary",
             "verify_outputs",
             "final_response",
         ]
@@ -722,7 +674,7 @@ class PromptContractTest(unittest.TestCase):
             self.assertIn("[-30, 30]", content, relative_path)
             self.assertNotIn("[-15, 15]", content, relative_path)
 
-    def test_quality_scoring_uses_configured_lightweight_negative_penalties(self):
+    def test_quality_scoring_uses_full_range_not_mechanical_one_point_scores(self):
         skill_dir = SCRIPT_PATH.parents[1]
         files = [
             "workflows/quality-scoring.md",
@@ -731,9 +683,9 @@ class PromptContractTest(unittest.TestCase):
         required_terms = [
             "统一分值表",
             "negative",
-            "0",
-            "-1",
             "-2",
+            "-5",
+            "-8",
             "positive",
             "+1",
             "+3",

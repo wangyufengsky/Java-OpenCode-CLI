@@ -17,16 +17,15 @@ class QualityScoreCalculatorTest {
                 "findings", List.of(
                         Map.of("dimension", "code_standard", "polarity", "negative", "severity", "high", "rule_id", "unsafe_format", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h1"),
                         Map.of("dimension", "risk_control", "polarity", "negative", "severity", "medium", "rule_id", "missing_boundary_check", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h2"),
-                        Map.of("dimension", "reviewability", "polarity", "negative", "severity", "low", "rule_id", "minor_style", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h3"),
                         Map.of("dimension", "maintainability", "polarity", "positive", "severity", "high", "rule_id", "clear_reuse_boundary")
                 ),
                 "code_snippets", List.of()
         ));
 
-        assertThat(result.get("quality_adjustment_percent")).isEqualTo(2.0);
+        assertThat(result.get("quality_adjustment_percent")).isEqualTo(-8.0);
         Map<?, ?> components = (Map<?, ?>) result.get("components_by_dimension");
-        assertThat(components.get("code_standard")).isEqualTo(-2.0);
-        assertThat(components.get("risk_control")).isEqualTo(-1.0);
+        assertThat(components.get("code_standard")).isEqualTo(-8.0);
+        assertThat(components.get("risk_control")).isEqualTo(-5.0);
         assertThat(components.get("maintainability")).isEqualTo(5.0);
         assertThat(components.get("reviewability")).isEqualTo(0.0);
     }
@@ -46,22 +45,5 @@ class QualityScoreCalculatorTest {
         ));
 
         assertThat(result.get("quality_adjustment_percent")).isEqualTo(0.0);
-    }
-
-    @Test
-    void duplicateNegativeScannerRuleOnlyDeductsOnce() {
-        QualityScoreCalculator calculator = new QualityScoreCalculator();
-
-        Map<String, Object> result = calculator.calculate(Map.of(
-                "findings", List.of(
-                        Map.of("dimension", "maintainability", "polarity", "negative", "severity", "medium", "rule_id", "DataClass", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h1", "file", "A.java"),
-                        Map.of("dimension", "maintainability", "polarity", "negative", "severity", "medium", "rule_id", "DataClass", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h2", "file", "B.java"),
-                        Map.of("dimension", "maintainability", "polarity", "negative", "severity", "medium", "rule_id", "DataClass", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h3", "file", "C.java")
-                )
-        ));
-
-        assertThat(result.get("quality_adjustment_percent")).isEqualTo(-1.0);
-        assertThat((List<?>) result.get("scored_findings")).hasSize(1);
-        assertThat(result.get("scoring_notes").toString()).contains("ignored duplicate negative scanner rule: DataClass");
     }
 }
