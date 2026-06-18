@@ -50,7 +50,7 @@
 workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 100), 2)
 ```
 
-`quality_adjustment_percent` 来自 Java 调度器对每个人 `quality-summary.json.findings[]` 执行统一评分后的结果，取值范围限制在 `[-30, 30]`。子 agent 手写分数无效。质量调整只作为工作量排序的辅助修正，不代表绩效评价。
+`quality_adjustment_percent` 来自 Java 调度器对每个人 `quality-summary.json.findings[]` 执行统一评分后的结果，取值范围限制在 `[-30, 30]`。个人报告 session 手写分数无效。质量调整只作为工作量排序的辅助修正，不代表绩效评价。
 
 ## 4. 个人报告链接
 

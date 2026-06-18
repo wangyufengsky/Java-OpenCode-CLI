@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -78,6 +79,38 @@ class ArchitectureConventionsTest {
         assertThat(filter).contains("List<Pattern> includePatterns");
         assertThat(filter).contains("List<Pattern> excludePatterns");
         assertThat(gitignore).contains("D:/");
+    }
+
+    @Test
+    void runtimePromptPacksUseProgramScheduledSessionsInsteadOfMainSubAgentTerms() throws Exception {
+        for (String path : List.of(
+                "src/main/resources/git-report-prompt-pack",
+                "src/main/resources/smartesb-rewrite-code-review-prompt-pack"
+        )) {
+            try (var files = Files.walk(Path.of(path))) {
+                files.filter(Files::isRegularFile)
+                        .filter(file -> file.toString().endsWith(".md"))
+                        .forEach(file -> {
+                            try {
+                                assertThat(Files.readString(file))
+                                        .as(file.toString())
+                                        .doesNotContain("主 agent")
+                                        .doesNotContain("主agent")
+                                        .doesNotContain("子 agent")
+                                        .doesNotContain("子agent")
+                                        .doesNotContain("main agent")
+                                        .doesNotContain("main-agent")
+                                        .doesNotContain("sub agent")
+                                        .doesNotContain("sub-agent")
+                                        .doesNotContain("subagent")
+                                        .doesNotContain("child agent")
+                                        .doesNotContain("child-agent");
+                            } catch (Exception exception) {
+                                throw new RuntimeException(exception);
+                            }
+                        });
+            }
+        }
     }
 
     private String read(String path) throws Exception {
