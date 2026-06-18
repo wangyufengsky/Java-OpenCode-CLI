@@ -17,6 +17,7 @@ public class GitReportProperties {
     private final OpenCode opencode = new OpenCode();
     private final DetailInput detailInput = new DetailInput();
     private final SynthesisInput synthesisInput = new SynthesisInput();
+    private final StaticAnalysis staticAnalysis = new StaticAnalysis();
 
     public Project getProject() {
         return project;
@@ -40,6 +41,10 @@ public class GitReportProperties {
 
     public SynthesisInput getSynthesisInput() {
         return synthesisInput;
+    }
+
+    public StaticAnalysis getStaticAnalysis() {
+        return staticAnalysis;
     }
 
     public static class Project {
@@ -352,16 +357,10 @@ public class GitReportProperties {
     }
 
     public static class DetailInput {
-        private int topFiles = 10;
         private int commits = 20;
-
-        public int getTopFiles() {
-            return topFiles;
-        }
-
-        public void setTopFiles(int topFiles) {
-            this.topFiles = topFiles;
-        }
+        private int hunksPerAuthor = 50;
+        private int findingsPerAuthor = 50;
+        private int patchExcerptLines = 12;
 
         public int getCommits() {
             return commits;
@@ -369,6 +368,78 @@ public class GitReportProperties {
 
         public void setCommits(int commits) {
             this.commits = commits;
+        }
+
+        public int getHunksPerAuthor() {
+            return hunksPerAuthor;
+        }
+
+        public void setHunksPerAuthor(int hunksPerAuthor) {
+            this.hunksPerAuthor = hunksPerAuthor;
+        }
+
+        public int getFindingsPerAuthor() {
+            return findingsPerAuthor;
+        }
+
+        public void setFindingsPerAuthor(int findingsPerAuthor) {
+            this.findingsPerAuthor = findingsPerAuthor;
+        }
+
+        public int getPatchExcerptLines() {
+            return patchExcerptLines;
+        }
+
+        public void setPatchExcerptLines(int patchExcerptLines) {
+            this.patchExcerptLines = patchExcerptLines;
+        }
+    }
+
+    public static class StaticAnalysis {
+        private boolean enabled = true;
+        private boolean pmdEnabled = true;
+        private boolean spotbugsEnabled = true;
+        private boolean failOnAnalysisError;
+        private String mavenBin = "mvn";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isPmdEnabled() {
+            return pmdEnabled;
+        }
+
+        public void setPmdEnabled(boolean pmdEnabled) {
+            this.pmdEnabled = pmdEnabled;
+        }
+
+        public boolean isSpotbugsEnabled() {
+            return spotbugsEnabled;
+        }
+
+        public void setSpotbugsEnabled(boolean spotbugsEnabled) {
+            this.spotbugsEnabled = spotbugsEnabled;
+        }
+
+        public boolean isFailOnAnalysisError() {
+            return failOnAnalysisError;
+        }
+
+        public void setFailOnAnalysisError(boolean failOnAnalysisError) {
+            this.failOnAnalysisError = failOnAnalysisError;
+        }
+
+        public String getMavenBin() {
+            return mavenBin;
+        }
+
+        public void setMavenBin(String mavenBin) {
+            this.mavenBin = mavenBin;
         }
     }
 

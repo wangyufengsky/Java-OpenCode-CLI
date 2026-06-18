@@ -10,10 +10,16 @@ public class GitReportPreparation {
     private static final Logger log = LoggerFactory.getLogger(GitReportPreparation.class);
 
     private final GitStatsCollector statsCollector;
+    private final StaticAnalysisAttributor staticAnalysisAttributor;
     private final ReportPreparationWriter writer;
 
     public GitReportPreparation(GitStatsCollector statsCollector, ReportPreparationWriter writer) {
+        this(statsCollector, null, writer);
+    }
+
+    public GitReportPreparation(GitStatsCollector statsCollector, StaticAnalysisAttributor staticAnalysisAttributor, ReportPreparationWriter writer) {
         this.statsCollector = statsCollector;
+        this.staticAnalysisAttributor = staticAnalysisAttributor;
         this.writer = writer;
     }
 
@@ -27,7 +33,24 @@ public class GitReportPreparation {
                 properties.getGit().getRevision(),
                 properties.getGit().isIncludeMerges());
         Map<String, Object> data = statsCollector.collect(properties);
+        if (staticAnalysisAttributor == null) {
+            markStaticAnalysisDisabled(data);
+        } else {
+            staticAnalysisAttributor.apply(properties, data);
+        }
         writer.write(properties.getPaths().getOut().toAbsolutePath().normalize(), data, properties.getDetailInput());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void markStaticAnalysisDisabled(Map<String, Object> data) {
+        Object authors = data.get("authors");
+        if (authors instanceof Iterable<?> iterable) {
+            for (Object item : iterable) {
+                if (item instanceof Map<?, ?> map) {
+                    ((Map<String, Object>) map).put("scanner_status", Map.of("enabled", false));
+                }
+            }
+        }
     }
 
     private void validate(GitReportProperties properties) {

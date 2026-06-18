@@ -394,6 +394,13 @@ def score_quality_finding(finding: dict[str, Any]) -> tuple[dict[str, Any] | Non
     if severity is None:
         return None, f"ignored finding with invalid severity: {finding.get('severity')!r}"
 
+    if polarity == "negative" and (
+        finding.get("source") != "scanner"
+        or finding.get("attribution") != "owned_hunk"
+        or not str(finding.get("owned_hunk_id") or "").strip()
+    ):
+        return None, "ignored unattributed negative finding"
+
     score = QUALITY_FINDING_SCORE_TABLE[polarity][severity]
     return {
         "dimension": dimension,
@@ -444,37 +451,6 @@ def calculate_quality_score(quality_summary: dict[str, Any]) -> dict[str, Any]:
         dimension = scored["dimension"]
         components_by_dimension[dimension] = clamp_dimension_score(dimension, components_by_dimension[dimension] + scored["score"])
         scored_findings.append(scored)
-
-    snippets = quality_summary.get("code_snippets", [])
-    if not isinstance(snippets, list):
-        snippets = []
-        scoring_notes.append("quality_summary.code_snippets is not a list; ignored")
-
-    for snippet in snippets:
-        if not isinstance(snippet, dict):
-            scoring_notes.append("ignored non-object code snippet")
-            continue
-        if low_quality_snippet_has_negative_finding(snippet, scored_findings):
-            continue
-        fallback_finding = {
-            "dimension": snippet.get("dimension"),
-            "polarity": "negative",
-            "severity": snippet.get("severity") or "medium",
-            "rule_id": "low_quality_code_snippet",
-            "file": snippet.get("file"),
-            "line_start": snippet.get("line_start"),
-            "line_end": snippet.get("line_end"),
-            "evidence": snippet.get("reason") or "低质量代码片段",
-        }
-        scored, note = score_quality_finding(fallback_finding)
-        if note:
-            scoring_notes.append(note)
-            continue
-        assert scored is not None
-        dimension = scored["dimension"]
-        components_by_dimension[dimension] = clamp_dimension_score(dimension, components_by_dimension[dimension] + scored["score"])
-        scored_findings.append(scored)
-        scoring_notes.append("code_snippets item scored through low_quality_code_snippet fallback")
 
     quality_adjustment_percent = clamp_quality_adjustment(sum(components_by_dimension.values()))
     components = [
@@ -666,14 +642,6 @@ def collect_stats(args: argparse.Namespace) -> dict[str, Any]:
         stats["workload_score"] = calculate_workload_score(stats)
         stats["base_workload_score"] = stats["workload_score"]
         stats["quality_adjustment_percent"] = 0
-        stats["top_files"] = sorted(
-            (
-                {"path": path, **file_stats, "non_comment_churn": file_stats["non_comment_added"] + file_stats["non_comment_deleted"]}
-                for path, file_stats in stats["files"].items()
-            ),
-            key=lambda item: (item["non_comment_churn"], item["file_change_count"], item["path"]),
-            reverse=True,
-        )[:20]
         stats["extensions"] = dict(sorted(stats["extensions"].items(), key=lambda item: item[1]["non_comment_added"] + item[1]["non_comment_deleted"], reverse=True))
 
     ranked = sorted(authors.values(), key=lambda item: (item["workload_score"], item["non_comment_churn"], item["commit_count"]), reverse=True)
@@ -749,29 +717,13 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
         },
         {
             "step": 3,
-            "action": "inspect_top_files",
-            "required": True,
-            "source": "detail.top_files",
-            "limit": 10,
-            "status": "pending",
-        },
-        {
-            "step": 4,
-            "action": "collect_call_evidence",
-            "required": False,
-            "condition": "Only for public/common utility code claims.",
-            "limit": 5,
-            "status": "pending",
-        },
-        {
-            "step": 5,
             "action": "draft_person_report",
             "required": True,
             "target_path": str(report_md),
             "status": "pending",
         },
         {
-            "step": 6,
+            "step": 4,
             "action": "write_person_report",
             "required": True,
             "target_path": str(report_md),
@@ -779,14 +731,14 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
             "status": "pending",
         },
         {
-            "step": 7,
+            "step": 5,
             "action": "draft_quality_summary",
             "required": True,
             "target_path": str(quality_summary_json),
             "status": "pending",
         },
         {
-            "step": 8,
+            "step": 6,
             "action": "write_quality_summary",
             "required": True,
             "target_path": str(quality_summary_json),
@@ -794,14 +746,14 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
             "status": "pending",
         },
         {
-            "step": 9,
+            "step": 7,
             "action": "verify_outputs",
             "required": True,
             "required_paths": [str(report_md), str(quality_summary_json)],
             "status": "pending",
         },
         {
-            "step": 10,
+            "step": 8,
             "action": "final_response",
             "required": True,
             "allowed": ["DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"],
@@ -878,10 +830,8 @@ def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
                 "quality_adjustment_percent": author["quality_adjustment_percent"],
                 "workload_score": author["workload_score"],
             },
-            "top_files": author["top_files"],
             "extensions": author["extensions"],
             "commits": author["commits"],
-            "files": author["files"],
             "execution_worklist": author["execution_worklist"],
             "output": {
                 "person_report_md": author["person_report_md"],

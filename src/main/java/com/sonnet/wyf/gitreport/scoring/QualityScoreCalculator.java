@@ -27,21 +27,6 @@ public class QualityScoreCalculator {
                 scoreFinding(castMap(finding), componentsByDimension, scoredFindings, scoringNotes);
             }
         }
-        for (Object item : listValue(qualitySummary.get("code_snippets"))) {
-            if (item instanceof Map<?, ?> snippet && !hasNegativeFindingForSnippet(castMap(snippet), scoredFindings)) {
-                Map<String, Object> fallback = new LinkedHashMap<>();
-                fallback.put("dimension", snippet.get("dimension"));
-                fallback.put("polarity", "negative");
-                fallback.put("severity", Objects.toString(snippet.get("severity"), "medium"));
-                fallback.put("rule_id", "low_quality_code_snippet");
-                fallback.put("file", snippet.get("file"));
-                fallback.put("line_start", snippet.get("line_start"));
-                fallback.put("line_end", snippet.get("line_end"));
-                fallback.put("evidence", Objects.toString(snippet.get("reason"), "低质量代码片段"));
-                scoreFinding(fallback, componentsByDimension, scoredFindings, scoringNotes);
-                scoringNotes.add("code_snippets item scored through low_quality_code_snippet fallback");
-            }
-        }
         double qualityAdjustment = componentsByDimension.values().stream().mapToDouble(Double::doubleValue).sum();
         qualityAdjustment = Math.max(-30.0, Math.min(30.0, qualityAdjustment));
         List<Map<String, Object>> components = componentsByDimension.entrySet().stream()
@@ -64,6 +49,12 @@ public class QualityScoreCalculator {
             scoringNotes.add("ignored invalid finding");
             return;
         }
+        if ("negative".equals(polarity) && (!"scanner".equals(Objects.toString(finding.get("source"), ""))
+                || !"owned_hunk".equals(Objects.toString(finding.get("attribution"), ""))
+                || Objects.toString(finding.get("owned_hunk_id"), "").isBlank())) {
+            scoringNotes.add("ignored unattributed negative finding");
+            return;
+        }
         double next = componentsByDimension.get(dimension) + SCORE_TABLE.get(polarity).get(severity);
         double limit = DIMENSION_LIMITS.get(dimension);
         componentsByDimension.put(dimension, Math.max(-limit, Math.min(limit, next)));
@@ -75,14 +66,6 @@ public class QualityScoreCalculator {
         scored.put("rule_id", Objects.toString(finding.get("rule_id"), ""));
         scored.put("file", Objects.toString(finding.get("file"), ""));
         scoredFindings.add(scored);
-    }
-
-    private boolean hasNegativeFindingForSnippet(Map<String, Object> snippet, List<Map<String, Object>> scoredFindings) {
-        String dimension = Objects.toString(snippet.get("dimension"), "");
-        String file = Objects.toString(snippet.get("file"), "");
-        return scoredFindings.stream().anyMatch(finding -> "negative".equals(finding.get("polarity"))
-                && dimension.equals(finding.get("dimension"))
-                && (file.isBlank() || file.equals(finding.get("file"))));
     }
 
     private List<?> listValue(Object value) {

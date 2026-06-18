@@ -23,8 +23,17 @@ opencode:
   synthesis-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
 
 detail-input:
-  top-files: 10
   commits: 20
+  hunks-per-author: 50
+  findings-per-author: 50
+  patch-excerpt-lines: 12
+
+static-analysis:
+  enabled: true
+  pmd-enabled: true
+  spotbugs-enabled: true
+  fail-on-analysis-error: false
+  maven-bin: "mvn"
 
 synthesis-input:
   person-report-excerpt-chars: 8192

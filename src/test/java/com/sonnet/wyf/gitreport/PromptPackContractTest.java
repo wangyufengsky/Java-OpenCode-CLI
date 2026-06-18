@@ -36,7 +36,13 @@ class PromptPackContractTest {
                 "intellij-idea_read_file",
                 "intellij-idea_get_file_text_by_path",
                 "intellij-idea_replace_text_in_file",
-                "intellij-idea_replace_text_undoable",
+                "intellij-idea_replace_text_undoable"
+        );
+        assertThat(worker).doesNotContain(
+                "detail.top_files",
+                "Top 文件",
+                "inspect_top_files",
+                "collect_call_evidence",
                 "intellij-index_ide_find_references",
                 "intellij-index_ide_call_hierarchy",
                 "intellij-index_ide_type_hierarchy",
@@ -49,7 +55,7 @@ class PromptPackContractTest {
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
-                "代码取证 MCP 不足时写入 `unverified`",
+                "不得读取业务代码文件",
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );

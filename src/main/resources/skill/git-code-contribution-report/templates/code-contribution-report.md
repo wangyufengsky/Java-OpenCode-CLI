@@ -45,7 +45,7 @@
 按最终排名顺序和每个人的 `person-report.md` 分析工作量结构。每个人至少说明：
 
 - 主要贡献类型：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- 统计依据：引用提交数、文件修改次数、去注释新增/删除/净变更行，并引用个人报告中的 Top 文件或扩展名分布结论。
+- 统计依据：引用提交数、文件修改次数、去注释新增/删除/净变更行，并引用个人报告中的归属变更或扩展名分布结论。
 - 质量依据：引用 `quality-summary.json` 中的质量调整、正向信号、风险信号和未验证项。
 - 口径提醒：如存在格式化、生成文件、依赖锁文件、批量迁移、批量删除等可能影响排名的因素，明确说明。
 
@@ -81,7 +81,7 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 - 默认排除 merge commit；只有脚本传入 `--include-merges` 时才包含。
 - 只统计命中 `metadata.include` 且未命中 `metadata.exclude` 的开发相关文件。
 - 默认统计白名单包含 Java、Python、JavaScript/TypeScript、HTML/CSS、XML、YAML/YML、JSON、SQL、Shell、C/C++、Go、Rust、PHP、Proto、GraphQL、Dockerfile、Makefile、Jenkinsfile 和常见开发配置文件。
-- Markdown、Excel、Word、PPT、PDF、普通文本、媒体和归档类文件不计入提交数、文件修改次数、去重文件数、原始行数、去注释行数、Top 文件、扩展名分布、基础工作量分或最终工作量分。
+- Markdown、Excel、Word、PPT、PDF、普通文本、媒体和归档类文件不计入提交数、文件修改次数、去重文件数、原始行数、去注释行数、扩展名分布、基础工作量分或最终工作量分。
 - 只修改非统计文件的提交不计入 `commit_count`；混合提交只统计符合计入条件的开发文件。
 - `文件修改次数` 是提交内文件变更次数，不等同于去重文件数。
 - `去注释新增行`、`去注释删除行` 会过滤明显注释行和空行，但不保证等同于严格语法解析。

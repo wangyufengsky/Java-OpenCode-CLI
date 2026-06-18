@@ -15,8 +15,8 @@ class QualityScoreCalculatorTest {
 
         Map<String, Object> result = calculator.calculate(Map.of(
                 "findings", List.of(
-                        Map.of("dimension", "code_standard", "polarity", "negative", "severity", "high", "rule_id", "unsafe_format"),
-                        Map.of("dimension", "risk_control", "polarity", "negative", "severity", "medium", "rule_id", "missing_boundary_check"),
+                        Map.of("dimension", "code_standard", "polarity", "negative", "severity", "high", "rule_id", "unsafe_format", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h1"),
+                        Map.of("dimension", "risk_control", "polarity", "negative", "severity", "medium", "rule_id", "missing_boundary_check", "source", "scanner", "attribution", "owned_hunk", "owned_hunk_id", "h2"),
                         Map.of("dimension", "maintainability", "polarity", "positive", "severity", "high", "rule_id", "clear_reuse_boundary")
                 ),
                 "code_snippets", List.of()
@@ -31,7 +31,7 @@ class QualityScoreCalculatorTest {
     }
 
     @Test
-    void lowQualitySnippetCreatesNegativeFallbackScore() {
+    void lowQualitySnippetWithoutAttributedFindingDoesNotCreateFallbackScore() {
         QualityScoreCalculator calculator = new QualityScoreCalculator();
 
         Map<String, Object> result = calculator.calculate(Map.of(
@@ -44,6 +44,6 @@ class QualityScoreCalculatorTest {
                 ))
         ));
 
-        assertThat(result.get("quality_adjustment_percent")).isEqualTo(-5.0);
+        assertThat(result.get("quality_adjustment_percent")).isEqualTo(0.0);
     }
 }

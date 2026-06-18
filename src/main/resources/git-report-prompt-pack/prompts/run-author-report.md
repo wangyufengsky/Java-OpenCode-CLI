@@ -12,7 +12,7 @@ detail_json: <path>
 
 ## 严格边界
 
-- 只读取输入的 `detail_json` 和 `detail.top_files` 中 Java 已裁剪出的 Top 开发文件；`detail_json` 不提供完整文件列表。
+- 只读取输入的 `detail_json`；不得读取业务代码文件、源码文件或按文件路径自行补证。
 - `detail.commits` 是 Java 已裁剪后的主要提交列表，不要要求或推断完整提交列表。
 - 不读取 `summary.json`、`details.json`、`index_inputs.json` 或其他人员 detail。
 - 不生成总报告 `code-contribution-report.md`。
@@ -26,14 +26,14 @@ detail_json: <path>
 
 ## 受控读写与取证规则
 
-- 读取 `detail_json`、Top 文件和候选代码片段时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 读取 `detail_json` 时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 - 写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具。
 - 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
 - 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 - 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入报告、质量摘要或代码文件。
-- 公共代码取证优先使用 `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
-- 代码取证 MCP 不足时写入 `unverified`，不要写无证据 finding。
+- 负向质量发现、代码片段、行号和归属只能使用 `detail.attributed_findings` 与 `detail.code_snippets` 中 Java 已生成的内容。
+- 如需说明扫描失败、未归因风险或证据不足，只能引用 `detail.context_findings`、`detail.scanner_status` 写入 `unverified` 或风险说明，不得新增负向扣分 finding。
 
 ## Markdown 表格安全
 
@@ -69,7 +69,7 @@ DONE person_report_md=<path> quality_summary_json=<path>
 
 - 人员基本统计。
 - 工作量结构分析：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- Top 变更文件分析。
+- 归属变更与扫描证据分析。
 - 扩展名分布分析。
 - 主要提交列表。
 - 统计偏差提醒。
@@ -109,7 +109,12 @@ DONE person_report_md=<path> quality_summary_json=<path>
   "line_end": 0,
   "evidence": "",
   "reason": "",
-  "suggestion": ""
+  "suggestion": "",
+  "source": "scanner",
+  "scanner": "pmd",
+  "scanner_rule": "",
+  "attribution": "owned_hunk",
+  "owned_hunk_id": ""
 }
 ```
 
@@ -120,7 +125,8 @@ DONE person_report_md=<path> quality_summary_json=<path>
 - `severity` 只能是 `low`、`medium` 或 `high`。
 - `rule_id` 必须稳定、可聚合。
 - `evidence` 必须写明证据，不得只写结论。
-- 缺少证据的维度不要写 finding，写入 `unverified` 说明原因。
+- 负向 finding 必须来自 `detail.attributed_findings`，并保留 `source=scanner`、`attribution=owned_hunk`、`owned_hunk_id`。
+- 不得新增负向 finding；缺少 Java 归因证据的内容只能写入 `unverified` 或风险说明。
 - `code_snippets` 只记录可安全摘录的低质量代码片段，数量和长度以 Java 生成与压缩后的输入为准，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；确需说明敏感内容时用 `[REDACTED]`。
 
 `code_snippets[]` 中对象字段：

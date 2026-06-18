@@ -18,8 +18,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class GitStatsCollector {
+    private static final Pattern HUNK_HEADER = Pattern.compile("@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
+
     private final CommandExecutor commandExecutor;
     private final CommentLineCounter commentLineCounter;
     private final WorkloadScoreCalculator scoreCalculator;
@@ -59,6 +63,7 @@ public class GitStatsCollector {
                     "subject", commit.get("subject")
             ));
             Map<String, Map<String, Integer>> nonComment = parseNonCommentDiff(repo, commit.get("hash"), filter);
+            list(stats, "owned_hunks").addAll(parseOwnedHunks(repo, commit.get("hash"), author, filter, properties.getDetailInput().getPatchExcerptLines()));
             for (Map<String, Object> row : numstatRows) {
                 String path = row.get("path").toString();
                 Map<String, Integer> nc = nonComment.getOrDefault(path, Map.of("added", 0, "deleted", 0));
@@ -106,6 +111,113 @@ public class GitStatsCollector {
         result.put("totals", totals(ranked));
         result.put("authors", ranked);
         return result;
+    }
+
+    private List<Map<String, Object>> parseOwnedHunks(Path repo, String commitHash, String author, FileScopeFilter filter, int patchExcerptLines) throws Exception {
+        String output = commandExecutor.run(repo, "git", "show", "--format=", "--unified=3", "--no-ext-diff", "--find-renames", commitHash);
+        List<Map<String, Object>> hunks = new ArrayList<>();
+        String currentFile = null;
+        String oldFile = null;
+        int oldLine = 0;
+        int newLine = 0;
+        int hunkStart = 0;
+        int hunkEnd = 0;
+        int nonCommentAdded = 0;
+        int hunkIndex = 0;
+        List<String> excerpt = new ArrayList<>();
+        Map<String, CommentLineCounter.CommentState> states = new LinkedHashMap<>();
+        for (String line : output.split("\\R")) {
+            if (line.startsWith("diff ")) {
+                if (currentFile != null && hunkStart > 0) {
+                    hunks.add(ownedHunk(author, commitHash, currentFile, oldFile, hunkStart, hunkEnd, nonCommentAdded, ++hunkIndex, excerpt));
+                }
+                currentFile = null;
+                oldFile = null;
+                hunkStart = 0;
+                hunkEnd = 0;
+                nonCommentAdded = 0;
+                excerpt = new ArrayList<>();
+                continue;
+            }
+            if (line.startsWith("--- a/")) {
+                oldFile = line.substring(6);
+                continue;
+            }
+            if (line.startsWith("+++ b/")) {
+                currentFile = filter.isCounted(line.substring(6)) ? line.substring(6) : null;
+                continue;
+            }
+            if (line.startsWith("+++ /dev/null")) {
+                currentFile = null;
+                continue;
+            }
+            Matcher matcher = HUNK_HEADER.matcher(line);
+            if (matcher.matches()) {
+                if (currentFile != null && hunkStart > 0) {
+                    hunks.add(ownedHunk(author, commitHash, currentFile, oldFile, hunkStart, hunkEnd, nonCommentAdded, ++hunkIndex, excerpt));
+                }
+                oldLine = Integer.parseInt(matcher.group(1));
+                newLine = Integer.parseInt(matcher.group(3));
+                hunkStart = 0;
+                hunkEnd = 0;
+                nonCommentAdded = 0;
+                excerpt = new ArrayList<>();
+                addExcerpt(excerpt, line, patchExcerptLines);
+                continue;
+            }
+            if (currentFile == null || line.startsWith("---") || line.startsWith("+++")) {
+                continue;
+            }
+            if (line.startsWith("+")) {
+                if (hunkStart == 0) {
+                    hunkStart = newLine;
+                }
+                hunkEnd = newLine;
+                if (commentLineCounter.isCountableCodeLine(currentFile, line.substring(1), states.computeIfAbsent(currentFile + "+", ignored -> new CommentLineCounter.CommentState()))) {
+                    nonCommentAdded++;
+                }
+                addExcerpt(excerpt, line, patchExcerptLines);
+                newLine++;
+            } else if (line.startsWith("-")) {
+                addExcerpt(excerpt, line, patchExcerptLines);
+                oldLine++;
+            } else {
+                addExcerpt(excerpt, line, patchExcerptLines);
+                oldLine++;
+                newLine++;
+            }
+        }
+        if (currentFile != null && hunkStart > 0) {
+            hunks.add(ownedHunk(author, commitHash, currentFile, oldFile, hunkStart, hunkEnd, nonCommentAdded, ++hunkIndex, excerpt));
+        }
+        return hunks;
+    }
+
+    private Map<String, Object> ownedHunk(String author, String commitHash, String file, String oldFile, int lineStart, int lineEnd, int nonCommentAdded, int hunkIndex, List<String> excerpt) {
+        String shortHash = commitHash.substring(0, Math.min(12, commitHash.length()));
+        Map<String, Object> hunk = new LinkedHashMap<>();
+        hunk.put("hunk_id", authorKeyLike(author) + ":" + shortHash + ":" + file + ":" + lineStart + ":" + hunkIndex);
+        hunk.put("author", author);
+        hunk.put("commit_hash", commitHash);
+        hunk.put("short_hash", shortHash);
+        hunk.put("file", file);
+        hunk.put("old_file", oldFile == null || oldFile.equals(file) ? null : oldFile);
+        hunk.put("line_start", lineStart);
+        hunk.put("line_end", lineEnd);
+        hunk.put("non_comment_added", nonCommentAdded);
+        hunk.put("patch_excerpt", String.join("\n", excerpt));
+        return hunk;
+    }
+
+    private void addExcerpt(List<String> excerpt, String line, int limit) {
+        if (excerpt.size() < Math.max(0, limit)) {
+            excerpt.add(line);
+        }
+    }
+
+    private String authorKeyLike(String author) {
+        String normalized = author.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        return normalized.isBlank() ? "unknown" : normalized;
     }
 
     private String firstNonBlank(String preferred, String fallback) {
@@ -240,6 +352,11 @@ public class GitStatsCollector {
         }
         map.put("workload_score", 0.0);
         map.put("commits", new ArrayList<>());
+        map.put("owned_hunks", new ArrayList<>());
+        map.put("attributed_findings", new ArrayList<>());
+        map.put("context_findings", new ArrayList<>());
+        map.put("code_snippets", new ArrayList<>());
+        map.put("scanner_status", new LinkedHashMap<>(Map.of("enabled", false)));
         map.put("files", new LinkedHashMap<String, Map<String, Object>>());
         map.put("extensions", new LinkedHashMap<String, Map<String, Object>>());
         return map;
@@ -286,20 +403,6 @@ public class GitStatsCollector {
             stats.put("workload_score", scoreCalculator.calculate(stats));
             stats.put("base_workload_score", stats.get("workload_score"));
             stats.put("quality_adjustment_percent", 0);
-            stats.put("top_files", files.entrySet().stream()
-                    .map(entry -> {
-                        Map<String, Object> row = new LinkedHashMap<>();
-                        row.put("path", entry.getKey());
-                        row.putAll(entry.getValue());
-                        row.put("non_comment_churn", intValue(row, "non_comment_added") + intValue(row, "non_comment_deleted"));
-                        return row;
-                    })
-                    .sorted(Comparator.<Map<String, Object>>comparingInt(row -> intValue(row, "non_comment_churn"))
-                            .thenComparingInt(row -> intValue(row, "file_change_count"))
-                            .thenComparing(row -> row.get("path").toString())
-                            .reversed())
-                    .limit(20)
-                    .toList());
             stats.put("extensions", map(stats, "extensions"));
             result.add(stats);
         }

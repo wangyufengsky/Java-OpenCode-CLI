@@ -36,7 +36,7 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 每个子 agent 只接收一个 `detail_json` 路径，不接收全量 `summary.json`、`details.json`、`index_inputs.json` 或其他人员明细。子 agent 读取该 JSON 后，将其内容对象称为 `detail`。子 agent 必须：
 
 - 按 MCP workflow 读取自己的 `detail_json` 和 `templates\person-code-contribution-report.md`。
-- 分析该人员的提交数、文件修改次数、去重文件数、去注释新增/删除/净变更行、Top 文件、扩展名分布和主要提交。
+- 分析该人员的提交数、文件修改次数、去重文件数、去注释新增/删除/净变更行、归属变更、扩展名分布和主要提交。
 - 非开发文件已由脚本排除；子 agent 不得把 Markdown、Office、普通文档、媒体或归档文件作为质量正向或风险信号依据。
 - 写入 `detail.output.person_report_md` 指定的文件。
 - 写入 `detail.output.quality_summary_json` 指定的文件，初始内容为 quality-summary.json 专用 marker。

@@ -22,7 +22,7 @@ public class ReportPreparationWriter {
     private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
     private static final List<String> PERSON_REPORT_PLACEHOLDERS = List.of(
             "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
-            "{{TOP_FILES_ROWS}}",
+            "{{OWNED_CHANGE_ROWS}}",
             "{{EXTENSION_ROWS}}",
             "{{COMMIT_ROWS}}",
             "{{BIAS_NOTES}}",
@@ -110,7 +110,10 @@ public class ReportPreparationWriter {
             detail.put("rank", author.get("rank"));
             detail.put("author", author.get("author"));
             detail.put("summary", summaryFields(author));
-            detail.put("top_files", limitedList(author.get("top_files"), limits.getTopFiles()));
+            detail.put("owned_hunks", limitedList(author.get("owned_hunks"), limits.getHunksPerAuthor()));
+            detail.put("attributed_findings", limitedList(author.get("attributed_findings"), limits.getFindingsPerAuthor()));
+            detail.put("context_findings", limitedList(author.get("context_findings"), limits.getFindingsPerAuthor()));
+            detail.put("scanner_status", author.getOrDefault("scanner_status", Map.of("enabled", false)));
             detail.put("extensions", author.get("extensions"));
             detail.put("commits", limitedList(author.get("commits"), limits.getCommits()));
             detail.put("execution_worklist", author.get("execution_worklist"));
@@ -124,7 +127,7 @@ public class ReportPreparationWriter {
             ));
             writeJson(detailPath, detail);
             Files.writeString(reportPath, renderPersonReportTemplate(author));
-            writeJson(qualityPath, initialQualitySummary(author));
+            writeJson(qualityPath, initialQualitySummary(author, limits));
         }
     }
 
@@ -173,14 +176,12 @@ public class ReportPreparationWriter {
         return List.of(
                 step(1, "read_detail_json", detailJson),
                 step(2, "read_embedded_person_report_template", null),
-                step(3, "inspect_top_files", null),
-                step(4, "collect_call_evidence", null),
-                step(5, "draft_person_report", reportMd),
-                stepWithPlaceholders(6, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
-                step(7, "draft_quality_summary", qualitySummaryJson),
-                step(8, "replace_quality_summary_json_fields", qualitySummaryJson),
-                Map.of("step", 9, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
-                Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"), "status", "pending")
+                step(3, "draft_person_report", reportMd),
+                stepWithPlaceholders(4, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
+                step(5, "complete_quality_summary_text_fields", qualitySummaryJson),
+                step(6, "replace_quality_summary_json_fields", qualitySummaryJson),
+                Map.of("step", 7, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
+                Map.of("step", 8, "action", "final_response", "required", true, "allowed", List.of("DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"), "status", "pending")
         );
     }
 
@@ -229,14 +230,14 @@ public class ReportPreparationWriter {
         return renderTemplate(FINAL_REPORT_TEMPLATE, values);
     }
 
-    private Map<String, Object> initialQualitySummary(Map<String, Object> author) {
+    private Map<String, Object> initialQualitySummary(Map<String, Object> author, GitReportProperties.DetailInput limits) {
         Map<String, Object> quality = new LinkedHashMap<>();
         quality.put("author", author.get("author"));
         quality.put("status", "pending");
-        quality.put("findings", List.of());
+        quality.put("findings", limitedList(author.get("attributed_findings"), limits.getFindingsPerAuthor()));
         quality.put("positive_signals", List.of());
         quality.put("risk_signals", List.of());
-        quality.put("code_snippets", List.of());
+        quality.put("code_snippets", limitedList(author.get("code_snippets"), limits.getFindingsPerAuthor()));
         quality.put("unverified", List.of());
         quality.put("summary", "{{QUALITY_SUMMARY}}");
         return quality;
@@ -277,6 +278,10 @@ public class ReportPreparationWriter {
             return List.of();
         }
         return list.stream().limit(Math.max(0, limit)).toList();
+    }
+
+    private List<?> listValue(Object value) {
+        return value instanceof List<?> list ? list : List.of();
     }
 
     private String makeAuthorKey(int rank, String author) {

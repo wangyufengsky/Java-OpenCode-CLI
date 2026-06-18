@@ -54,7 +54,7 @@ class GitReportPreparationIntegrationTest {
         properties.getPaths().setOut(out);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
-        properties.getDetailInput().setTopFiles(7);
+        properties.getDetailInput().setHunksPerAuthor(7);
         properties.getDetailInput().setCommits(3);
 
         GitReportPreparation preparation = new GitReportPreparation(
@@ -95,9 +95,13 @@ class GitReportPreparationIntegrationTest {
         JsonNode detail = objectMapper.readTree(detailJson.toFile());
         assertThat(detail.get("metadata").get("project_id").asText()).isEqualTo("upfs-production");
         assertThat(detail.has("files")).isFalse();
-        assertThat(detail.get("top_files")).hasSizeLessThanOrEqualTo(7);
+        assertThat(detail.has("top_files")).isFalse();
+        assertThat(detail.get("owned_hunks")).isNotNull();
+        assertThat(detail.get("attributed_findings")).isNotNull();
+        assertThat(detail.get("context_findings")).isNotNull();
+        assertThat(detail.get("scanner_status")).isNotNull();
         assertThat(detail.get("commits")).hasSizeLessThanOrEqualTo(3);
-        assertThat(detail.get("execution_worklist")).hasSize(10);
+        assertThat(detail.get("execution_worklist")).hasSize(8);
         assertThat(detail.at("/output/report_placeholders").isArray()).isTrue();
         assertThat(detail.at("/output/quality_summary_status_required").asText()).isEqualTo("completed");
     }
