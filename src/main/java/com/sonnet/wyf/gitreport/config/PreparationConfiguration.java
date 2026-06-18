@@ -6,7 +6,6 @@ import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
-import com.sonnet.wyf.gitreport.preparation.StaticAnalysisAttributor;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,16 +38,7 @@ public class PreparationConfiguration {
     }
 
     @Bean
-    StaticAnalysisAttributor staticAnalysisAttributor(CommandExecutor commandExecutor) {
-        return new StaticAnalysisAttributor(commandExecutor);
-    }
-
-    @Bean
-    GitReportPreparation gitReportPreparation(
-            GitStatsCollector gitStatsCollector,
-            StaticAnalysisAttributor staticAnalysisAttributor,
-            ReportPreparationWriter reportPreparationWriter
-    ) {
-        return new GitReportPreparation(gitStatsCollector, staticAnalysisAttributor, reportPreparationWriter);
+    GitReportPreparation gitReportPreparation(GitStatsCollector gitStatsCollector, ReportPreparationWriter reportPreparationWriter) {
+        return new GitReportPreparation(gitStatsCollector, reportPreparationWriter);
     }
 }

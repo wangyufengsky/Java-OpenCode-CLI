@@ -144,7 +144,7 @@ class AuthorOutputValidatorAndQualityScoresTest {
                   "author": "Alice <alice@example.com>",
                   "status": "completed",
                   "findings": [
-                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "secret", "file": "A.java", "line_start": 1, "line_end": 1, "evidence": "证据", "reason": "原因", "suggestion": "建议", "source": "scanner", "attribution": "owned_hunk", "owned_hunk_id": "h1"}
+                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "secret", "file": "A.java", "line_start": 1, "line_end": 1, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
                   ],
                   "positive_signals": [],
                   "risk_signals": [],
@@ -185,33 +185,6 @@ class AuthorOutputValidatorAndQualityScoresTest {
     }
 
     @Test
-    void validatorRejectsNegativeFindingWithoutOwnedHunkAttribution() throws Exception {
-        Path report = tempDir.resolve("person-report.md");
-        Path quality = tempDir.resolve("quality-summary.json");
-        Files.writeString(report, "个人报告内容\n");
-        Files.writeString(quality, """
-                {
-                  "author": "Alice <alice@example.com>",
-                  "status": "completed",
-                  "findings": [
-                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check", "file": "A.java", "line_start": 1, "line_end": 3, "evidence": "证据", "reason": "原因", "suggestion": "建议", "source": "scanner", "attribution": "owned_hunk"}
-                  ],
-                  "positive_signals": [],
-                  "risk_signals": [],
-                  "code_snippets": [],
-                  "unverified": [],
-                  "summary": "无"
-                }
-                """);
-        AuthorOutputValidator validator = new AuthorOutputValidator(objectMapper);
-
-        AuthorValidationResult result = validator.validate(report, quality);
-
-        assertThat(result.ok()).isFalse();
-        assertThat(result.error()).contains("owned_hunk_id");
-    }
-
-    @Test
     void validatorAcceptsValidQualitySummaryWithSnippetEvidence() throws Exception {
         Path report = tempDir.resolve("person-report.md");
         Path quality = tempDir.resolve("quality-summary.json");
@@ -221,7 +194,7 @@ class AuthorOutputValidatorAndQualityScoresTest {
                   "author": "Alice <alice@example.com>",
                   "status": "completed",
                   "findings": [
-                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check", "file": "A.java", "line_start": 1, "line_end": 3, "evidence": "证据", "reason": "原因", "suggestion": "建议", "source": "scanner", "attribution": "owned_hunk", "owned_hunk_id": "author-001-alice:abc123:A.java:1"}
+                    {"id": "F1", "dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check", "file": "A.java", "line_start": 1, "line_end": 3, "evidence": "证据", "reason": "原因", "suggestion": "建议"}
                   ],
                   "positive_signals": [],
                   "risk_signals": [],
@@ -247,7 +220,7 @@ class AuthorOutputValidatorAndQualityScoresTest {
                   "author": "Alice <alice@example.com>",
                   "status": "completed",
                   "findings": [
-                    {"dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check", "source": "scanner", "attribution": "owned_hunk", "owned_hunk_id": "h1"}
+                    {"dimension": "risk_control", "polarity": "negative", "severity": "medium", "rule_id": "missing_boundary_check"}
                   ],
                   "positive_signals": [],
                   "risk_signals": [],

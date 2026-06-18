@@ -116,25 +116,6 @@ public class AuthorOutputValidator {
                     return AuthorValidationResult.failed("quality summary findings[" + index + "] missing numeric field: " + field);
                 }
             }
-            if ("negative".equals(string(finding.get("polarity")))) {
-                AuthorValidationResult attribution = validateNegativeAttribution(index, finding);
-                if (!attribution.ok()) {
-                    return attribution;
-                }
-            }
-        }
-        return AuthorValidationResult.success();
-    }
-
-    private AuthorValidationResult validateNegativeAttribution(int index, Map<String, Object> finding) {
-        if (!"scanner".equals(string(finding.get("source")))) {
-            return AuthorValidationResult.failed("quality summary findings[" + index + "] negative finding must have source=scanner");
-        }
-        if (!"owned_hunk".equals(string(finding.get("attribution")))) {
-            return AuthorValidationResult.failed("quality summary findings[" + index + "] negative finding must have attribution=owned_hunk");
-        }
-        if (blankString(finding.get("owned_hunk_id"))) {
-            return AuthorValidationResult.failed("quality summary findings[" + index + "] missing owned_hunk_id");
         }
         return AuthorValidationResult.success();
     }

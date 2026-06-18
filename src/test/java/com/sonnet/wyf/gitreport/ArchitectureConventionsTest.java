@@ -113,6 +113,53 @@ class ArchitectureConventionsTest {
         }
     }
 
+    @Test
+    void gitReportRuntimeHasNoStaticAnalysisAttributionResidue() throws Exception {
+        List<String> roots = List.of(
+                "pom.xml",
+                "src/main/java/com/sonnet/wyf/gitreport",
+                "src/main/resources/chains/git-code-contribution-report.yml",
+                "src/main/resources/git-report-prompt-pack"
+        );
+        List<String> forbidden = List.of(
+                "StaticAnalysisAttributor",
+                "static-analysis",
+                "StaticAnalysis",
+                "pmd",
+                "spotbugs",
+                "scanner_status",
+                "owned_hunks",
+                "attributed_findings",
+                "context_findings",
+                "owned_hunk",
+                "owned_hunk_id",
+                "source=scanner"
+        );
+
+        for (String root : roots) {
+            Path path = Path.of(root);
+            if (Files.isRegularFile(path)) {
+                assertNoForbiddenResidue(path, forbidden);
+                continue;
+            }
+            try (var files = Files.walk(path)) {
+                files.filter(Files::isRegularFile)
+                        .forEach(file -> assertNoForbiddenResidue(file, forbidden));
+            }
+        }
+    }
+
+    private void assertNoForbiddenResidue(Path file, List<String> forbidden) {
+        try {
+            String text = Files.readString(file);
+            for (String term : forbidden) {
+                assertThat(text).as(file + " contains residue term " + term).doesNotContain(term);
+            }
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
+        }
+    }
+
     private String read(String path) throws Exception {
         return Files.readString(Path.of(path));
     }

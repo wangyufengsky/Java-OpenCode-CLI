@@ -16,7 +16,7 @@ tools: intellij-idea,intellij-index
 
 这是主 agent 编排 skill。统计准备脚本负责从 Git 采集事实、生成编排输入并预创建所有输出文件；子 agent 负责按人生成个人报告和质量发现项；主 agent 读取个人报告和质量发现项，调用脚本统一计算质量分，生成总报告、最终评分、排名、综合分析和链接。
 
-脚本生成 `base_workload_score` 和初始 `workload_score`，初始二者相同。Java 证据包生成并归因 `quality-summary.json.findings[]` 后，主 agent 必须调用 `scripts\git_code_contribution_report.py score-quality` 统一计算质量调整，并把质量调整并入最终 `workload_score`。质量调整范围限制在 `[-30, 30]`。最终报告不得把行数、提交数或评分表述为绩效结论。
+脚本生成 `base_workload_score` 和初始 `workload_score`，初始二者相同。子 agent 写入 `quality-summary.json.findings[]` 后，主 agent 必须调用 `scripts\git_code_contribution_report.py score-quality` 统一计算质量调整，并把质量调整并入最终 `workload_score`。质量调整范围限制在 `[-30, 30]`。最终报告不得把行数、提交数或评分表述为绩效结论。
 
 ## MCP Workflow
 
@@ -41,7 +41,7 @@ MCP 工具命名和文件读写约束以该 workflow 为准。
 4. 确认脚本已生成 `summary.json`、`index_inputs.json`、个人 detail、个人报告占位文件和质量摘要占位文件。
 5. 按 MCP workflow 读取 `summary.json` 和 `index_inputs.json`。
 6. 读取子 agent workflow，按 `index_inputs.json.tasks[]` 每个开发人员派发一个子 agent。
-7. 每个子 agent 使用 `prompts\run-author-report.md`，只处理一个 `detail_json`，写一个 `person-report.md`，并在 Java 证据包已归因的基础上补全 `quality-summary.json` 的中文摘要和风险说明。
+7. 每个子 agent 使用 `prompts\run-author-report.md`，只处理一个 `detail_json`，写一个 `person-report.md` 和一个只包含质量发现项的 `quality-summary.json`。
 8. 读取质量评分 workflow，校验每个人的 `quality-summary.json`，并用 `scripts\git_code_contribution_report.py score-quality` 统一计算质量分。
 9. 生成主报告之前，若发现某个人的个人报告或质量摘要缺失、仍只包含 marker、质量摘要仍为 `quality_summary_marker`、内容明显为空或写入失败，必须按子 agent workflow 补跑该人员一次；补跑校验仍未完成时，停止生成主报告并报告失败人员。
 10. 读取报告写作 workflow，使用 `prompts\synthesize-report.md` 汇总个人报告、质量摘要、最终 `workload_score`、排名、分析和链接。

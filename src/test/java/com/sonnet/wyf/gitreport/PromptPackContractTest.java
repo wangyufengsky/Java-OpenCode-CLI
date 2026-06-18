@@ -36,13 +36,7 @@ class PromptPackContractTest {
                 "intellij-idea_read_file",
                 "intellij-idea_get_file_text_by_path",
                 "intellij-idea_replace_text_in_file",
-                "intellij-idea_replace_text_undoable"
-        );
-        assertThat(worker).doesNotContain(
-                "detail.top_files",
-                "Top 文件",
-                "inspect_top_files",
-                "collect_call_evidence",
+                "intellij-idea_replace_text_undoable",
                 "intellij-index_ide_find_references",
                 "intellij-index_ide_call_hierarchy",
                 "intellij-index_ide_type_hierarchy",
@@ -55,7 +49,7 @@ class PromptPackContractTest {
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
-                "不得读取业务代码文件",
+                "代码取证 MCP 不足时写入 `unverified`",
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );
@@ -115,24 +109,6 @@ class PromptPackContractTest {
         assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
-
-        String combined = worker + "\n" + rerun + "\n" + synthesis;
-        assertThat(combined).contains(
-                "本链路不读取业务文档、协议文档或重构设计文档",
-                "交易审查只使用 task JSON、准备器输出、新老项目代码、配置、XML、SQL 和数据库证据"
-        );
-        assertThat(combined).doesNotContain(
-                "`documents`",
-                "documents.",
-                "documents.reconstructed_design",
-                "documents.old_8583",
-                "documents.json",
-                "documents.mapping_8583_to_json",
-                "重构项目详细设计文档.md",
-                "8583.md",
-                "json.md",
-                "8583 to json.md"
-        );
     }
 
     @Test

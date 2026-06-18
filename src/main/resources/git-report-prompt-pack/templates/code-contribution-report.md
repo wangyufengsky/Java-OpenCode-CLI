@@ -70,7 +70,7 @@ workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 1
 - 默认排除 merge commit；只有脚本传入 `--include-merges` 时才包含。
 - 只统计命中 `metadata.include` 且未命中 `metadata.exclude` 的开发相关文件。
 - 默认统计白名单包含 Java、Python、JavaScript/TypeScript、HTML/CSS、XML、YAML/YML、JSON、SQL、Shell、C/C++、Go、Rust、PHP、Proto、GraphQL、Dockerfile、Makefile、Jenkinsfile 和常见开发配置文件。
-- Markdown、Excel、Word、PPT、PDF、普通文本、媒体和归档类文件不计入提交数、文件修改次数、去重文件数、原始行数、去注释行数、扩展名分布、基础工作量分或最终工作量分。
+- Markdown、Excel、Word、PPT、PDF、普通文本、媒体和归档类文件不计入提交数、文件修改次数、去重文件数、原始行数、去注释行数、Top 文件、扩展名分布、基础工作量分或最终工作量分。
 - 只修改非统计文件的提交不计入 `commit_count`；混合提交只统计符合计入条件的开发文件。
 - `文件修改次数` 是提交内文件变更次数，不等同于去重文件数。
 - `去注释新增行`、`去注释删除行` 会过滤明显注释行和空行，但不保证等同于严格语法解析。

@@ -32,14 +32,8 @@ class GitReportPropertiesTest {
                         "git-report.opencode.create-session-timeout-seconds=11",
                         "git-report.opencode.request-timeout-seconds=90",
                         "git-report.opencode.validation-max-corrections=3",
+                        "git-report.detail-input.top-files=7",
                         "git-report.detail-input.commits=12",
-                        "git-report.detail-input.hunks-per-author=9",
-                        "git-report.detail-input.findings-per-author=11",
-                        "git-report.detail-input.patch-excerpt-lines=13",
-                        "git-report.static-analysis.enabled=true",
-                        "git-report.static-analysis.pmd-enabled=true",
-                        "git-report.static-analysis.spotbugs-enabled=false",
-                        "git-report.static-analysis.fail-on-analysis-error=true",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
                         "git-report.synthesis-input.snippets-per-author=5",
                         "git-report.synthesis-input.snippets-total=30",
@@ -67,14 +61,8 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
                     assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(6);
+                    assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(7);
                     assertThat(properties.getDetailInput().getCommits()).isEqualTo(12);
-                    assertThat(properties.getDetailInput().getHunksPerAuthor()).isEqualTo(9);
-                    assertThat(properties.getDetailInput().getFindingsPerAuthor()).isEqualTo(11);
-                    assertThat(properties.getDetailInput().getPatchExcerptLines()).isEqualTo(13);
-                    assertThat(properties.getStaticAnalysis().isEnabled()).isTrue();
-                    assertThat(properties.getStaticAnalysis().isPmdEnabled()).isTrue();
-                    assertThat(properties.getStaticAnalysis().isSpotbugsEnabled()).isFalse();
-                    assertThat(properties.getStaticAnalysis().isFailOnAnalysisError()).isTrue();
                     assertThat(properties.getSynthesisInput().getPersonReportExcerptChars()).isEqualTo(8192);
                     assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
                     assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);

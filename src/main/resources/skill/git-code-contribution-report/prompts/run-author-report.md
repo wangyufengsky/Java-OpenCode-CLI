@@ -36,9 +36,8 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 ## MCP 规则
 
 - 读取、搜索、调用链取证、写入和禁止项全部按 `workflows/mcp-tool-contract.md` 执行。
-- 不得读取业务代码、源码文件或按文件路径自行补证。
-- 负向质量发现、代码片段、行号和归属只能使用 Java 证据包中已生成的 `detail.attributed_findings` 与 `detail.code_snippets`。
-- 不新增负向扣分 finding；未归因或证据不足的内容只能写入 `unverified` 或风险说明。
+- 质量分析需要读取代码时，只能读取 `detail.top_files` 中排名靠前的最多 10 个文件。
+- 判断公共代码、工具类代码复用价值时，优先使用 MCP workflow 允许的引用或调用链取证方式确认调用点，并记录实际工具名；最多读取 5 个候选调用点文件。
 - 不得为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件已由脚本排除，不属于统计和评分依据。
 - 将 `detail.output.quality_summary_json` 中的 `detail.output.quality_summary_marker` 替换为合法 JSON 对象。
 - 搜索已生成文件时优先按 `detail.output` 中的确定路径直接读取。
@@ -52,7 +51,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 - 单次写入不超过 6000 字符。
 - 单次写入不超过 120 行。
-- 归属变更表、扩展名分布表、主要提交表较长时按行分批写入。
+- Top 文件表、扩展名分布表、主要提交表较长时按行分批写入。
 - 写中间块时，将 `detail.output.report_marker` 替换为“本次内容 + 同一个 marker”，保留 marker 供下一块继续追加。
 - 写最后一块时，再将 marker 替换为最后内容或移除 marker。
 - 如果 marker 不存在、MCP 替换失败或目标文件不可写，立即停止并报告失败；不要改用 shell、PowerShell、Python 临时脚本或重定向写文件。
@@ -68,7 +67,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 ## Markdown 表格安全规则
 
-所有 Markdown 表格单元格在写入前必须做安全处理，尤其是 `detail.commits[].subject`、归属变更证据、分析结论和质量证据：
+所有 Markdown 表格单元格在写入前必须做安全处理，尤其是 `detail.commits[].subject`、`detail.top_files[].path`、分析结论和质量证据：
 
 - 将 `|` 转义为 `\|`。
 - 将单元格内的换行、回车和列表项改写为简短短语、`<br>` 或中文分号；表格行必须是单个物理行。
@@ -86,7 +85,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 - 人员基本统计。
 - 工作量结构分析：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- 归属变更与扫描证据分析。
+- Top 变更文件分析。
 - 扩展名分布分析。
 - 主要提交列表。
 - 统计偏差提醒。
@@ -97,7 +96,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 ## 质量摘要 JSON
 
-个人报告写完后，必须写 `detail.output.quality_summary_json`。子 agent 只负责补充中文摘要和风险说明，不负责发现负向扣分项，也不负责最终计分。子 agent 不得写入 `quality_adjustment_percent`。子 agent 不得写入 `components[].score`。主 agent 必须使用脚本统一计算质量分。
+个人报告写完后，必须写 `detail.output.quality_summary_json`。子 agent 只负责发现证据，不负责最终计分。子 agent 不得写入 `quality_adjustment_percent`。子 agent 不得写入 `components[].score`。主 agent 必须使用脚本统一计算质量分。
 
 写入质量摘要时，只替换 `detail.output.quality_summary_marker`。不得使用 `detail.output.report_marker` 写 `quality_summary_json`，因为 `detail.output.report_marker` 只存在于个人 Markdown 报告。
 
@@ -171,11 +170,11 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 低质量代码片段要求：
 
 - `code_snippets` 只记录低质量代码片段；没有明确问题时使用空数组。
-- 只要写入 `code_snippets`，必须同时保留 Java 证据包中对应的负向 finding；脚本不会根据片段自动补充扣分 finding。
+- 只要写入 `code_snippets`，必须同时写入对应的负向 finding；如果遗漏，脚本按 `low_quality_code_snippet` 规则补充一个负向 finding，统一计分结果必须小于 0。
 - 每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。
-- 片段必须来自 Java 证据包已摘录和脱敏的内容，并写明文件、行号、维度、严重程度、原因和建议。
+- 片段必须来自质量分析允许读取的开发文件或受控调用点文件，并写明文件、行号、维度、严重程度、原因和建议。
 - 不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；发现敏感信息时用 `[REDACTED]` 替代。
 - 个人报告中必须有“低质量代码片段”小节；没有可安全摘录的片段时写“未发现可安全摘录的低质量代码片段”。
 
-质量分析只能基于 `detail` 中 Java 已生成的归属变更、扫描归因、代码片段和扫描状态；不得读取业务代码或把未进入 `detail` 的文档、Office、媒体或归档文件当作质量证据。
+质量分析只能基于 `detail` 中已经统计出来的开发文件、按规则读取到的 Top 代码文件，以及为公共代码/工具类代码复用价值取证而受控读取的调用点文件；不得把未进入 `detail` 的文档、Office、媒体或归档文件当作质量证据。
 个人报告中不要展示最终质量调整百分比或质量调整后的 `workload_score`；最终分数只由主 agent 使用统一脚本计算后写入总报告。

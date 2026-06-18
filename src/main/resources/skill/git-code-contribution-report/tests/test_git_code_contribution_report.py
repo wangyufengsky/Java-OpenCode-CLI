@@ -62,9 +62,6 @@ class RankingTest(unittest.TestCase):
                     "severity": "high",
                     "rule_id": "unsafe_format",
                     "evidence": "格式化金额未做边界处理",
-                    "source": "scanner",
-                    "attribution": "owned_hunk",
-                    "owned_hunk_id": "h1",
                 },
                 {
                     "dimension": "risk_control",
@@ -72,9 +69,6 @@ class RankingTest(unittest.TestCase):
                     "severity": "medium",
                     "rule_id": "missing_boundary_check",
                     "evidence": "缺少空值保护",
-                    "source": "scanner",
-                    "attribution": "owned_hunk",
-                    "owned_hunk_id": "h2",
                 },
                 {
                     "dimension": "maintainability",
@@ -95,7 +89,7 @@ class RankingTest(unittest.TestCase):
         self.assertEqual(score["components_by_dimension"]["reviewability"], 0)
         self.assertEqual(score["quality_adjustment_percent"], -8)
 
-    def test_low_quality_snippets_do_not_create_fallback_score(self):
+    def test_low_quality_snippets_are_scored_when_findings_miss_them(self):
         summary = {
             "findings": [],
             "code_snippets": [
@@ -114,8 +108,8 @@ class RankingTest(unittest.TestCase):
 
         score = MODULE.calculate_quality_score(summary)
 
-        self.assertEqual(score["components_by_dimension"]["risk_control"], 0)
-        self.assertEqual(score["quality_adjustment_percent"], 0)
+        self.assertEqual(score["components_by_dimension"]["risk_control"], -5)
+        self.assertEqual(score["quality_adjustment_percent"], -5)
 
 
 class OutputLayoutTest(unittest.TestCase):
@@ -281,6 +275,8 @@ class OutputLayoutTest(unittest.TestCase):
                     [
                         "read_detail_json",
                         "read_person_report_template",
+                        "inspect_top_files",
+                        "collect_call_evidence",
                         "draft_person_report",
                         "write_person_report",
                         "draft_quality_summary",
@@ -289,13 +285,13 @@ class OutputLayoutTest(unittest.TestCase):
                         "final_response",
                     ],
                 )
-                self.assertEqual([item["step"] for item in task["execution_worklist"]], list(range(1, 9)))
-                self.assertEqual(task["execution_worklist"][3]["target_path"], task["report_md"])
-                self.assertEqual(task["execution_worklist"][3]["marker"], MODULE.AUTHOR_REPORT_MARKER)
-                self.assertEqual(task["execution_worklist"][5]["target_path"], task["quality_summary_json"])
-                self.assertEqual(task["execution_worklist"][5]["marker"], MODULE.QUALITY_SUMMARY_MARKER)
+                self.assertEqual([item["step"] for item in task["execution_worklist"]], list(range(1, 11)))
+                self.assertEqual(task["execution_worklist"][5]["target_path"], task["report_md"])
+                self.assertEqual(task["execution_worklist"][5]["marker"], MODULE.AUTHOR_REPORT_MARKER)
+                self.assertEqual(task["execution_worklist"][7]["target_path"], task["quality_summary_json"])
+                self.assertEqual(task["execution_worklist"][7]["marker"], MODULE.QUALITY_SUMMARY_MARKER)
                 self.assertEqual(
-                    task["execution_worklist"][6]["required_paths"],
+                    task["execution_worklist"][8]["required_paths"],
                     [task["report_md"], task["quality_summary_json"]],
                 )
                 self.assertFalse(pathlib.Path(task["report_relative_path"]).is_absolute())
@@ -309,9 +305,11 @@ class OutputLayoutTest(unittest.TestCase):
                 self.assertEqual(ranking["person_report_marker"], task["report_marker"])
                 self.assertEqual(ranking["person_report_relative_path"], task["report_relative_path"])
                 self.assertEqual(ranking["person_report_markdown_link"], task["report_markdown_link"])
-                self.assertNotIn("top_files", detail)
+                self.assertIn("top_files", detail)
                 excluded_suffixes = {".md", ".markdown", ".mdown", ".mkd", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".txt"}
                 self.assertTrue(excluded_suffixes.isdisjoint(detail["extensions"]))
+                self.assertTrue(all(pathlib.Path(path).suffix.lower() not in excluded_suffixes for path in detail["files"]))
+                self.assertTrue(all(pathlib.Path(row["path"]).suffix.lower() not in excluded_suffixes for row in detail["top_files"]))
 
 
 class PromptContractTest(unittest.TestCase):
@@ -322,6 +320,8 @@ class PromptContractTest(unittest.TestCase):
             "OpenCode MCP 工具命名规范",
             "intellij-idea_read_file",
             "intellij-idea_get_file_text_by_path",
+            "intellij-index_ide_find_references",
+            "intellij-index_ide_call_hierarchy",
             "intellij-idea_replace_text_in_file",
             "intellij-idea_replace_text_undoable",
         ]
@@ -360,13 +360,15 @@ class PromptContractTest(unittest.TestCase):
         self.assertNotIn("intellij-idea_read_file", skill_md)
         self.assertNotIn("intellij-index_ide_find_references", skill_md)
 
-    def test_quality_rules_forbid_subagent_code_reading(self):
+    def test_quality_rules_reward_public_reused_code_with_risk_balance(self):
         skill_dir = SCRIPT_PATH.parents[1]
         required_terms = [
-            "不得读取业务代码",
-            "detail.attributed_findings",
-            "detail.code_snippets",
-            "不新增负向扣分 finding",
+            "公共代码",
+            "工具类代码",
+            "调用链",
+            "调用点",
+            '"dimension": "maintainability"',
+            '"dimension": "risk_control"',
         ]
 
         for relative_path in [
@@ -531,7 +533,7 @@ class PromptContractTest(unittest.TestCase):
             for term in required_terms:
                 self.assertIn(term, content, relative_path)
 
-    def test_low_quality_snippets_do_not_create_fallback_score(self):
+    def test_low_quality_snippets_must_deduct_quality_score(self):
         skill_dir = SCRIPT_PATH.parents[1]
         files = [
             "workflows/quality-scoring.md",
@@ -539,7 +541,8 @@ class PromptContractTest(unittest.TestCase):
         ]
         required_terms = [
             "只要写入 `code_snippets`",
-            "脚本不会根据片段自动补充扣分 finding",
+            "脚本按 `low_quality_code_snippet` 规则补充一个负向 finding",
+            "统一计分结果必须小于 0",
         ]
 
         for relative_path in files:

@@ -1,6 +1,6 @@
 # 子 agent 质量摘要 JSON
 
-子 agent 必须把 Java 证据包中的质量发现项保留到 `detail.output.quality_summary_json`，按 MCP workflow 将 `detail.output.quality_summary_marker` 替换为合法 JSON。子 agent 只负责补充中文摘要和风险说明，不负责发现负向扣分项，不负责最终计分。
+子 agent 必须把质量发现项写入 `detail.output.quality_summary_json`，按 MCP workflow 将 `detail.output.quality_summary_marker` 替换为合法 JSON。子 agent 只负责发现证据，不负责最终计分。
 
 子 agent 不得写入 `quality_adjustment_percent`。子 agent 不得写入 `components[].score`。主 agent 必须使用脚本统一计算质量分，避免不同子 agent 使用不同评分尺度。
 
@@ -88,16 +88,17 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 ## 低质量代码片段规则
 
 - `code_snippets` 只记录低质量代码片段；没有明确问题时使用空数组。
-- 只要写入 `code_snippets`，必须同时保留 Java 证据包中对应的负向 finding；脚本不会根据片段自动补充扣分 finding。
+- 只要写入 `code_snippets`，必须同时写入对应的负向 finding；如果遗漏，脚本按 `low_quality_code_snippet` 规则补充一个负向 finding，统一计分结果必须小于 0。
 - 每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。
-- 片段必须来自 Java 证据包已摘录和脱敏的内容，并写明 `file`、`line_start`、`line_end`、`dimension`、`severity`、`reason` 和 `suggestion`。
+- 片段必须来自质量分析允许读取的开发文件或受控调用点文件，并写明 `file`、`line_start`、`line_end`、`dimension`、`severity`、`reason` 和 `suggestion`。
 - 不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；发现敏感信息时用 `[REDACTED]` 替代，并在 `risk_signals` 中说明。
 - 不确定行号时 `line_start` 和 `line_end` 使用 `0`，并在 `reason` 中说明定位依据。
 
-## 质量分析代码读取边界
+## 质量分析允许读取的代码范围
 
-- 子 agent 不得读取业务代码、源码文件或按文件路径自行补证。
-- 负向质量发现、代码片段、行号和归属只能使用 Java 证据包中已生成的 `detail.attributed_findings` 与 `detail.code_snippets`。
+- 只读取 `detail.top_files` 中排名靠前的最多 10 个文件。
+- 只读取当前人员本次统计涉及的文件。
+- 为判断公共代码、工具类代码是否被多个调用点使用，可以额外按 MCP workflow 做引用或调用链取证，并读取最多 5 个候选调用点文件；只能记录与该公共代码直接相关的调用证据。
 - 禁止为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件不属于统计口径。
 - 不扫描全项目，不读取其他人员文件清单。
-- Java 扫描失败、未归因风险或证据不足时，只能写入 `unverified` 或风险说明，不新增负向扣分 finding。
+- MCP 无法读取代码时，不写 finding，并写入 `unverified`。
