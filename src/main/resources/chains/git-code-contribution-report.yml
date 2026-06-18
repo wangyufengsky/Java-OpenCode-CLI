@@ -31,9 +31,8 @@ detail-input:
 static-analysis:
   enabled: true
   pmd-enabled: true
-  spotbugs-enabled: true
+  pmd-ruleset: "pmd/git-report-java-quality.xml"
   fail-on-analysis-error: false
-  maven-bin: "mvn"
 
 synthesis-input:
   person-report-excerpt-chars: 8192

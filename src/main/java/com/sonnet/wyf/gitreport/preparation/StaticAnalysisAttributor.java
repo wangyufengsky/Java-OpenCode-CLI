@@ -1,6 +1,10 @@
 package com.sonnet.wyf.gitreport.preparation;
 
 import com.sonnet.wyf.gitreport.GitReportProperties;
+import net.sourceforge.pmd.PMDConfiguration;
+import net.sourceforge.pmd.PmdAnalysis;
+import net.sourceforge.pmd.reporting.Report;
+import net.sourceforge.pmd.reporting.RuleViolation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -17,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
 public class StaticAnalysisAttributor {
@@ -25,10 +30,7 @@ public class StaticAnalysisAttributor {
             "(?i)(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|密钥|令牌|密码)"
     );
 
-    private final CommandExecutor commandExecutor;
-
-    public StaticAnalysisAttributor(CommandExecutor commandExecutor) {
-        this.commandExecutor = commandExecutor;
+    public StaticAnalysisAttributor() {
     }
 
     public void apply(GitReportProperties properties, Map<String, Object> data) throws Exception {
@@ -42,33 +44,38 @@ public class StaticAnalysisAttributor {
         status.put("enabled", true);
         List<ScannerFinding> findings = new ArrayList<>();
         if (properties.getStaticAnalysis().isPmdEnabled()) {
-            findings.addAll(runPmd(repo, properties, status));
-        }
-        if (properties.getStaticAnalysis().isSpotbugsEnabled()) {
-            findings.addAll(runSpotBugs(repo, properties, status));
+            findings.addAll(runPmd(repo, properties, authors, status));
         }
         attribute(repo, authors, findings, status);
     }
 
-    private List<ScannerFinding> runPmd(Path repo, GitReportProperties properties, Map<String, Object> status) throws Exception {
+    private List<ScannerFinding> runPmd(Path repo, GitReportProperties properties, List<Map<String, Object>> authors, Map<String, Object> status) throws Exception {
         Map<String, Object> pmd = new LinkedHashMap<>();
         status.put("pmd", pmd);
         try {
-            commandExecutor.run(repo,
-                    properties.getStaticAnalysis().getMavenBin(),
-                    "-q",
-                    "org.apache.maven.plugins:maven-pmd-plugin:3.28.0:pmd",
-                    "-DskipTests",
-                    "-Dpmd.failOnViolation=false");
-            Path report = firstExisting(repo.resolve("target/site/pmd.xml"), repo.resolve("target/pmd.xml"));
-            if (report == null) {
-                pmd.put("status", "no_report");
+            List<Path> files = touchedJavaFiles(repo, authors);
+            pmd.put("mode", "embedded");
+            pmd.put("ruleset", properties.getStaticAnalysis().getPmdRuleset());
+            pmd.put("scanned_file_count", files.size());
+            if (files.isEmpty()) {
+                pmd.put("status", "no_source_files");
                 return List.of();
             }
-            List<ScannerFinding> findings = parsePmd(report, repo);
+            PMDConfiguration configuration = new PMDConfiguration();
+            configuration.addRuleSet(properties.getStaticAnalysis().getPmdRuleset());
+            configuration.setThreads(1);
+            configuration.setIgnoreIncrementalAnalysis(true);
+            Report report;
+            try (PmdAnalysis analysis = PmdAnalysis.create(configuration)) {
+                for (Path file : files) {
+                    analysis.files().addFile(file);
+                }
+                report = analysis.performAnalysisAndCollectReport();
+            }
+            List<ScannerFinding> findings = mapPmdViolations(report, repo);
             pmd.put("status", "completed");
-            pmd.put("report", report.toString());
             pmd.put("finding_count", findings.size());
+            pmd.put("processing_error_count", report.getProcessingErrors().size());
             return findings;
         } catch (Exception exception) {
             pmd.put("status", "failed");
@@ -81,37 +88,16 @@ public class StaticAnalysisAttributor {
         }
     }
 
-    private List<ScannerFinding> runSpotBugs(Path repo, GitReportProperties properties, Map<String, Object> status) throws Exception {
-        Map<String, Object> spotbugs = new LinkedHashMap<>();
-        status.put("spotbugs", spotbugs);
-        try {
-            commandExecutor.run(repo,
-                    properties.getStaticAnalysis().getMavenBin(),
-                    "-q",
-                    "-DskipTests",
-                    "compile",
-                    "com.github.spotbugs:spotbugs-maven-plugin:4.10.2.0:spotbugs",
-                    "-Dspotbugs.failOnError=false",
-                    "-Dspotbugs.xmlOutput=true");
-            Path report = firstExisting(repo.resolve("target/spotbugsXml.xml"), repo.resolve("target/spotbugs.xml"));
-            if (report == null) {
-                spotbugs.put("status", "no_report");
-                return List.of();
-            }
-            List<ScannerFinding> findings = parseSpotBugs(report, repo);
-            spotbugs.put("status", "completed");
-            spotbugs.put("report", report.toString());
-            spotbugs.put("finding_count", findings.size());
-            return findings;
-        } catch (Exception exception) {
-            spotbugs.put("status", "failed");
-            spotbugs.put("error", exception.getMessage());
-            if (properties.getStaticAnalysis().isFailOnAnalysisError()) {
-                throw exception;
-            }
-            log.warn("SpotBugs analysis failed and will be recorded as unverified: {}", exception.getMessage());
-            return List.of();
-        }
+    private List<Path> touchedJavaFiles(Path repo, List<Map<String, Object>> authors) {
+        return authors.stream()
+                .flatMap(author -> listValue(author.get("unique_files")).stream())
+                .map(value -> Objects.toString(value, ""))
+                .filter(path -> path.endsWith(".java"))
+                .distinct()
+                .map(repo::resolve)
+                .map(Path::normalize)
+                .filter(path -> path.startsWith(repo) && Files.isRegularFile(path))
+                .collect(Collectors.toList());
     }
 
     List<ScannerFinding> parsePmd(Path report, Path repo) throws Exception {
@@ -140,28 +126,26 @@ public class StaticAnalysisAttributor {
         return findings;
     }
 
-    List<ScannerFinding> parseSpotBugs(Path report, Path repo) throws Exception {
-        Document document = parseXml(report);
+    List<ScannerFinding> mapPmdViolations(Report report, Path repo) {
         List<ScannerFinding> findings = new ArrayList<>();
-        NodeList bugs = document.getElementsByTagName("BugInstance");
-        for (int index = 0; index < bugs.getLength(); index++) {
-            Element bug = (Element) bugs.item(index);
-            Element sourceLine = firstElement(bug.getElementsByTagName("SourceLine"));
-            if (sourceLine == null) {
-                continue;
-            }
-            String path = normalizePath(repo, firstNonBlank(sourceLine.getAttribute("sourcepath"), sourceLine.getAttribute("sourcefile"), ""));
-            String type = firstNonBlank(bug.getAttribute("type"), bug.getAttribute("abbrev"), "spotbugs_bug");
-            String category = bug.getAttribute("category");
+        for (RuleViolation violation : report.getViolations()) {
+            String rule = firstNonBlank(
+                    violation.getRule() == null ? "" : violation.getRule().getName(),
+                    "pmd_violation"
+            );
+            String ruleset = violation.getRule() == null ? "" : violation.getRule().getRuleSetName();
+            String priority = violation.getRule() == null || violation.getRule().getPriority() == null
+                    ? ""
+                    : String.valueOf(violation.getRule().getPriority().getPriority());
             findings.add(new ScannerFinding(
-                    "spotbugs",
-                    type,
-                    path,
-                    intAttr(sourceLine, "start", 0),
-                    intAttr(sourceLine, "end", intAttr(sourceLine, "start", 0)),
-                    severityFromSpotBugs(bug.getAttribute("priority")),
-                    dimension(type, category, "spotbugs"),
-                    firstNonBlank(category, type, "SpotBugs finding")
+                    "pmd",
+                    rule,
+                    normalizePath(repo, violation.getFileId().getAbsolutePath()),
+                    violation.getBeginLine(),
+                    violation.getEndLine(),
+                    severityFromPmd(priority),
+                    dimension(rule, firstNonBlank(ruleset, violation.getDescription()), "pmd"),
+                    compact(violation.getDescription())
             ));
         }
         return findings;
@@ -264,6 +248,9 @@ public class StaticAnalysisAttributor {
             snippet.put("line_end", end);
             snippet.put("dimension", finding.get("dimension"));
             snippet.put("severity", finding.get("severity"));
+            snippet.put("scanner", finding.get("scanner"));
+            snippet.put("scanner_rule", finding.get("scanner_rule"));
+            snippet.put("owned_hunk_id", finding.get("owned_hunk_id"));
             snippet.put("reason", finding.get("reason"));
             snippet.put("suggestion", finding.get("suggestion"));
             snippet.put("snippet", String.join("\n", excerpt));
@@ -287,19 +274,6 @@ public class StaticAnalysisAttributor {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         return factory.newDocumentBuilder().parse(report.toFile());
-    }
-
-    private Path firstExisting(Path... paths) {
-        for (Path path : paths) {
-            if (Files.exists(path)) {
-                return path;
-            }
-        }
-        return null;
-    }
-
-    private Element firstElement(NodeList nodes) {
-        return nodes.getLength() == 0 ? null : (Element) nodes.item(0);
     }
 
     private int intAttr(Element element, String name, int fallback) {
@@ -332,14 +306,6 @@ public class StaticAnalysisAttributor {
             return "high";
         }
         return value == 3 ? "medium" : "low";
-    }
-
-    private String severityFromSpotBugs(String priority) {
-        int value = parseInt(priority, 2);
-        if (value <= 1) {
-            return "high";
-        }
-        return value == 2 ? "medium" : "low";
     }
 
     private int parseInt(String value, int fallback) {

@@ -39,8 +39,8 @@ public class PreparationConfiguration {
     }
 
     @Bean
-    StaticAnalysisAttributor staticAnalysisAttributor(CommandExecutor commandExecutor) {
-        return new StaticAnalysisAttributor(commandExecutor);
+    StaticAnalysisAttributor staticAnalysisAttributor() {
+        return new StaticAnalysisAttributor();
     }
 
     @Bean

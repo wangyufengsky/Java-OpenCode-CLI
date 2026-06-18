@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="git-report-java-quality"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.github.io/schema/ruleset_2_0_0.xsd">
+
+    <description>
+        Risk-first Java rules for git contribution quality reports.
+        Focus on correctness, exception handling, resource handling, security,
+        concurrency, performance, and maintainability. Style-only and
+        documentation-only rules are intentionally excluded.
+    </description>
+
+    <rule ref="category/java/security.xml"/>
+
+    <rule ref="category/java/multithreading.xml"/>
+
+    <rule ref="category/java/errorprone.xml">
+        <exclude name="AvoidDuplicateLiterals"/>
+        <exclude name="MissingSerialVersionUID"/>
+        <exclude name="MoreThanOneLogger"/>
+        <exclude name="JUnitSpelling"/>
+        <exclude name="JUnitStaticSuite"/>
+        <exclude name="DetachedTestCase"/>
+        <exclude name="TestClassWithoutTestCases"/>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/PreserveStackTrace"/>
+    <rule ref="category/java/bestpractices.xml/UseTryWithResources"/>
+    <rule ref="category/java/bestpractices.xml/CheckResultSet"/>
+    <rule ref="category/java/bestpractices.xml/AvoidPrintStackTrace"/>
+    <rule ref="category/java/bestpractices.xml/SystemPrintln"/>
+    <rule ref="category/java/bestpractices.xml/RelianceOnDefaultCharset"/>
+    <rule ref="category/java/bestpractices.xml/UseStandardCharsets"/>
+    <rule ref="category/java/bestpractices.xml/ArrayIsStoredDirectly"/>
+    <rule ref="category/java/bestpractices.xml/MethodReturnsInternalArray"/>
+    <rule ref="category/java/bestpractices.xml/UseCollectionIsEmpty"/>
+    <rule ref="category/java/bestpractices.xml/UseEnumCollections"/>
+    <rule ref="category/java/bestpractices.xml/AvoidUsingHardCodedIP"/>
+    <rule ref="category/java/bestpractices.xml/UnusedAssignment"/>
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod"/>
+
+    <rule ref="category/java/performance.xml/InefficientStringBuffering"/>
+    <rule ref="category/java/performance.xml/ConsecutiveAppendsShouldReuse"/>
+    <rule ref="category/java/performance.xml/ConsecutiveLiteralAppends"/>
+    <rule ref="category/java/performance.xml/UseIndexOfChar"/>
+    <rule ref="category/java/performance.xml/StringInstantiation"/>
+    <rule ref="category/java/performance.xml/BigIntegerInstantiation"/>
+    <rule ref="category/java/performance.xml/InefficientEmptyStringCheck"/>
+    <rule ref="category/java/performance.xml/AvoidFileStream"/>
+    <rule ref="category/java/performance.xml/OptimizableToArrayCall"/>
+
+    <rule ref="category/java/design.xml/CognitiveComplexity"/>
+    <rule ref="category/java/design.xml/CyclomaticComplexity"/>
+    <rule ref="category/java/design.xml/NPathComplexity"/>
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"/>
+    <rule ref="category/java/design.xml/ExceptionAsFlowControl"/>
+    <rule ref="category/java/design.xml/AvoidCatchingGenericException"/>
+    <rule ref="category/java/design.xml/AvoidRethrowingException"/>
+    <rule ref="category/java/design.xml/AvoidThrowingRawExceptionTypes"/>
+    <rule ref="category/java/design.xml/AvoidThrowingNullPointerException"/>
+    <rule ref="category/java/design.xml/SignatureDeclareThrowsException"/>
+    <rule ref="category/java/design.xml/CouplingBetweenObjects"/>
+    <rule ref="category/java/design.xml/GodClass"/>
+    <rule ref="category/java/design.xml/MutableStaticState"/>
+    <rule ref="category/java/design.xml/ExcessiveParameterList"/>
+    <rule ref="category/java/design.xml/UseUtilityClass"/>
+</ruleset>

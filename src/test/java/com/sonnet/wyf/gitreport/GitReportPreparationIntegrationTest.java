@@ -79,16 +79,37 @@ class GitReportPreparationIntegrationTest {
 
         JsonNode task = indexInputs.get("tasks").get(0);
         Path detailJson = Path.of(task.get("detail_json").asText());
+        Path gitJson = Path.of(task.get("git_json").asText());
+        Path pmdJson = Path.of(task.get("pmd_json").asText());
         Path reportMd = Path.of(task.get("report_md").asText());
         Path qualitySummaryJson = Path.of(task.get("quality_summary_json").asText());
         assertThat(detailJson).exists();
+        assertThat(gitJson).exists();
+        assertThat(pmdJson).exists();
+        assertThat(task.has("scanner_json")).isFalse();
         String personReport = Files.readString(reportMd);
-        assertThat(personReport).contains("# 个人代码提交量报告：Alice <alice@example.com>", "{{WORKLOAD_STRUCTURE_ANALYSIS}}");
+        assertThat(personReport).contains(
+                "# 个人代码提交量报告：Alice <alice@example.com>",
+                "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
+                "{{BIAS_NOTES}}",
+                "{{POSITIVE_SIGNALS}}",
+                "{{RISK_SIGNALS}}",
+                "{{OVERALL_EVALUATION}}"
+        );
+        assertThat(personReport).doesNotContain(
+                "{{OWNED_CHANGE_ROWS}}",
+                "{{EXTENSION_ROWS}}",
+                "{{COMMIT_ROWS}}",
+                "{{QUALITY_FINDING_ROWS}}",
+                "{{LOW_QUALITY_SNIPPETS}}",
+                "{{UNVERIFIED_ITEMS}}"
+        );
+        assertThat(personReport).contains("Demo.java", ".java", "add demo", "未发现可安全摘录的低质量代码片段");
         assertThat(personReport).doesNotContain(GitReportConstants.AUTHOR_REPORT_MARKER);
         JsonNode qualitySummary = objectMapper.readTree(qualitySummaryJson.toFile());
         assertThat(qualitySummary.get("author").asText()).isEqualTo("Alice <alice@example.com>");
-        assertThat(qualitySummary.get("status").asText()).isEqualTo("pending");
-        assertThat(qualitySummary.get("summary").asText()).isEqualTo("{{QUALITY_SUMMARY}}");
+        assertThat(qualitySummary.get("status").asText()).isEqualTo("completed");
+        assertThat(qualitySummary.get("summary").asText()).contains("Java 已根据静态扫描归因生成质量摘要");
         assertThat(task.get("report_markdown_link").asText()).startsWith("[person-report.md](reports/");
         assertThat(task.has("report_marker")).isFalse();
         assertThat(task.has("quality_summary_marker")).isFalse();
@@ -96,12 +117,30 @@ class GitReportPreparationIntegrationTest {
         assertThat(detail.get("metadata").get("project_id").asText()).isEqualTo("upfs-production");
         assertThat(detail.has("files")).isFalse();
         assertThat(detail.has("top_files")).isFalse();
-        assertThat(detail.get("owned_hunks")).isNotNull();
-        assertThat(detail.get("attributed_findings")).isNotNull();
-        assertThat(detail.get("context_findings")).isNotNull();
-        assertThat(detail.get("scanner_status")).isNotNull();
-        assertThat(detail.get("commits")).hasSizeLessThanOrEqualTo(3);
-        assertThat(detail.get("execution_worklist")).hasSize(8);
+        assertThat(detail.has("owned_hunks")).isFalse();
+        assertThat(detail.has("attributed_findings")).isFalse();
+        assertThat(detail.has("context_findings")).isFalse();
+        assertThat(detail.get("inputs").get("git_json").asText()).isEqualTo(gitJson.toString());
+        assertThat(detail.get("inputs").get("pmd_json").asText()).isEqualTo(pmdJson.toString());
+        assertThat(detail.get("inputs").size()).isEqualTo(2);
+        JsonNode gitDetail = objectMapper.readTree(gitJson.toFile());
+        assertThat(gitDetail.get("owned_hunks")).isNotNull();
+        assertThat(gitDetail.get("commits")).hasSizeLessThanOrEqualTo(3);
+        JsonNode pmdDetail = objectMapper.readTree(pmdJson.toFile());
+        assertThat(pmdDetail.get("scanner").asText()).isEqualTo("pmd");
+        assertThat(pmdDetail.get("attributed_findings")).isNotNull();
+        assertThat(detail.get("execution_worklist")).hasSize(7);
+        assertThat(detail.get("execution_worklist").findValuesAsText("action")).contains(
+                "read_detail_json",
+                "read_git_json",
+                "read_pmd_json",
+                "replace_analysis_placeholders"
+        );
+        assertThat(detail.get("execution_worklist").findValuesAsText("action")).doesNotContain(
+                "complete_quality_summary_text_fields",
+                "replace_quality_summary_json_fields",
+                "read_scanner_json"
+        );
         assertThat(detail.at("/output/report_placeholders").isArray()).isTrue();
         assertThat(detail.at("/output/quality_summary_status_required").asText()).isEqualTo("completed");
     }
