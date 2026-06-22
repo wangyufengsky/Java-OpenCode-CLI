@@ -79,7 +79,6 @@ class SmartEsbWorkflowChainConcurrencyTest {
         properties.setOut(tempDir.resolve("logical-out").toString());
         properties.setLocalOut(tempDir.resolve("local-out"));
         properties.setTransactionPlanDir(tempDir.resolve("plans"));
-        properties.setOldProject(tempDir.resolve("old-project").toString());
         properties.setNewProject(tempDir.resolve("new-project").toString());
         properties.setDocRoot(tempDir.resolve("docs").toString());
         return properties;

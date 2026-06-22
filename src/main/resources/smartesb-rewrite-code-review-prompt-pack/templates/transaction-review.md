@@ -11,10 +11,10 @@
 - 交易：`{{transaction}}`
 - 说明：{{description}}
 - 重构项目：`{{new_project}}`
-- legacy-index：`{{legacy_index}}`
+- old-8583-doc：`{{old_8583_doc}}`
 - 映射文档：`{{mapping_doc}}`
 - 详细设计：`{{reconstructed_design}}`
-- 证据来源：仅使用 new_project 新代码、映射文档、legacy-index 老代码详细设计索引、重构详细设计、配置、SQL 和数据库证据；不读取或检索 old_project 下的老代码源码。
+- 证据来源：仅使用 new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据；不读取或检索 old_project 下的老代码源码。
 
 ## 详细报告链接
 

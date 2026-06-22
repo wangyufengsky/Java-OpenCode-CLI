@@ -19,7 +19,7 @@
 - 搜索不到刚生成的报告或索引疑似过期时，先尝试 `intellij-index_ide_sync_files`，再重试读取。
 - OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用或路径不可写时，停止汇总写入并向用户报告失败；禁止使用 shell、本地脚本或临时重定向。
 - 汇总阶段不得用 shell 扫描源码、不得重新做交易级代码审查。
-- 汇总阶段不读取或检索 old_project 下的老代码源码，也不重新读取映射文档、legacy-index 或重构详细设计；只使用 summary 输入和交易摘要。
+- 汇总阶段不读取或检索 old_project 下的老代码源码，也不重新读取映射文档、old-8583-doc 或重构详细设计；只使用 summary 输入和交易摘要。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入汇总输入、交易摘要、`index.md` 或 `summary.md`。
 - 汇总阶段必须按 `index_inputs.schemas.transaction_summary` 校验每个交易 `summary.json`，不得跳过 schema 校验。
 
@@ -30,7 +30,7 @@
 - 只有 summary 缺失、JSON 格式错误、schema 校验失败或 status 为 `failed` 时，才读取对应 `review.md`。
 - schema 校验失败的交易必须进入“失败或未完成交易”，并写明缺失字段或类型错误；不得把无效 summary 当成 completed。
 - 不重新读取全量源码。
-- 不重新读取映射文档、legacy-index 或重构详细设计，不读取 old_project 源码。
+- 不重新读取映射文档、old-8583-doc 或重构详细设计，不读取 old_project 源码。
 - 不新增交易审查 session 没有证据支持的 finding。
 - 输出的 `index.md` 和 `summary.md` 必须全中文。
 - 允许保留原文的内容仅限代码标识符、文件路径、协议域号、JSON path、错误码、工具名和命令名。

@@ -27,6 +27,6 @@ class ChainConfigLoaderTest {
 
         assertThat(properties.getOut()).isEqualTo("/home/wangyufeng/review-output/smartesb-rewrite-review");
         assertThat(properties.getTransactionPlanDir()).hasToString("src/main/resources/smartesb-transactions");
-        assertThat(properties.getBatchSize()).isEqualTo(5);
+        assertThat(properties.getOld8583Doc()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md");
     }
 }

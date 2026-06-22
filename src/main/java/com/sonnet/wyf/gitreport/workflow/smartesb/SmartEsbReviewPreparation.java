@@ -16,6 +16,7 @@ import java.util.Map;
 public class SmartEsbReviewPreparation {
     private static final String INDEX_TEMPLATE = "smartesb-rewrite-code-review-prompt-pack/templates/index.md";
     private static final String TRANSACTION_REVIEW_TEMPLATE = "smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md";
+    private static final String TRANSACTION_SUMMARY_SCHEMA = "smartesb-rewrite-code-review-prompt-pack/schemas/transaction-summary.schema.json";
     public static final Map<String, List<String>> TOP_LEVEL_OUTPUT_PLACEHOLDERS = Map.of(
             "index_md", List.of(
                     "{{OVERALL_CONCLUSION}}",
@@ -67,6 +68,8 @@ public class SmartEsbReviewPreparation {
             throw new IllegalStateException("SmartESB output already exists and is not empty: " + out);
         }
         Files.createDirectories(out);
+        String schemaLogicalPath = appendLogical(logicalOut, "schemas", "transaction-summary.schema.json");
+        writeTextIfMissing(out.resolve("schemas").resolve("transaction-summary.schema.json"), readResource(TRANSACTION_SUMMARY_SCHEMA), overwrite);
         Map<String, String> topValues = topLevelTemplateValues(properties, logicalOut, plan, plan.transactions().size());
         writeTextIfMissing(out.resolve("index.md"), renderTemplate(INDEX_TEMPLATE, topValues), overwrite);
         writeTextIfMissing(out.resolve("summary.md"), renderSummaryTemplate(topValues), overwrite);
@@ -74,7 +77,7 @@ public class SmartEsbReviewPreparation {
         List<Map<String, Object>> tasks = plan.transactions().stream()
                 .map(transaction -> {
                     try {
-                        return writeTransaction(properties, logicalOut, out, transaction, overwrite);
+                        return writeTransaction(properties, logicalOut, schemaLogicalPath, out, transaction, overwrite);
                     } catch (IOException exception) {
                         throw new IllegalStateException(exception);
                     }
@@ -99,7 +102,7 @@ public class SmartEsbReviewPreparation {
         indexInputs.put("date", plan.date().toString());
         indexInputs.put("out", logicalOut);
         indexInputs.put("local_out", properties.getLocalOut() == null ? null : out.toString());
-        indexInputs.put("schemas", Map.of("transaction_summary", "classpath:smartesb-rewrite-code-review-prompt-pack/schemas/transaction-summary.schema.json"));
+        indexInputs.put("schemas", Map.of("transaction_summary", schemaLogicalPath));
         indexInputs.put("templates", Map.of(
                 "index", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/index.md",
                 "transaction_review", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md"
@@ -131,6 +134,7 @@ public class SmartEsbReviewPreparation {
     private Map<String, Object> writeTransaction(
             SmartEsbRewriteProperties properties,
             String logicalOut,
+            String schemaLogicalPath,
             Path localOut,
             SmartEsbDailyTransactionPlan.Transaction transaction,
             boolean overwrite
@@ -181,12 +185,12 @@ public class SmartEsbReviewPreparation {
         task.put("documents", Map.of(
                 "mapping_8583_to_json", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))),
                 "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))),
-                "legacy_index", normalizeLogical(properties.getLegacyIndex())
+                "old_8583_doc", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "old-8583.md")))
         ));
         task.put("skill", Map.of(
                 "prompt", "classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-transaction-review.md",
                 "transaction_template", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md",
-                "summary_schema", "classpath:smartesb-rewrite-code-review-prompt-pack/schemas/transaction-summary.schema.json",
+                "summary_schema", schemaLogicalPath,
                 "preferred_reader", "opencode_native",
                 "preferred_writer", "opencode_native",
                 "fallback_file_tools", List.of(
@@ -202,7 +206,7 @@ public class SmartEsbReviewPreparation {
         task.put("output", output);
         task.put("output_placeholders", TRANSACTION_OUTPUT_PLACEHOLDERS);
         task.put("rules", Map.of(
-                "scope", "只审查当前交易的新代码、映射文档、重构详细设计和 legacy-index 老代码详细设计索引；不读取或检索 old_project 下的老代码源码。",
+                "scope", "只审查当前交易的新代码、映射文档、重构详细设计和 old-8583-doc 老代码详细设计；不读取或检索 old_project 下的老代码源码。",
                 "precreated_outputs", "准备器已预创建包含完整模板和占位符的 review.md、mapping-matrix.md、sections/*.md，以及初始 summary.json；子 agent 只能替换这些已存在文件中的 output_placeholders，占位符之外的标题结构不得删除、重命名或重排。",
                 "template_contract", "只能替换 output_placeholders 中列出的占位符；写入完成后所有 Markdown 报告不得残留 {{...}} 占位符。",
                 "reader_preference", "读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 fallback_file_tools 中的读取工具。",
@@ -269,7 +273,7 @@ public class SmartEsbReviewPreparation {
     private Map<String, String> topLevelTemplateValues(SmartEsbRewriteProperties properties, String logicalOut, SmartEsbDailyTransactionPlan plan, int transactionCount) {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("new_project", normalizeLogical(properties.getNewProject()));
-        values.put("legacy_index", normalizeLogical(properties.getLegacyIndex()));
+        values.put("old_8583_doc", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "old-8583.md"))));
         values.put("transaction_count", String.valueOf(transactionCount));
         values.put("out", logicalOut);
         values.put("date", plan.date().toString());
@@ -281,7 +285,7 @@ public class SmartEsbReviewPreparation {
         values.put("transaction", transaction.name());
         values.put("description", transaction.description());
         values.put("new_project", normalizeLogical(properties.getNewProject()));
-        values.put("legacy_index", normalizeLogical(properties.getLegacyIndex()));
+        values.put("old_8583_doc", normalizeLogical(firstNonBlank(properties.getOld8583Doc(), appendLogical(properties.getDocRoot(), "old-8583.md"))));
         values.put("reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))));
         values.put("mapping_doc", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))));
         return values;
@@ -301,7 +305,7 @@ public class SmartEsbReviewPreparation {
                 | --- | --- |
                 | 日期 | {{date}} |
                 | 重构项目 | `{{new_project}}` |
-                | legacy-index | `{{legacy_index}}` |
+                | old-8583-doc | `{{old_8583_doc}}` |
                 | 交易数 | {{transaction_count}} |
                 | 输出目录 | `{{out}}` |
 
@@ -332,7 +336,7 @@ public class SmartEsbReviewPreparation {
                 {{SUMMARY_NEXT_STEPS}}
                 """.replace("{{date}}", values.getOrDefault("date", ""))
                 .replace("{{new_project}}", values.getOrDefault("new_project", ""))
-                .replace("{{legacy_index}}", values.getOrDefault("legacy_index", ""))
+                .replace("{{old_8583_doc}}", values.getOrDefault("old_8583_doc", ""))
                 .replace("{{transaction_count}}", values.getOrDefault("transaction_count", ""))
                 .replace("{{out}}", values.getOrDefault("out", ""));
     }

@@ -120,14 +120,15 @@ class PromptPackContractTest {
 
         String combined = worker + "\n" + rerun + "\n" + synthesis;
         assertThat(combined).contains(
-                "可以读取 legacy-index 中当前交易相关的老代码详细设计索引片段",
-                "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、legacy-index 老代码详细设计索引、重构详细设计、配置、SQL 和数据库证据",
-                "只读取当前交易相关的映射文档、legacy-index 和重构详细设计片段",
+                "可以读取 old-8583-doc 中当前交易相关的老代码详细设计片段",
+                "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据",
+                "只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段",
                 "优先使用 OpenCode `explore` 分析文档和代码",
                 "主交易 session 只消费 `explore` 返回的短证据摘要",
                 "`old_code_paths` 必须写空数组"
         );
         assertThat(combined).doesNotContain(
+                "legacy-index",
                 "允许通过 OpenCode `explore` 分析 old_project 老代码",
                 "交易审查只使用 task JSON、准备器输出、old_project 老代码",
                 "在 `old_project` 中定位",
