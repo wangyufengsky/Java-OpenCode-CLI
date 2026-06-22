@@ -27,9 +27,9 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 - `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response` 是必经步骤。
 - 如果 worklist 缺失、目标路径缺失、marker 不存在、写入失败或校验失败，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
 - 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束。
-- 子 agent 分析完成后必须立即调用 MCP 写入工具，先写 `person-report.md`，再写 `quality-summary.json`。
+- 子 agent 分析完成后必须立即调用 MCP 写入工具，先写 `quality-summary.json`，再写 `person-report.md`。
 - 不要等待主会话继续提示；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
 
 ## Sub-Agent Contract
 
@@ -42,6 +42,7 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 - 写入 `detail.output.quality_summary_json` 指定的文件，初始内容为 quality-summary.json 专用 marker。
 - 写个人报告时只用 `detail.output.report_marker` 替换预创建 marker。
 - 写质量摘要时只替换 `detail.output.quality_summary_marker`；不得使用 `detail.output.report_marker` 写 `quality_summary_json`。
+- 必须先写质量摘要，再根据已写入的质量证据写个人报告。
 - 按 `detail.execution_worklist` 的 `step` 升序执行所有必经步骤；不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - 按报告写作 workflow 分块写个人报告；不要一次写入完整长报告。
 - 不创建、重命名、删除或移动任何文件。

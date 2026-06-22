@@ -44,12 +44,16 @@ class PromptPackContractTest {
         );
         assertThat(worker).contains(
                 "写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具",
+                "必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`",
+                "质量分析只能基于 `detail.changed_regions`",
+                "不得打开或通读 `detail.top_files[].path` 对应的完整文件",
+                "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
                 "路径字段只能使用 `filePath`",
                 "禁止使用 `pathInProject`、`file_path`、`path`",
                 "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
-                "代码取证 MCP 不足时写入 `unverified`",
+                "代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`",
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );
@@ -65,6 +69,7 @@ class PromptPackContractTest {
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );
         assertThat(worker).doesNotContain("MCP 写入不可用时必须返回 `BLOCKED`");
+        assertThat(worker).doesNotContain("inspect_top_files");
         assertThat(synthesis).doesNotContain("MCP 写入不可用时必须返回 `BLOCKED`");
         assertThat(worker).doesNotContain("替换 `detail.output.report_marker`", "保留 marker", "移除 marker");
         assertThat(synthesis).doesNotContain("final_report_marker", "保留 marker", "移除 marker");

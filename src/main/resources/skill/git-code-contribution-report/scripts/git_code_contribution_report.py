@@ -330,6 +330,7 @@ def empty_author(author: str) -> dict[str, Any]:
         "non_comment_churn": 0,
         "workload_score": 0.0,
         "commits": [],
+        "changed_regions": [],
         "files": {},
         "extensions": {},
     }
@@ -592,6 +593,95 @@ def parse_non_comment_diff(repo: Path, commit_hash: str, includes: list[str], ex
     return result
 
 
+def parse_changed_regions(repo: Path, commit_hash: str, includes: list[str], excludes: list[str], max_hunk_lines: int) -> list[dict[str, Any]]:
+    output = run_git(
+        repo,
+        ["show", "--format=", "--unified=0", "--no-ext-diff", "--find-renames", commit_hash],
+    )
+    regions: list[dict[str, Any]] = []
+    current_file: str | None = None
+    old_file: str | None = None
+    change_type = "modified"
+    current_region: dict[str, Any] | None = None
+    current_hunk: list[str] | None = None
+    current_changed_lines = 0
+    current_truncated = False
+    hunk_line_limit = max(1, max_hunk_lines)
+    hunk_pattern = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@.*")
+
+    def finish_region() -> None:
+        nonlocal current_region, current_hunk, current_truncated
+        if current_region is not None and current_hunk is not None:
+            current_region["hunk"] = "\n".join(current_hunk)
+            current_region["truncated"] = current_truncated
+
+    def count_value(value: str | None) -> int:
+        return 1 if value in (None, "") else int(value)
+
+    for line in output.splitlines():
+        if line.startswith("diff "):
+            finish_region()
+            current_region = None
+            current_hunk = None
+            current_file = None
+            old_file = None
+            change_type = "modified"
+            continue
+        if line.startswith("--- a/"):
+            old_file = line[6:]
+            continue
+        if line.startswith("--- /dev/null"):
+            old_file = None
+            change_type = "added"
+            continue
+        if line.startswith("+++ b/"):
+            candidate = line[6:]
+            current_file = candidate if file_is_counted(candidate, includes, excludes) else None
+            continue
+        if line.startswith("+++ /dev/null"):
+            change_type = "deleted"
+            current_file = old_file if old_file and file_is_counted(old_file, includes, excludes) else None
+            continue
+
+        match = hunk_pattern.match(line)
+        if match:
+            finish_region()
+            current_region = None
+            current_hunk = None
+            current_changed_lines = 0
+            current_truncated = False
+            if current_file is not None:
+                old_start = int(match.group(1))
+                old_count = count_value(match.group(2))
+                new_start = int(match.group(3))
+                new_count = count_value(match.group(4))
+                current_region = {
+                    "commit": commit_hash,
+                    "short_hash": commit_hash[:12],
+                    "file": current_file,
+                    "change_type": change_type,
+                    "line_start": old_start if new_count == 0 else new_start,
+                    "line_end": old_start + max(0, old_count - 1) if new_count == 0 else new_start + max(0, new_count - 1),
+                    "old_line_start": old_start,
+                    "old_line_end": old_start + max(0, old_count - 1),
+                }
+                current_hunk = [line]
+                regions.append(current_region)
+            continue
+
+        if current_region is None or current_hunk is None or line.startswith("\\ No newline"):
+            continue
+        if line.startswith("+") or line.startswith("-"):
+            if current_changed_lines < hunk_line_limit:
+                current_hunk.append(line)
+            else:
+                current_truncated = True
+            current_changed_lines += 1
+
+    finish_region()
+    return regions
+
+
 def add_file_stats(target: dict[str, Any], path: str, added: int, deleted: int, nc_added: int, nc_deleted: int) -> None:
     files = target["files"]
     if path not in files:
@@ -642,6 +732,7 @@ def collect_stats(args: argparse.Namespace) -> dict[str, Any]:
         )
 
         non_comment = parse_non_comment_diff(repo, commit["hash"], include_patterns, exclude_patterns)
+        stats["changed_regions"].extend(parse_changed_regions(repo, commit["hash"], include_patterns, exclude_patterns, args.changed_region_lines))
         for row in numstat_rows:
             path = row["path"]
             nc = non_comment.get(path, {"added": 0, "deleted": 0})
@@ -749,10 +840,9 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
         },
         {
             "step": 3,
-            "action": "inspect_top_files",
+            "action": "inspect_changed_regions",
             "required": True,
-            "source": "detail.top_files",
-            "limit": 10,
+            "source": "detail.changed_regions",
             "status": "pending",
         },
         {
@@ -765,32 +855,32 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
         },
         {
             "step": 5,
-            "action": "draft_person_report",
-            "required": True,
-            "target_path": str(report_md),
-            "status": "pending",
-        },
-        {
-            "step": 6,
-            "action": "write_person_report",
-            "required": True,
-            "target_path": str(report_md),
-            "marker": AUTHOR_REPORT_MARKER,
-            "status": "pending",
-        },
-        {
-            "step": 7,
             "action": "draft_quality_summary",
             "required": True,
             "target_path": str(quality_summary_json),
             "status": "pending",
         },
         {
-            "step": 8,
+            "step": 6,
             "action": "write_quality_summary",
             "required": True,
             "target_path": str(quality_summary_json),
             "marker": QUALITY_SUMMARY_MARKER,
+            "status": "pending",
+        },
+        {
+            "step": 7,
+            "action": "draft_person_report",
+            "required": True,
+            "target_path": str(report_md),
+            "status": "pending",
+        },
+        {
+            "step": 8,
+            "action": "write_person_report",
+            "required": True,
+            "target_path": str(report_md),
+            "marker": AUTHOR_REPORT_MARKER,
             "status": "pending",
         },
         {
@@ -847,7 +937,7 @@ def attach_output_paths(data: dict[str, Any], out: Path) -> dict[str, Any]:
     return data
 
 
-def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
+def write_author_outputs(out: Path, data: dict[str, Any], args: argparse.Namespace) -> None:
     details_dir = out / "details"
     reports_dir = out / "reports"
     details_dir.mkdir(parents=True, exist_ok=True)
@@ -879,6 +969,7 @@ def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
                 "workload_score": author["workload_score"],
             },
             "top_files": author["top_files"],
+            "changed_regions": prioritized_changed_regions(author, args.changed_regions),
             "extensions": author["extensions"],
             "commits": author["commits"],
             "files": author["files"],
@@ -895,6 +986,23 @@ def write_author_outputs(out: Path, data: dict[str, Any]) -> None:
         write_json(detail_path, detail)
         report_path.write_text(AUTHOR_REPORT_MARKER + "\n", encoding="utf-8")
         quality_path.write_text(QUALITY_SUMMARY_MARKER + "\n", encoding="utf-8")
+
+
+def prioritized_changed_regions(author: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    top_file_priority = {row["path"]: index for index, row in enumerate(author.get("top_files", []))}
+
+    def changed_line_count(region: dict[str, Any]) -> int:
+        return sum(1 for line in region.get("hunk", "").splitlines() if line.strip().startswith(("+", "-")))
+
+    return sorted(
+        author.get("changed_regions", []),
+        key=lambda region: (
+            top_file_priority.get(region.get("file"), sys.maxsize),
+            -changed_line_count(region),
+            region.get("file", ""),
+            region.get("line_start", 0),
+        ),
+    )[: max(0, limit)]
 
 
 def build_index_inputs(data: dict[str, Any]) -> dict[str, Any]:
@@ -1019,6 +1127,8 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Additional exclude file glob. Markdown, Office, plain document, media, and archive files are excluded by default. Can be repeated, for example --exclude 'target/**' --exclude '*.lock'.",
     )
+    parser.add_argument("--changed-regions", type=int, default=40, help="Maximum changed hunks to include in each author detail JSON.")
+    parser.add_argument("--changed-region-lines", type=int, default=24, help="Maximum changed +/- lines kept per hunk in each author detail JSON.")
     args = parser.parse_args()
     args.command = "collect"
     if args.since > args.until:
@@ -1044,7 +1154,7 @@ def main() -> None:
 
     data = collect_stats(args)
     data = attach_output_paths(data, out)
-    write_author_outputs(out, data)
+    write_author_outputs(out, data, args)
     write_json(out / "details.json", data)
     write_json(out / "summary.json", build_summary(data))
     write_json(out / "index_inputs.json", build_index_inputs(data))

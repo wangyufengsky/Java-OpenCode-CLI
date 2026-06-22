@@ -80,7 +80,7 @@
 
 ### 7.1 低质量代码片段
 
-低质量代码片段同时写入 `quality-summary.json.code_snippets`。每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。片段必须来自允许读取的开发文件或受控调用点文件。不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；如发现敏感内容，用 `[REDACTED]` 替代。
+低质量代码片段同时写入 `quality-summary.json.code_snippets`。每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。片段必须来自 `detail.changed_regions[].hunk`。不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；如发现敏感内容，用 `[REDACTED]` 替代。
 
 #### 片段 `<index>`：`<file>:<line_start>-<line_end>`
 

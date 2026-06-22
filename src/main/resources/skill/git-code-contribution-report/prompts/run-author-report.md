@@ -30,13 +30,15 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - 写质量摘要时只替换 `detail.output.quality_summary_marker`；这是 quality-summary.json 专用 marker，不得使用 `detail.output.report_marker` 写 `quality_summary_json`。
 - 读取 `detail.execution_worklist` 后，必须按 `step` 升序逐项执行；不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - 如果 `detail.execution_worklist` 缺失、为空或不包含 `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response`，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+- 必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`；个人报告中的质量与风险内容必须来自已写入的质量摘要证据。
 - 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 分析完成后必须立即调用 MCP 写入工具写 `person-report.md` 和 `quality-summary.json`。只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 分析完成后必须立即调用 MCP 写入工具先写 `quality-summary.json`，再写 `person-report.md`。只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
 
 ## MCP 规则
 
 - 读取、搜索、调用链取证、写入和禁止项全部按 `workflows/mcp-tool-contract.md` 执行。
-- 质量分析需要读取代码时，只能读取 `detail.top_files` 中排名靠前的最多 10 个文件。
+- 质量分析只能基于 `detail.changed_regions` 中脚本从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
+- `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
 - 判断公共代码、工具类代码复用价值时，优先使用 MCP workflow 允许的引用或调用链取证方式确认调用点，并记录实际工具名；最多读取 5 个候选调用点文件。
 - 不得为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件已由脚本排除，不属于统计和评分依据。
 - 将 `detail.output.quality_summary_json` 中的 `detail.output.quality_summary_marker` 替换为合法 JSON 对象。
@@ -61,7 +63,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - 以 `detail.execution_worklist` 为执行清单，按 `step` 升序逐项执行；不要自己改写、缩短或重新生成 worklist。
 - `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response` 是必经步骤；不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - 必须立即调用 MCP 写入工具；不要先发送“准备写入”“Let me write”“Now I will write”等进度文本。
-- 写入 `person-report.md` 后继续写 `quality-summary.json`，不要等待主会话继续提示。
+- 写入 `quality-summary.json` 后继续写 `person-report.md`，不要等待主会话继续提示。
 - 两个文件均写入成功后，最终只返回 `DONE person_report_md=<path> quality_summary_json=<path>`。
 - 任一文件无法写入或校验失败时，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
 
@@ -85,7 +87,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 - 人员基本统计。
 - 工作量结构分析：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- Top 变更文件分析。
+- Top 变更文件统计分析。
 - 扩展名分布分析。
 - 主要提交列表。
 - 统计偏差提醒。
@@ -96,7 +98,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 
 ## 质量摘要 JSON
 
-个人报告写完后，必须写 `detail.output.quality_summary_json`。子 agent 只负责发现证据，不负责最终计分。子 agent 不得写入 `quality_adjustment_percent`。子 agent 不得写入 `components[].score`。主 agent 必须使用脚本统一计算质量分。
+写个人报告前，必须先写 `detail.output.quality_summary_json`。子 agent 只负责发现证据，不负责最终计分。子 agent 不得写入 `quality_adjustment_percent`。子 agent 不得写入 `components[].score`。主 agent 必须使用脚本统一计算质量分。
 
 写入质量摘要时，只替换 `detail.output.quality_summary_marker`。不得使用 `detail.output.report_marker` 写 `quality_summary_json`，因为 `detail.output.report_marker` 只存在于个人 Markdown 报告。
 
@@ -172,7 +174,7 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 - `code_snippets` 只记录低质量代码片段；没有明确问题时使用空数组。
 - 只要写入 `code_snippets`，必须同时写入对应的负向 finding；如果遗漏，脚本按 `low_quality_code_snippet` 规则补充一个负向 finding，统一计分结果必须小于 0。
 - 每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。
-- 片段必须来自质量分析允许读取的开发文件或受控调用点文件，并写明文件、行号、维度、严重程度、原因和建议。
+- 片段必须来自 `detail.changed_regions[].hunk`，并写明文件、行号、维度、严重程度、原因和建议。
 - 不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；发现敏感信息时用 `[REDACTED]` 替代。
 - 个人报告中必须有“低质量代码片段”小节；没有可安全摘录的片段时写“未发现可安全摘录的低质量代码片段”。
 

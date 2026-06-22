@@ -96,9 +96,144 @@ class GitReportPreparationIntegrationTest {
         assertThat(detail.get("metadata").get("project_id").asText()).isEqualTo("upfs-production");
         assertThat(detail.has("files")).isFalse();
         assertThat(detail.get("top_files")).hasSizeLessThanOrEqualTo(7);
+        assertThat(detail.get("changed_regions")).hasSizeGreaterThan(0);
+        assertThat(detail.get("changed_regions").get(0).has("hunk")).isTrue();
+        assertThat(detail.get("execution_worklist").toString()).contains("inspect_changed_regions");
+        assertThat(detail.get("execution_worklist").toString()).doesNotContain("inspect_top_files");
         assertThat(detail.get("commits")).hasSizeLessThanOrEqualTo(3);
         assertThat(detail.get("execution_worklist")).hasSize(10);
+        assertThat(detail.get("execution_worklist").get(4).get("action").asText()).isEqualTo("draft_quality_summary");
+        assertThat(detail.get("execution_worklist").get(5).get("action").asText()).isEqualTo("replace_quality_summary_json_fields");
+        assertThat(detail.get("execution_worklist").get(6).get("action").asText()).isEqualTo("draft_person_report");
+        assertThat(detail.get("execution_worklist").get(7).get("action").asText()).isEqualTo("replace_person_report_placeholders");
         assertThat(detail.at("/output/report_placeholders").isArray()).isTrue();
         assertThat(detail.at("/output/quality_summary_status_required").asText()).isEqualTo("completed");
+    }
+
+    @Test
+    void detailChangedRegionsContainOnlyAuthorCommittedHunks() throws Exception {
+        Path repo = tempDir.resolve("repo-regions");
+        Path out = tempDir.resolve("out-regions");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
+        GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
+        Files.writeString(repo.resolve("Demo.java"), """
+                class Demo {
+                  String stable = "base";
+                  String bobOwned = "base";
+                }
+                """);
+        GitTestSupport.run(repo, "git", "add", "Demo.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "base");
+
+        GitTestSupport.run(repo, "git", "config", "user.name", "Bob");
+        GitTestSupport.run(repo, "git", "config", "user.email", "bob@example.com");
+        Files.writeString(repo.resolve("Demo.java"), """
+                class Demo {
+                  String stable = "base";
+                  String bobOwned = "changed-by-bob";
+                }
+                """);
+        GitTestSupport.run(repo, "git", "add", "Demo.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "bob changes own line");
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+        properties.getDetailInput().setChangedRegions(10);
+        properties.getDetailInput().setChangedRegionLines(20);
+
+        GitReportPreparation preparation = new GitReportPreparation(
+                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
+                new ReportPreparationWriter(objectMapper)
+        );
+        preparation.prepare(properties);
+
+        JsonNode indexInputs = objectMapper.readTree(out.resolve("index_inputs.json").toFile());
+        JsonNode bobTask = null;
+        for (JsonNode task : indexInputs.get("tasks")) {
+            if ("Bob <bob@example.com>".equals(task.get("author").asText())) {
+                bobTask = task;
+                break;
+            }
+        }
+        assertThat(bobTask).isNotNull();
+        JsonNode detail = objectMapper.readTree(Path.of(bobTask.get("detail_json").asText()).toFile());
+
+        assertThat(detail.get("author").asText()).isEqualTo("Bob <bob@example.com>");
+        assertThat(detail.get("top_files").get(0).get("path").asText()).isEqualTo("Demo.java");
+        JsonNode changedRegion = detail.get("changed_regions").get(0);
+        assertThat(changedRegion.get("file").asText()).isEqualTo("Demo.java");
+        assertThat(changedRegion.get("line_start").asInt()).isEqualTo(3);
+        assertThat(changedRegion.get("line_end").asInt()).isEqualTo(3);
+        assertThat(changedRegion.get("hunk").asText()).contains("changed-by-bob");
+        assertThat(changedRegion.get("hunk").asText()).doesNotContain("String stable = \"base\"");
+    }
+
+    @Test
+    void detailChangedRegionsAreSortedByTopFilePriorityBeforeLimit() throws Exception {
+        Path repo = tempDir.resolve("repo-priority");
+        Path out = tempDir.resolve("out-priority");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Bob");
+        GitTestSupport.run(repo, "git", "config", "user.email", "bob@example.com");
+        Files.writeString(repo.resolve("High.java"), """
+                class High {
+                  int a = 1;
+                  int b = 2;
+                  int c = 3;
+                  int d = 4;
+                }
+                """);
+        Files.writeString(repo.resolve("Low.java"), """
+                class Low {
+                  int value = 1;
+                }
+                """);
+        GitTestSupport.run(repo, "git", "add", ".");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "base");
+
+        Files.writeString(repo.resolve("High.java"), """
+                class High {
+                  int a = 10;
+                  int b = 20;
+                  int c = 30;
+                  int d = 40;
+                }
+                """);
+        GitTestSupport.run(repo, "git", "add", "High.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "large high change");
+
+        Files.writeString(repo.resolve("Low.java"), """
+                class Low {
+                  int value = 2;
+                }
+                """);
+        GitTestSupport.run(repo, "git", "add", "Low.java");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "small low change");
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+        properties.getDetailInput().setChangedRegions(1);
+
+        GitReportPreparation preparation = new GitReportPreparation(
+                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
+                new ReportPreparationWriter(objectMapper)
+        );
+        preparation.prepare(properties);
+
+        JsonNode indexInputs = objectMapper.readTree(out.resolve("index_inputs.json").toFile());
+        JsonNode detail = objectMapper.readTree(Path.of(indexInputs.get("tasks").get(0).get("detail_json").asText()).toFile());
+
+        assertThat(detail.get("top_files").get(0).get("path").asText()).isEqualTo("High.java");
+        assertThat(detail.get("changed_regions")).hasSize(1);
+        assertThat(detail.get("changed_regions").get(0).get("file").asText()).isEqualTo("High.java");
     }
 }

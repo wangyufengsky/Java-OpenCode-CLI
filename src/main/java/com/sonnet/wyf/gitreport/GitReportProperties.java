@@ -354,6 +354,8 @@ public class GitReportProperties {
     public static class DetailInput {
         private int topFiles = 10;
         private int commits = 20;
+        private int changedRegions = 40;
+        private int changedRegionLines = 24;
 
         public int getTopFiles() {
             return topFiles;
@@ -369,6 +371,22 @@ public class GitReportProperties {
 
         public void setCommits(int commits) {
             this.commits = commits;
+        }
+
+        public int getChangedRegions() {
+            return changedRegions;
+        }
+
+        public void setChangedRegions(int changedRegions) {
+            this.changedRegions = changedRegions;
+        }
+
+        public int getChangedRegionLines() {
+            return changedRegionLines;
+        }
+
+        public void setChangedRegionLines(int changedRegionLines) {
+            this.changedRegionLines = changedRegionLines;
         }
     }
 

@@ -12,7 +12,9 @@ detail_json: <path>
 
 ## 严格边界
 
-- 只读取输入的 `detail_json` 和 `detail.top_files` 中 Java 已裁剪出的 Top 开发文件；`detail_json` 不提供完整文件列表。
+- 只读取输入的 `detail_json`；质量分析只能基于 `detail.changed_regions` 中 Java 从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
+- `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
+- `detail.changed_regions` 是 Java 已按配置裁剪后的主要提交区域；每个区域的 `file`、`line_start`、`line_end` 和 `hunk` 才是该人员本次提交的可分析代码边界。
 - `detail.commits` 是 Java 已裁剪后的主要提交列表，不要要求或推断完整提交列表。
 - 不读取 `summary.json`、`details.json`、`index_inputs.json` 或其他人员 detail。
 - 不生成总报告 `code-contribution-report.md`。
@@ -22,18 +24,20 @@ detail_json: <path>
 - 写个人报告时只能替换模板中已有的 `{{...}}` 占位符，不得删除、重命名或重排标题结构。
 - 写质量摘要时只能把 Java 预创建 JSON 对象中的固定字段更新为最终值，不得改成非 JSON 或写入额外评分字段。
 - 按 `detail.execution_worklist` 的 `step` 升序执行，不得把 worklist 当作最终响应。
+- 必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`；个人报告中的质量与风险内容必须来自已写入的质量摘要证据。
 - 不得在 `quality-summary.json` 中写入 `quality_adjustment_percent` 或 `components[].score`；质量评分由 Java 统一计算。
 
 ## 受控读写与取证规则
 
-- 读取 `detail_json`、Top 文件和候选代码片段时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 读取 `detail_json` 时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 - 写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具。
 - 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
 - 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 - 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入报告、质量摘要或代码文件。
 - 公共代码取证优先使用 `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
-- 代码取证 MCP 不足时写入 `unverified`，不要写无证据 finding。
+- 公共代码取证只能用于理解调用关系；不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
+- 代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`，不要写无证据 finding。
 
 ## Markdown 表格安全
 
@@ -48,6 +52,7 @@ detail_json: <path>
 - 个人 Markdown 单次写入不超过 6000 字符、120 行；长表格分块写。
 - 个人报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `detail.output.report_placeholders` 中列出的占位符。
 - `quality-summary.json` 必须保持合法 JSON object，并将 `status` 改为 `completed`。
+- `quality-summary.json` 写入完成前，不得开始写 `person-report.md`。
 - 写入完成后，个人报告和质量摘要不得残留 `{{...}}` 占位符。
 - 任一文件无法写入或校验失败时，最终只返回：
 
@@ -69,7 +74,7 @@ DONE person_report_md=<path> quality_summary_json=<path>
 
 - 人员基本统计。
 - 工作量结构分析：新增开发、重构调整、缺陷修复、配置脚本修改、删除清理或混合型工作。
-- Top 变更文件分析。
+- Top 变更文件统计分析。
 - 扩展名分布分析。
 - 主要提交列表。
 - 统计偏差提醒。
@@ -121,7 +126,7 @@ DONE person_report_md=<path> quality_summary_json=<path>
 - `rule_id` 必须稳定、可聚合。
 - `evidence` 必须写明证据，不得只写结论。
 - 缺少证据的维度不要写 finding，写入 `unverified` 说明原因。
-- `code_snippets` 只记录可安全摘录的低质量代码片段，数量和长度以 Java 生成与压缩后的输入为准，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；确需说明敏感内容时用 `[REDACTED]`。
+- `code_snippets` 只记录来自 `detail.changed_regions[].hunk` 的可安全摘录低质量代码片段，数量和长度以 Java 生成与压缩后的输入为准，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；确需说明敏感内容时用 `[REDACTED]`。
 
 `code_snippets[]` 中对象字段：
 
@@ -139,3 +144,4 @@ DONE person_report_md=<path> quality_summary_json=<path>
 ```
 
 每个 `code_snippets[]` 必须能对应同文件或同维度的负向 finding；否则不要写入片段。
+每个 finding 和 `code_snippets[]` 的 `file`、`line_start`、`line_end` 必须落在某个 `detail.changed_regions[]` 的同文件行号范围内；无法落入提交区域的风险只能写入 `unverified`。

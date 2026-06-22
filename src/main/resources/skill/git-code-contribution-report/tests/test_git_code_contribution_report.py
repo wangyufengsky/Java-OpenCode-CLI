@@ -111,6 +111,19 @@ class RankingTest(unittest.TestCase):
         self.assertEqual(score["components_by_dimension"]["risk_control"], -5)
         self.assertEqual(score["quality_adjustment_percent"], -5)
 
+    def test_changed_regions_are_sorted_by_top_file_priority_before_limit(self):
+        author = {
+            "top_files": [{"path": "High.java"}, {"path": "Low.java"}],
+            "changed_regions": [
+                {"file": "Low.java", "line_start": 1, "hunk": "@@ -1 +1 @@\n-  int value = 1;\n+  int value = 2;"},
+                {"file": "High.java", "line_start": 1, "hunk": "@@ -1,2 +1,2 @@\n-  int a = 1;\n-  int b = 2;\n+  int a = 10;\n+  int b = 20;"},
+            ],
+        }
+
+        regions = MODULE.prioritized_changed_regions(author, 1)
+
+        self.assertEqual([region["file"] for region in regions], ["High.java"])
+
 
 class OutputLayoutTest(unittest.TestCase):
     def test_deleted_file_counts_non_comment_deleted_lines(self):
@@ -275,21 +288,21 @@ class OutputLayoutTest(unittest.TestCase):
                     [
                         "read_detail_json",
                         "read_person_report_template",
-                        "inspect_top_files",
+                        "inspect_changed_regions",
                         "collect_call_evidence",
-                        "draft_person_report",
-                        "write_person_report",
                         "draft_quality_summary",
                         "write_quality_summary",
+                        "draft_person_report",
+                        "write_person_report",
                         "verify_outputs",
                         "final_response",
                     ],
                 )
                 self.assertEqual([item["step"] for item in task["execution_worklist"]], list(range(1, 11)))
-                self.assertEqual(task["execution_worklist"][5]["target_path"], task["report_md"])
-                self.assertEqual(task["execution_worklist"][5]["marker"], MODULE.AUTHOR_REPORT_MARKER)
-                self.assertEqual(task["execution_worklist"][7]["target_path"], task["quality_summary_json"])
-                self.assertEqual(task["execution_worklist"][7]["marker"], MODULE.QUALITY_SUMMARY_MARKER)
+                self.assertEqual(task["execution_worklist"][5]["target_path"], task["quality_summary_json"])
+                self.assertEqual(task["execution_worklist"][5]["marker"], MODULE.QUALITY_SUMMARY_MARKER)
+                self.assertEqual(task["execution_worklist"][7]["target_path"], task["report_md"])
+                self.assertEqual(task["execution_worklist"][7]["marker"], MODULE.AUTHOR_REPORT_MARKER)
                 self.assertEqual(
                     task["execution_worklist"][8]["required_paths"],
                     [task["report_md"], task["quality_summary_json"]],
@@ -602,7 +615,8 @@ class PromptContractTest(unittest.TestCase):
             "禁止在写文件前输出进度说明",
             "不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束",
             "必须立即调用 MCP 写入工具",
-            "只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`",
+            "先写 `quality-summary.json`，再写 `person-report.md`",
+            "只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`",
         ]
 
         for relative_path in [

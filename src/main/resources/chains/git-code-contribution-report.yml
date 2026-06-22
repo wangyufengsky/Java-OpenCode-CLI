@@ -25,6 +25,8 @@ opencode:
 detail-input:
   top-files: 10
   commits: 20
+  changed-regions: 40
+  changed-region-lines: 24
 
 synthesis-input:
   person-report-excerpt-chars: 8192

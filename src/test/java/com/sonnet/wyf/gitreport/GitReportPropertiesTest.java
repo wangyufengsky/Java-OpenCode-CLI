@@ -63,6 +63,8 @@ class GitReportPropertiesTest {
                     assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(6);
                     assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(7);
                     assertThat(properties.getDetailInput().getCommits()).isEqualTo(12);
+                    assertThat(properties.getDetailInput().getChangedRegions()).isEqualTo(40);
+                    assertThat(properties.getDetailInput().getChangedRegionLines()).isEqualTo(24);
                     assertThat(properties.getSynthesisInput().getPersonReportExcerptChars()).isEqualTo(8192);
                     assertThat(properties.getSynthesisInput().getSnippetsPerAuthor()).isEqualTo(5);
                     assertThat(properties.getSynthesisInput().getSnippetsTotal()).isEqualTo(30);

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -111,6 +112,7 @@ public class ReportPreparationWriter {
             detail.put("author", author.get("author"));
             detail.put("summary", summaryFields(author));
             detail.put("top_files", limitedList(author.get("top_files"), limits.getTopFiles()));
+            detail.put("changed_regions", prioritizedChangedRegions(author, limits.getChangedRegions()));
             detail.put("extensions", author.get("extensions"));
             detail.put("commits", limitedList(author.get("commits"), limits.getCommits()));
             detail.put("execution_worklist", author.get("execution_worklist"));
@@ -173,12 +175,12 @@ public class ReportPreparationWriter {
         return List.of(
                 step(1, "read_detail_json", detailJson),
                 step(2, "read_embedded_person_report_template", null),
-                step(3, "inspect_top_files", null),
+                step(3, "inspect_changed_regions", null),
                 step(4, "collect_call_evidence", null),
-                step(5, "draft_person_report", reportMd),
-                stepWithPlaceholders(6, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
-                step(7, "draft_quality_summary", qualitySummaryJson),
-                step(8, "replace_quality_summary_json_fields", qualitySummaryJson),
+                step(5, "draft_quality_summary", qualitySummaryJson),
+                step(6, "replace_quality_summary_json_fields", qualitySummaryJson),
+                step(7, "draft_person_report", reportMd),
+                stepWithPlaceholders(8, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
                 Map.of("step", 9, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
                 Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"), "status", "pending")
         );
@@ -277,6 +279,44 @@ public class ReportPreparationWriter {
             return List.of();
         }
         return list.stream().limit(Math.max(0, limit)).toList();
+    }
+
+    private List<Map<String, Object>> prioritizedChangedRegions(Map<String, Object> author, int limit) {
+        Map<String, Integer> topFilePriority = new LinkedHashMap<>();
+        int index = 0;
+        for (Map<String, Object> topFile : listOfMaps(author.get("top_files"))) {
+            topFilePriority.putIfAbsent(string(topFile.get("path")), index++);
+        }
+        return listOfMaps(author.get("changed_regions")).stream()
+                .sorted(Comparator
+                        .comparingInt((Map<String, Object> region) -> topFilePriority.getOrDefault(string(region.get("file")), Integer.MAX_VALUE))
+                        .thenComparing(Comparator.comparingInt(this::changedLineCount).reversed())
+                        .thenComparing(region -> string(region.get("file")))
+                        .thenComparingInt(region -> intValue(region.get("line_start"))))
+                .limit(Math.max(0, limit))
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listOfMaps(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream()
+                .filter(Map.class::isInstance)
+                .map(item -> (Map<String, Object>) item)
+                .toList();
+    }
+
+    private int changedLineCount(Map<String, Object> region) {
+        return string(region.get("hunk")).lines()
+                .map(String::trim)
+                .mapToInt(line -> line.startsWith("+") || line.startsWith("-") ? 1 : 0)
+                .sum();
+    }
+
+    private int intValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
     }
 
     private String makeAuthorKey(int rank, String author) {

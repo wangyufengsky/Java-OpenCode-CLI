@@ -90,14 +90,14 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 - `code_snippets` 只记录低质量代码片段；没有明确问题时使用空数组。
 - 只要写入 `code_snippets`，必须同时写入对应的负向 finding；如果遗漏，脚本按 `low_quality_code_snippet` 规则补充一个负向 finding，统一计分结果必须小于 0。
 - 每个人最多 3 个低质量代码片段，每个片段最多 12 行，不得粘贴完整文件。
-- 片段必须来自质量分析允许读取的开发文件或受控调用点文件，并写明 `file`、`line_start`、`line_end`、`dimension`、`severity`、`reason` 和 `suggestion`。
+- 片段必须来自 `detail.changed_regions[].hunk`，并写明 `file`、`line_start`、`line_end`、`dimension`、`severity`、`reason` 和 `suggestion`。
 - 不得包含密钥、令牌、密码、手机号、身份证号、银行卡号；发现敏感信息时用 `[REDACTED]` 替代，并在 `risk_signals` 中说明。
 - 不确定行号时 `line_start` 和 `line_end` 使用 `0`，并在 `reason` 中说明定位依据。
 
 ## 质量分析允许读取的代码范围
 
-- 只读取 `detail.top_files` 中排名靠前的最多 10 个文件。
-- 只读取当前人员本次统计涉及的文件。
+- 质量分析只能基于 `detail.changed_regions` 中脚本从该人员提交提取出的 hunk。
+- `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
 - 为判断公共代码、工具类代码是否被多个调用点使用，可以额外按 MCP workflow 做引用或调用链取证，并读取最多 5 个候选调用点文件；只能记录与该公共代码直接相关的调用证据。
 - 禁止为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件不属于统计口径。
 - 不扫描全项目，不读取其他人员文件清单。

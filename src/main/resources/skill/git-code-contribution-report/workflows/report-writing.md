@@ -32,7 +32,7 @@
 - `report_relative_path`：相对 `code-contribution-report.md` 所在目录的相对路径，例如 `reports/author-001-xxx/person-report.md`。
 - `report_markdown_link`：总报告中必须使用的可点击 Markdown 链接，例如 `[person-report.md](reports/author-001-xxx/person-report.md)`。
 
-`execution_worklist` 至少包含 `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response`。任一步无法执行、目标路径缺失、marker 不存在、写入失败或校验失败时，子 agent 最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+`execution_worklist` 至少包含 `write_quality_summary`、`write_person_report`、`verify_outputs`、`final_response`，且 `write_quality_summary` 必须排在 `write_person_report` 前面。任一步无法执行、目标路径缺失、marker 不存在、写入失败或校验失败时，子 agent 最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
 
 agent 输出：
 
@@ -54,6 +54,8 @@ agent 输出：
 - 偏差与注意事项。
 - 代码质量与风险信号。
 - 低质量代码片段；每个人最多 3 个，每个片段最多 12 行，不得包含密钥、令牌、密码、手机号、身份证号、银行卡号，不得粘贴完整文件；没有明确片段时写“未发现可安全摘录的低质量代码片段”。
+
+个人报告中的“代码质量与风险信号”和“低质量代码片段”必须来自已经写入的 `quality-summary.json`，不得先写个人报告再补质量摘要。
 
 总报告必须包含：
 

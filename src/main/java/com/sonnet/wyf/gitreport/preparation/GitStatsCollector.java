@@ -18,8 +18,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class GitStatsCollector {
+    private static final Pattern HUNK_HEADER = Pattern.compile("@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
+
     private final CommandExecutor commandExecutor;
     private final CommentLineCounter commentLineCounter;
     private final WorkloadScoreCalculator scoreCalculator;
@@ -59,6 +63,12 @@ public class GitStatsCollector {
                     "subject", commit.get("subject")
             ));
             Map<String, Map<String, Integer>> nonComment = parseNonCommentDiff(repo, commit.get("hash"), filter);
+            list(stats, "changed_regions").addAll(parseChangedRegions(
+                    repo,
+                    commit.get("hash"),
+                    filter,
+                    properties.getDetailInput().getChangedRegionLines()
+            ));
             for (Map<String, Object> row : numstatRows) {
                 String path = row.get("path").toString();
                 Map<String, Integer> nc = nonComment.getOrDefault(path, Map.of("added", 0, "deleted", 0));
@@ -146,6 +156,105 @@ public class GitStatsCollector {
             }
         }
         return rows;
+    }
+
+    private List<Map<String, Object>> parseChangedRegions(Path repo, String commitHash, FileScopeFilter filter, int maxHunkLines) throws Exception {
+        String output = commandExecutor.run(repo, "git", "show", "--format=", "--unified=0", "--no-ext-diff", "--find-renames", commitHash);
+        List<Map<String, Object>> regions = new ArrayList<>();
+        String currentFile = null;
+        String oldFile = null;
+        String changeType = "modified";
+        Map<String, Object> currentRegion = null;
+        List<String> currentHunk = null;
+        int currentChangedLines = 0;
+        boolean currentTruncated = false;
+        int hunkLineLimit = Math.max(1, maxHunkLines);
+        for (String line : output.split("\\R")) {
+            if (line.startsWith("diff ")) {
+                finishRegion(currentRegion, currentHunk, currentTruncated);
+                currentRegion = null;
+                currentHunk = null;
+                currentFile = null;
+                oldFile = null;
+                changeType = "modified";
+                continue;
+            }
+            if (line.startsWith("--- a/")) {
+                oldFile = line.substring(6);
+                continue;
+            }
+            if (line.startsWith("--- /dev/null")) {
+                oldFile = null;
+                changeType = "added";
+                continue;
+            }
+            if (line.startsWith("+++ b/")) {
+                String file = line.substring(6);
+                currentFile = filter.isCounted(file) ? file : null;
+                continue;
+            }
+            if (line.startsWith("+++ /dev/null")) {
+                changeType = "deleted";
+                currentFile = oldFile != null && filter.isCounted(oldFile) ? oldFile : null;
+                continue;
+            }
+            Matcher matcher = HUNK_HEADER.matcher(line);
+            if (matcher.matches()) {
+                finishRegion(currentRegion, currentHunk, currentTruncated);
+                currentRegion = null;
+                currentHunk = null;
+                currentChangedLines = 0;
+                currentTruncated = false;
+                if (currentFile != null) {
+                    currentRegion = changedRegion(commitHash, currentFile, changeType, matcher);
+                    currentHunk = new ArrayList<>();
+                    currentHunk.add(line);
+                    regions.add(currentRegion);
+                }
+                continue;
+            }
+            if (currentRegion == null || currentHunk == null || line.startsWith("\\ No newline")) {
+                continue;
+            }
+            if (line.startsWith("+") || line.startsWith("-")) {
+                if (currentChangedLines < hunkLineLimit) {
+                    currentHunk.add(line);
+                } else {
+                    currentTruncated = true;
+                }
+                currentChangedLines++;
+            }
+        }
+        finishRegion(currentRegion, currentHunk, currentTruncated);
+        return regions;
+    }
+
+    private Map<String, Object> changedRegion(String commitHash, String file, String changeType, Matcher header) {
+        int oldStart = Integer.parseInt(header.group(1));
+        int oldCount = countValue(header.group(2));
+        int newStart = Integer.parseInt(header.group(3));
+        int newCount = countValue(header.group(4));
+        Map<String, Object> region = new LinkedHashMap<>();
+        region.put("commit", commitHash);
+        region.put("short_hash", commitHash.substring(0, Math.min(12, commitHash.length())));
+        region.put("file", file);
+        region.put("change_type", changeType);
+        region.put("line_start", newCount == 0 ? oldStart : newStart);
+        region.put("line_end", newCount == 0 ? oldStart + Math.max(0, oldCount - 1) : newStart + Math.max(0, newCount - 1));
+        region.put("old_line_start", oldStart);
+        region.put("old_line_end", oldStart + Math.max(0, oldCount - 1));
+        return region;
+    }
+
+    private void finishRegion(Map<String, Object> region, List<String> hunk, boolean truncated) {
+        if (region != null && hunk != null) {
+            region.put("hunk", String.join("\n", hunk));
+            region.put("truncated", truncated);
+        }
+    }
+
+    private int countValue(String value) {
+        return value == null || value.isBlank() ? 1 : Integer.parseInt(value);
     }
 
     private Map<String, Map<String, Integer>> parseNonCommentDiff(Path repo, String commitHash, FileScopeFilter filter) throws Exception {
@@ -240,6 +349,7 @@ public class GitStatsCollector {
         }
         map.put("workload_score", 0.0);
         map.put("commits", new ArrayList<>());
+        map.put("changed_regions", new ArrayList<>());
         map.put("files", new LinkedHashMap<String, Map<String, Object>>());
         map.put("extensions", new LinkedHashMap<String, Map<String, Object>>());
         return map;

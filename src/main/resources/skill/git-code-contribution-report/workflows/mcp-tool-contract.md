@@ -42,7 +42,7 @@ reports\author-*\quality-summary.json
 
 | 行为 | 强制 MCP | 规则 |
 | --- | --- | --- |
-| 读取准备脚本输出、模板和 prompt | `intellij-idea_read_file`、`intellij-idea_get_file_text_by_path` | 主 agent 只读 `summary.json`、`index_inputs.json`、`index_inputs.tasks[].report_md` 指定的个人报告和 `index_inputs.tasks[].quality_summary_json` 指定的质量摘要；子 agent 只读输入的 `detail_json`、个人报告模板和受限 Top 变更文件。禁止用 `cat`、`type`、`Get-Content` 或 Python 读取这些文件作为报告依据。 |
+| 读取准备脚本输出、模板和 prompt | `intellij-idea_read_file`、`intellij-idea_get_file_text_by_path` | 主 agent 只读 `summary.json`、`index_inputs.json`、`index_inputs.tasks[].report_md` 指定的个人报告和 `index_inputs.tasks[].quality_summary_json` 指定的质量摘要；子 agent 只读输入的 `detail_json` 和个人报告模板，质量分析只用 `detail.changed_regions` 中的 hunk。禁止用 `cat`、`type`、`Get-Content` 或 Python 读取这些文件作为报告依据。 |
 | 定位公共代码调用证据 | `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations`，辅以 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_symbol`、`intellij-index_ide_search_text`；候选调用点文件内容用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 仅当判断公共代码、工具类代码复用价值时使用；优先用调用链或引用查询 MCP 工具确认调用点，最多读取 5 个候选调用点文件。MCP 不可用或证据不足时写入 `unverified`，禁止改用 shell、grep、rg 或 Python 扫描全项目。 |
 | 写个人报告和总报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换脚本预创建文件中的 marker。 |
 | 搜索已生成文件 | `intellij-idea_find_files_by_glob`、`intellij-idea_find_files_by_name_keyword`、`intellij-idea_search_in_files_by_text`、`intellij-idea_search_in_files_by_regex` | 优先按 `index_inputs.json` 中的确定路径直接读取；只有路径异常或需要定位预创建文件时才搜索。 |
@@ -65,5 +65,6 @@ reports\author-*\quality-summary.json
 
 - 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束。
 - 子 agent 分析完成后必须立即调用 MCP 写入工具；文本回复、计划、摘要或“准备写入”不算写入。
+- 子 agent 必须先写 `quality-summary.json`，再写 `person-report.md`；个人报告中的质量与风险内容必须来自已写入的质量摘要证据。
 - 子 agent 不要等待主会话继续提示；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 只有确认 `person-report.md` 和 `quality-summary.json` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
