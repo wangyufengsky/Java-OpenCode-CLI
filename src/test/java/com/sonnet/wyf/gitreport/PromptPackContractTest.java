@@ -114,6 +114,25 @@ class PromptPackContractTest {
         assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
+
+        String combined = worker + "\n" + rerun + "\n" + synthesis;
+        assertThat(combined).contains(
+                "不读取或检索 old_project 下的老代码",
+                "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据",
+                "只读取当前交易相关的映射文档和详细设计片段",
+                "优先使用 OpenCode `explore` 分析文档和代码",
+                "主交易 session 只消费 `explore` 返回的短证据摘要"
+        );
+        assertThat(combined).doesNotContain(
+                "定位老项目代码",
+                "读取老项目代码",
+                "在 `old_project` 中定位",
+                "建立老代码调用链",
+                "新老项目代码",
+                "新老代码",
+                "本链路不读取业务文档、协议文档或重构设计文档",
+                "`documents` 必须写空数组"
+        );
     }
 
     @Test

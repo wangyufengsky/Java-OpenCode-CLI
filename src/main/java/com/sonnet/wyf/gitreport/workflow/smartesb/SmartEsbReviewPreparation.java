@@ -86,7 +86,6 @@ public class SmartEsbReviewPreparation {
         summary.put("transaction_plan", plan.source().toString());
         summary.put("out", logicalOut);
         summary.put("local_out", properties.getLocalOut() == null ? null : out.toString());
-        summary.put("old_project", normalizeLogical(properties.getOldProject()));
         summary.put("new_project", normalizeLogical(properties.getNewProject()));
         summary.put("transaction_count", tasks.size());
         summary.put("transactions", tasks.stream().map(task -> Map.of(
@@ -157,7 +156,7 @@ public class SmartEsbReviewPreparation {
         writeTextIfMissing(files.get("review_md"), renderTemplate(TRANSACTION_REVIEW_TEMPLATE, values), overwrite);
         writeTextIfMissing(files.get("matrix_md"), mappingTemplate(), overwrite);
         writeTextIfMissing(files.get("findings_md"), sectionTemplate("详细问题", "{{FINDINGS_DETAIL}}"), overwrite);
-        writeTextIfMissing(files.get("code_chains_md"), sectionTemplate("新老代码调用链", "{{CODE_CHAINS}}"), overwrite);
+        writeTextIfMissing(files.get("code_chains_md"), sectionTemplate("新代码调用链", "{{CODE_CHAINS}}"), overwrite);
         writeTextIfMissing(files.get("protocol_review_md"), sectionTemplate("8583 到 JSON 协议审查", "{{PROTOCOL_REVIEW}}"), overwrite);
         writeTextIfMissing(files.get("behavior_review_md"), sectionTemplate("行为等价性审查", "{{BEHAVIOR_REVIEW}}"), overwrite);
         writeTextIfMissing(files.get("verification_md"), sectionTemplate("最小验证测试", "{{VERIFICATION_TESTS}}"), overwrite);
@@ -178,8 +177,11 @@ public class SmartEsbReviewPreparation {
         Map<String, Object> task = new LinkedHashMap<>();
         task.put("transaction", transaction.name());
         task.put("description", transaction.description());
-        task.put("old_project", normalizeLogical(properties.getOldProject()));
         task.put("new_project", normalizeLogical(properties.getNewProject()));
+        task.put("documents", Map.of(
+                "mapping_8583_to_json", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))),
+                "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md")))
+        ));
         task.put("skill", Map.of(
                 "prompt", "classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-transaction-review.md",
                 "transaction_template", "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md",
@@ -199,10 +201,11 @@ public class SmartEsbReviewPreparation {
         task.put("output", output);
         task.put("output_placeholders", TRANSACTION_OUTPUT_PLACEHOLDERS);
         task.put("rules", Map.of(
-                "scope", "只审查当前交易。",
+                "scope", "只审查当前交易的新代码、映射文档和详细设计；不读取或检索 old_project 下的老代码。",
                 "precreated_outputs", "准备器已预创建包含完整模板和占位符的 review.md、mapping-matrix.md、sections/*.md，以及初始 summary.json；子 agent 只能替换这些已存在文件中的 output_placeholders，占位符之外的标题结构不得删除、重命名或重排。",
                 "template_contract", "只能替换 output_placeholders 中列出的占位符；写入完成后所有 Markdown 报告不得残留 {{...}} 占位符。",
                 "reader_preference", "读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 fallback_file_tools 中的读取工具。",
+                "explore_preference", "优先使用 OpenCode explore 分析文档和代码；主交易 session 只消费 explore 返回的短证据摘要，不直接读取完整文档或大段源码。",
                 "writer_preference", "写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具；如调用 OpenCode 原生 write 工具，路径字段只能使用 filePath，内容字段只能使用 content，禁止使用 pathInProject、file_path、path 或其他猜测字段；如 OpenCode 原生文件编辑工具不可用，可使用 fallback_file_tools 中的 IntelliJ MCP 编辑工具；两类受控编辑工具都不可用时返回 BLOCKED，禁止调用 shell、PowerShell、Python、cat、type、Get-Content、重定向、cat > 或 sed -i。",
                 "markdown_max_chars_per_write", 6000,
                 "markdown_max_lines_per_write", 120
@@ -264,7 +267,6 @@ public class SmartEsbReviewPreparation {
 
     private Map<String, String> topLevelTemplateValues(SmartEsbRewriteProperties properties, String logicalOut, SmartEsbDailyTransactionPlan plan, int transactionCount) {
         Map<String, String> values = new LinkedHashMap<>();
-        values.put("old_project", normalizeLogical(properties.getOldProject()));
         values.put("new_project", normalizeLogical(properties.getNewProject()));
         values.put("transaction_count", String.valueOf(transactionCount));
         values.put("out", logicalOut);
@@ -276,8 +278,9 @@ public class SmartEsbReviewPreparation {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("transaction", transaction.name());
         values.put("description", transaction.description());
-        values.put("old_project", normalizeLogical(properties.getOldProject()));
         values.put("new_project", normalizeLogical(properties.getNewProject()));
+        values.put("reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))));
+        values.put("mapping_doc", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))));
         return values;
     }
 
@@ -294,7 +297,6 @@ public class SmartEsbReviewPreparation {
                 | 项目 | 内容 |
                 | --- | --- |
                 | 日期 | {{date}} |
-                | 老项目 | `{{old_project}}` |
                 | 重构项目 | `{{new_project}}` |
                 | 交易数 | {{transaction_count}} |
                 | 输出目录 | `{{out}}` |
@@ -325,7 +327,6 @@ public class SmartEsbReviewPreparation {
 
                 {{SUMMARY_NEXT_STEPS}}
                 """.replace("{{date}}", values.getOrDefault("date", ""))
-                .replace("{{old_project}}", values.getOrDefault("old_project", ""))
                 .replace("{{new_project}}", values.getOrDefault("new_project", ""))
                 .replace("{{transaction_count}}", values.getOrDefault("transaction_count", ""))
                 .replace("{{out}}", values.getOrDefault("out", ""));
@@ -335,7 +336,7 @@ public class SmartEsbReviewPreparation {
         return """
                 # 字段映射矩阵
 
-                | 8583 字段/来源 | 老系统含义 | 老代码依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 状态 | 验证方式 |
+                | 8583 字段/来源 | 映射文档依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 详细设计依据 | 状态 | 验证方式 |
                 | --- | --- | --- | --- | --- | --- | --- | --- |
                 {{MAPPING_ROWS}}
                 """;

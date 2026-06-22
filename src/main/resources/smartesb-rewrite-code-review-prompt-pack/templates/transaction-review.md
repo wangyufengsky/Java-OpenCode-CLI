@@ -2,7 +2,7 @@
 
 ## 问题摘要
 
-| 严重级别 | 标题 | 新代码位置 | 老代码位置 | 协议依据 | 业务影响 |
+| 严重级别 | 标题 | 新代码位置 | 文档依据 | 协议依据 | 业务影响 |
 | --- | --- | --- | --- | --- | --- |
 {{FINDING_ROWS}}
 
@@ -10,16 +10,17 @@
 
 - 交易：`{{transaction}}`
 - 说明：{{description}}
-- 老项目：`{{old_project}}`
 - 重构项目：`{{new_project}}`
-- 证据来源：仅使用新老项目代码、配置、XML、SQL 和数据库证据；不读取业务文档、协议文档或重构设计文档。
+- 映射文档：`{{mapping_doc}}`
+- 详细设计：`{{reconstructed_design}}`
+- 证据来源：仅使用 new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据；不读取或检索 old_project 下的老代码。
 
 ## 详细报告链接
 
 | 内容 | 文件 |
 | --- | --- |
 | 详细问题 | `sections/01-findings.md` |
-| 新老代码调用链 | `sections/02-code-chains.md` |
+| 新代码调用链 | `sections/02-code-chains.md` |
 | 8583 到 JSON 协议审查 | `sections/03-protocol-review.md` |
 | 行为等价性审查 | `sections/04-behavior-review.md` |
 | 最小验证测试 | `sections/05-verification.md` |

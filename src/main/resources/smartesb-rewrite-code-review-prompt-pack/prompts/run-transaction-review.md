@@ -3,8 +3,9 @@
 输入只允许是一个 task JSON 路径。先读取该 JSON，确认：
 
 - `transaction`
-- `old_project`
 - `new_project`
+- `documents.mapping_8583_to_json`
+- `documents.reconstructed_design`
 - `output.review_md`
 - `output.summary_json`
 - `output.matrix_md`
@@ -21,10 +22,11 @@
 
 - 只审查当前交易，不审查其他交易。
 - 不生成顶层 `index.md` 或 `summary.md`。
-- 本链路不读取业务文档、协议文档或重构设计文档。
-- 交易审查只使用 task JSON、准备器输出、新老项目代码、配置、XML、SQL 和数据库证据。
+- 不读取或检索 old_project 下的老代码。
+- 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
+- 优先使用 OpenCode `explore` 分析文档和代码，主交易 session 只消费 `explore` 返回的短证据摘要。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -39,22 +41,23 @@
 
 读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 
+分析映射文档、详细设计和 new_project 新代码时，优先使用 OpenCode `explore`，让 `explore` 只返回当前交易相关的短证据摘要、文件路径、标题或行号；主交易 session 不直接读取完整文档、完整源码文件或大段摘录。
+
 写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 
 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
 
 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 
-不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、业务文档、协议文档或重构设计文档。
+不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、映射文档或详细设计。
 
 代码定位、调用链取证和数据库证据仍按 MCP 优先：
 
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
-| 定位重构项目代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 同步索引后重试；仍失败再记录到 `unverified`。 |
-| 读取重构项目代码 | `intellij-index_ide_read_file` | 不要优先用 `grep`、`cat`、`rg` 读源码。 |
-| 定位老项目代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字扩大搜索。 |
-| 读取老项目代码 | `intellij-index_ide_read_file` | MCP 不可用时该范围标记未验证；禁止使用 shell。 |
+| 定位 new_project 新代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 同步索引后重试；仍失败再记录到 `unverified`。 |
+| 分析 new_project 新代码 | OpenCode `explore` | 只返回当前交易相关的短证据摘要；不要把完整源码拉入主上下文。 |
+| 分析映射文档和详细设计 | OpenCode `explore` | 只返回当前交易相关片段摘要；上下文不足时记录到 `unverified`，不要扩大到老代码。 |
 | 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到新增文件或明显索引过期时先同步，再重试一次。 |
 | 写 Markdown/JSON 报告 | OpenCode 原生文件编辑工具，fallback 为 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
@@ -118,15 +121,16 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 1. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `new_project` 中定位重构交易代码。
    - 优先 `intellij-index_ide_find_class` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
    - 用 `intellij-index_ide_find_file` 按文件名、通配符、XML、Mapper、配置文件定位候选。
-   - 用 `intellij-index_ide_read_file` 读取候选文件内容，读取时必须使用 IntelliJ-index 返回的相对路径原文。
+   - 对候选文件内容分析优先交给 OpenCode `explore`，只取当前交易相关的短证据摘要。
    - 需要一次查找多类关键文件时，用 `intellij-index_ide_find_key_file`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
-2. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `old_project` 中定位老 SmartESB 交易代码。
-   - 查询当前交易名、交易码、serviceId、类名、XML/biz 引用。
-   - 建立老代码调用链和 8583 报文处理路径。
-3. 只读取当前交易相关的代码、配置、XML、Mapper、SQL 和必要数据库证据；不要打开任何业务文档、协议文档或重构设计文档。
-4. 从新老代码和配置证据中建立 8583 到 JSON 映射矩阵。
-5. 根据代码、配置、XML、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读文档补齐。
+2. 只读取当前交易相关的映射文档和详细设计片段：
+   - `documents.mapping_8583_to_json`
+   - `documents.reconstructed_design`
+   - 文档分析优先交给 OpenCode `explore`，只取当前交易、8583 域、JSON path、类名相关的短证据摘要。
+3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码。
+4. 从映射文档、详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
+5. 根据 new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取老代码补齐。
 
 ## 代码规范审查规则
 
@@ -182,7 +186,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 写入映射矩阵。表头必须中文：
 
 ```text
-8583 字段/来源 | 老系统含义 | 老代码依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 状态 | 验证方式
+8583 字段/来源 | 映射文档依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 详细设计依据 | 状态 | 验证方式
 ```
 
 矩阵较大时按 8583 域号或 JSON 对象分块追加。
@@ -196,9 +200,8 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 - 严重级别。
 - 交易名。
 - 新代码位置。
-- 老代码位置。
-- 代码或配置证据依据。
-- 协议依据来自新老代码、XML、Mapper、SQL 或数据库证据；证据不足时写入 `unverified`。
+- 映射文档或详细设计依据。
+- 协议依据来自映射文档、详细设计、new_project 新代码、XML、Mapper、SQL 或数据库证据；证据不足时写入 `unverified`。
 - 实际问题。
 - 业务影响。
 - 建议修复。
@@ -237,6 +240,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 }
 ```
 
-`documents_checked` 必须写空数组，因为本链路不读取业务文档、协议文档或重构设计文档。
+`old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码。
+`documents_checked` 只能填写实际读取过的 `mapping_8583_to_json` 和 `reconstructed_design` 路径。
 
 如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 IDEA MCP 覆盖修正，不要把不完整摘要留给汇总阶段。
