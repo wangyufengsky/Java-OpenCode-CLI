@@ -3,6 +3,7 @@
 ## 概览
 
 - 重构项目：`{{new_project}}`
+- legacy-index：`{{legacy_index}}`
 - 交易数：`{{transaction_count}}`
 - 输出目录：`{{out}}`
 
@@ -36,7 +37,7 @@
 
 ## 证据边界
 
-本次审查仅使用 new_project 新代码、映射文档、详细设计、配置、SQL、数据库证据和交易摘要；不读取或检索 old_project 下的老代码。
+本次审查仅使用 new_project 新代码、映射文档、legacy-index 老代码详细设计索引、重构详细设计、配置、SQL、数据库证据和交易摘要；不读取或检索 old_project 下的老代码源码。
 
 ## 下一步
 

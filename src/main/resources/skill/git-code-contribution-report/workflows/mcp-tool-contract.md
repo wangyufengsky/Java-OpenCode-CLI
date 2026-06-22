@@ -43,6 +43,7 @@ reports\author-*\quality-summary.json
 | 行为 | 强制 MCP | 规则 |
 | --- | --- | --- |
 | 读取准备脚本输出、模板和 prompt | `intellij-idea_read_file`、`intellij-idea_get_file_text_by_path` | 主 agent 只读 `summary.json`、`index_inputs.json`、`index_inputs.tasks[].report_md` 指定的个人报告和 `index_inputs.tasks[].quality_summary_json` 指定的质量摘要；子 agent 只读输入的 `detail_json` 和个人报告模板，质量分析只用 `detail.changed_regions` 中的 hunk。禁止用 `cat`、`type`、`Get-Content` 或 Python 读取这些文件作为报告依据。 |
+| 上下文探索 | OpenCode `explore` | 优先使用 OpenCode `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。 |
 | 定位公共代码调用证据 | `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations`，辅以 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_symbol`、`intellij-index_ide_search_text`；候选调用点文件内容用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 仅当判断公共代码、工具类代码复用价值时使用；优先用调用链或引用查询 MCP 工具确认调用点，最多读取 5 个候选调用点文件。MCP 不可用或证据不足时写入 `unverified`，禁止改用 shell、grep、rg 或 Python 扫描全项目。 |
 | 写个人报告和总报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换脚本预创建文件中的 marker。 |
 | 搜索已生成文件 | `intellij-idea_find_files_by_glob`、`intellij-idea_find_files_by_name_keyword`、`intellij-idea_search_in_files_by_text`、`intellij-idea_search_in_files_by_regex` | 优先按 `index_inputs.json` 中的确定路径直接读取；只有路径异常或需要定位预创建文件时才搜索。 |

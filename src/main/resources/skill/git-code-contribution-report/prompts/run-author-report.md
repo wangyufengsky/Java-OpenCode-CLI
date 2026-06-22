@@ -39,6 +39,8 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - 读取、搜索、调用链取证、写入和禁止项全部按 `workflows/mcp-tool-contract.md` 执行。
 - 质量分析只能基于 `detail.changed_regions` 中脚本从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
 - `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
+- 优先使用 OpenCode `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。
+- 不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
 - 判断公共代码、工具类代码复用价值时，优先使用 MCP workflow 允许的引用或调用链取证方式确认调用点，并记录实际工具名；最多读取 5 个候选调用点文件。
 - 不得为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件已由脚本排除，不属于统计和评分依据。
 - 将 `detail.output.quality_summary_json` 中的 `detail.output.quality_summary_marker` 替换为合法 JSON 对象。

@@ -47,6 +47,9 @@ class PromptPackContractTest {
                 "必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`",
                 "质量分析只能基于 `detail.changed_regions`",
                 "不得打开或通读 `detail.top_files[].path` 对应的完整文件",
+                "优先使用 OpenCode `explore` 做上下文探索",
+                "当前作者 session 只消费 `explore` 返回的短证据摘要",
+                "`explore` 不得返回完整文件、大段源码或未压缩搜索结果",
                 "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
                 "路径字段只能使用 `filePath`",
                 "禁止使用 `pathInProject`、`file_path`、`path`",
@@ -117,17 +120,17 @@ class PromptPackContractTest {
 
         String combined = worker + "\n" + rerun + "\n" + synthesis;
         assertThat(combined).contains(
-                "不读取或检索 old_project 下的老代码",
-                "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据",
-                "只读取当前交易相关的映射文档和详细设计片段",
+                "可以读取 legacy-index 中当前交易相关的老代码详细设计索引片段",
+                "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、legacy-index 老代码详细设计索引、重构详细设计、配置、SQL 和数据库证据",
+                "只读取当前交易相关的映射文档、legacy-index 和重构详细设计片段",
                 "优先使用 OpenCode `explore` 分析文档和代码",
-                "主交易 session 只消费 `explore` 返回的短证据摘要"
+                "主交易 session 只消费 `explore` 返回的短证据摘要",
+                "`old_code_paths` 必须写空数组"
         );
         assertThat(combined).doesNotContain(
-                "定位老项目代码",
-                "读取老项目代码",
+                "允许通过 OpenCode `explore` 分析 old_project 老代码",
+                "交易审查只使用 task JSON、准备器输出、old_project 老代码",
                 "在 `old_project` 中定位",
-                "建立老代码调用链",
                 "新老项目代码",
                 "新老代码",
                 "本链路不读取业务文档、协议文档或重构设计文档",

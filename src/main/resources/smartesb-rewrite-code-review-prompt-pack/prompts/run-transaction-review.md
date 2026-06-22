@@ -5,6 +5,7 @@
 - `transaction`
 - `new_project`
 - `documents.mapping_8583_to_json`
+- `documents.legacy_index`
 - `documents.reconstructed_design`
 - `output.review_md`
 - `output.summary_json`
@@ -22,8 +23,9 @@
 
 - 只审查当前交易，不审查其他交易。
 - 不生成顶层 `index.md` 或 `summary.md`。
-- 不读取或检索 old_project 下的老代码。
-- 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据。
+- 不读取或检索 old_project 下的老代码源码。
+- 可以读取 legacy-index 中当前交易相关的老代码详细设计索引片段。
+- 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、legacy-index 老代码详细设计索引、重构详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
 - 优先使用 OpenCode `explore` 分析文档和代码，主交易 session 只消费 `explore` 返回的短证据摘要。
@@ -41,7 +43,7 @@
 
 读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 
-分析映射文档、详细设计和 new_project 新代码时，优先使用 OpenCode `explore`，让 `explore` 只返回当前交易相关的短证据摘要、文件路径、标题或行号；主交易 session 不直接读取完整文档、完整源码文件或大段摘录。
+分析映射文档、legacy-index、重构详细设计和 new_project 新代码时，优先使用 OpenCode `explore`，让 `explore` 只返回当前交易相关的短证据摘要、文件路径、标题或行号；主交易 session 不直接读取完整文档、完整源码文件或大段摘录。
 
 写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 
@@ -57,7 +59,7 @@
 | --- | --- | --- |
 | 定位 new_project 新代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 同步索引后重试；仍失败再记录到 `unverified`。 |
 | 分析 new_project 新代码 | OpenCode `explore` | 只返回当前交易相关的短证据摘要；不要把完整源码拉入主上下文。 |
-| 分析映射文档和详细设计 | OpenCode `explore` | 只返回当前交易相关片段摘要；上下文不足时记录到 `unverified`，不要扩大到老代码。 |
+| 分析映射文档、legacy-index 和重构详细设计 | OpenCode `explore` | 只返回当前交易相关片段摘要；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
 | 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到新增文件或明显索引过期时先同步，再重试一次。 |
 | 写 Markdown/JSON 报告 | OpenCode 原生文件编辑工具，fallback 为 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
@@ -124,13 +126,14 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
    - 对候选文件内容分析优先交给 OpenCode `explore`，只取当前交易相关的短证据摘要。
    - 需要一次查找多类关键文件时，用 `intellij-index_ide_find_key_file`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
-2. 只读取当前交易相关的映射文档和详细设计片段：
+2. 只读取当前交易相关的映射文档、legacy-index 和重构详细设计片段：
    - `documents.mapping_8583_to_json`
+   - `documents.legacy_index`
    - `documents.reconstructed_design`
    - 文档分析优先交给 OpenCode `explore`，只取当前交易、8583 域、JSON path、类名相关的短证据摘要。
-3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码。
-4. 从映射文档、详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
-5. 根据 new_project 新代码、映射文档、详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取老代码补齐。
+3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码源码。
+4. 从映射文档、legacy-index、重构详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
+5. 根据 new_project 新代码、映射文档、legacy-index、重构详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取 old_project 源码补齐。
 
 ## 代码规范审查规则
 
@@ -186,7 +189,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 写入映射矩阵。表头必须中文：
 
 ```text
-8583 字段/来源 | 映射文档依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 详细设计依据 | 状态 | 验证方式
+8583 字段/来源 | 映射文档依据 | 老代码详细设计依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 重构详细设计依据 | 状态 | 验证方式
 ```
 
 矩阵较大时按 8583 域号或 JSON 对象分块追加。
@@ -200,8 +203,8 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 - 严重级别。
 - 交易名。
 - 新代码位置。
-- 映射文档或详细设计依据。
-- 协议依据来自映射文档、详细设计、new_project 新代码、XML、Mapper、SQL 或数据库证据；证据不足时写入 `unverified`。
+- 映射文档、legacy-index 或重构详细设计依据。
+- 协议依据来自映射文档、legacy-index、重构详细设计、new_project 新代码、XML、Mapper、SQL 或数据库证据；证据不足时写入 `unverified`。
 - 实际问题。
 - 业务影响。
 - 建议修复。
@@ -240,7 +243,7 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 }
 ```
 
-`old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码。
-`documents_checked` 只能填写实际读取过的 `mapping_8583_to_json` 和 `reconstructed_design` 路径。
+`old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码源码。
+`documents_checked` 只能填写实际读取过的 `mapping_8583_to_json`、`legacy_index` 和 `reconstructed_design` 路径。
 
 如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 IDEA MCP 覆盖修正，不要把不完整摘要留给汇总阶段。

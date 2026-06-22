@@ -97,6 +97,8 @@ python <path-to-this-skill>\scripts\git_code_contribution_report.py score-qualit
 ## 质量分析允许读取的代码范围
 
 - 质量分析只能基于 `detail.changed_regions` 中脚本从该人员提交提取出的 hunk。
+- 优先使用 OpenCode `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。
+- 不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
 - `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
 - 为判断公共代码、工具类代码是否被多个调用点使用，可以额外按 MCP workflow 做引用或调用链取证，并读取最多 5 个候选调用点文件；只能记录与该公共代码直接相关的调用证据。
 - 禁止为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件不属于统计口径。

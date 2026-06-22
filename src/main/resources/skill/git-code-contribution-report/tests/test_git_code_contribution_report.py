@@ -609,6 +609,24 @@ class PromptContractTest(unittest.TestCase):
             for term in required_terms:
                 self.assertIn(term, content, relative_path)
 
+    def test_opencode_explore_is_allowed_as_bounded_context_probe(self):
+        skill_dir = SCRIPT_PATH.parents[1]
+        required_terms = [
+            "优先使用 OpenCode `explore` 做上下文探索",
+            "当前作者 session 只消费 `explore` 返回的短证据摘要",
+            "`explore` 不得返回完整文件、大段源码或未压缩搜索结果",
+            "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
+        ]
+
+        for relative_path in [
+            "prompts/run-author-report.md",
+            "workflows/mcp-tool-contract.md",
+            "workflows/quality-scoring.md",
+        ]:
+            content = (skill_dir / relative_path).read_text(encoding="utf-8")
+            for term in required_terms:
+                self.assertIn(term, content, relative_path)
+
     def test_subagent_must_call_write_tools_before_final_text(self):
         skill_dir = SCRIPT_PATH.parents[1]
         required_terms = [

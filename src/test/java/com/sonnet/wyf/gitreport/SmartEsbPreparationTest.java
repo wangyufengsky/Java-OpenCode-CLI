@@ -29,6 +29,7 @@ class SmartEsbPreparationTest {
         properties.setLocalOut(tempDir.resolve("mirror"));
         properties.setOldProject("D:\\upfs\\qianzhi\\upfs-cloud-xc");
         properties.setNewProject("D:\\upfs-nl-json");
+        properties.setLegacyIndex("D:\\upfs-nl-json\\doc\\index.md");
         properties.setDocRoot("D:\\upfs-nl-json\\doc\\docment");
         properties.setTransactionPlanDir(tempDir.resolve("plans"));
         SmartEsbDailyTransactionPlan plan = new SmartEsbDailyTransactionPlan(
@@ -69,11 +70,13 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/rules/writer_preference").asText()).contains("优先使用 OpenCode 原生文件编辑工具");
         assertThat(task.at("/rules/writer_preference").asText()).contains("路径字段只能使用 filePath");
         assertThat(task.at("/rules/template_contract").asText()).contains("只能替换 output_placeholders");
-        assertThat(task.at("/rules/scope").asText()).contains("不读取或检索 old_project 下的老代码");
+        assertThat(task.at("/rules/scope").asText()).contains("legacy-index 老代码详细设计索引");
+        assertThat(task.at("/rules/scope").asText()).contains("不读取或检索 old_project 下的老代码源码");
         assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 分析文档和代码");
         assertThat(task.at("/rules/explore_preference").asText()).contains("主交易 session 只消费 explore 返回的短证据摘要");
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/documents/mapping_8583_to_json").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\docment\\8583 to json.md");
+        assertThat(task.at("/documents/legacy_index").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\index.md");
         assertThat(task.at("/documents/reconstructed_design").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\docment\\重构项目详细设计文档.md");
         assertThat(task.at("/documents/old_8583").isMissingNode()).isTrue();
         assertThat(task.at("/documents/json").isMissingNode()).isTrue();
@@ -107,21 +110,22 @@ class SmartEsbPreparationTest {
         assertThat(task.path("task_path").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/tasks/transaction-CaRolloutRepeal.json");
         assertThat(task.at("/output/review_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/reports/CaRolloutRepeal/review.md");
         assertThat(task.at("/documents/mapping_8583_to_json").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/8583 to json.md");
+        assertThat(task.at("/documents/legacy_index").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/index.md");
         assertThat(task.at("/documents/reconstructed_design").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/重构项目详细设计文档.md");
         assertThat(task.at("/documents/old_8583").isMissingNode()).isTrue();
         assertThat(task.at("/documents/json").isMissingNode()).isTrue();
-        assertThat(task.at("/rules/scope").asText()).contains("只审查当前交易的新代码、映射文档和详细设计");
+        assertThat(task.at("/rules/scope").asText()).contains("只审查当前交易的新代码、映射文档、重构详细设计和 legacy-index 老代码详细设计索引");
         assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 分析文档和代码");
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("opencode_native");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
                 .contains(
                         "- 重构项目：`/home/wangyufeng/upfs-nl-json`",
+                        "- legacy-index：`/home/wangyufeng/upfs-nl-json/doc/index.md`",
                         "- 映射文档：`/home/wangyufeng/upfs-nl-json/doc/docment/8583 to json.md`",
                         "- 详细设计：`/home/wangyufeng/upfs-nl-json/doc/docment/重构项目详细设计文档.md`"
                 )
                 .doesNotContain(
-                        "- 老项目：",
                         "8583 文档",
                         "JSON 文档",
                         "/home/wangyufeng/upfs-nl-json/doc/docment/8583.md"

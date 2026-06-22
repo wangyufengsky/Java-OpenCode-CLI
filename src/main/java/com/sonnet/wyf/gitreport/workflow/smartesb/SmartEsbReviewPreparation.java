@@ -180,7 +180,8 @@ public class SmartEsbReviewPreparation {
         task.put("new_project", normalizeLogical(properties.getNewProject()));
         task.put("documents", Map.of(
                 "mapping_8583_to_json", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))),
-                "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md")))
+                "reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))),
+                "legacy_index", normalizeLogical(properties.getLegacyIndex())
         ));
         task.put("skill", Map.of(
                 "prompt", "classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-transaction-review.md",
@@ -201,7 +202,7 @@ public class SmartEsbReviewPreparation {
         task.put("output", output);
         task.put("output_placeholders", TRANSACTION_OUTPUT_PLACEHOLDERS);
         task.put("rules", Map.of(
-                "scope", "只审查当前交易的新代码、映射文档和详细设计；不读取或检索 old_project 下的老代码。",
+                "scope", "只审查当前交易的新代码、映射文档、重构详细设计和 legacy-index 老代码详细设计索引；不读取或检索 old_project 下的老代码源码。",
                 "precreated_outputs", "准备器已预创建包含完整模板和占位符的 review.md、mapping-matrix.md、sections/*.md，以及初始 summary.json；子 agent 只能替换这些已存在文件中的 output_placeholders，占位符之外的标题结构不得删除、重命名或重排。",
                 "template_contract", "只能替换 output_placeholders 中列出的占位符；写入完成后所有 Markdown 报告不得残留 {{...}} 占位符。",
                 "reader_preference", "读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 fallback_file_tools 中的读取工具。",
@@ -268,6 +269,7 @@ public class SmartEsbReviewPreparation {
     private Map<String, String> topLevelTemplateValues(SmartEsbRewriteProperties properties, String logicalOut, SmartEsbDailyTransactionPlan plan, int transactionCount) {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("new_project", normalizeLogical(properties.getNewProject()));
+        values.put("legacy_index", normalizeLogical(properties.getLegacyIndex()));
         values.put("transaction_count", String.valueOf(transactionCount));
         values.put("out", logicalOut);
         values.put("date", plan.date().toString());
@@ -279,6 +281,7 @@ public class SmartEsbReviewPreparation {
         values.put("transaction", transaction.name());
         values.put("description", transaction.description());
         values.put("new_project", normalizeLogical(properties.getNewProject()));
+        values.put("legacy_index", normalizeLogical(properties.getLegacyIndex()));
         values.put("reconstructed_design", normalizeLogical(firstNonBlank(properties.getReconstructedDesign(), appendLogical(properties.getDocRoot(), "重构项目详细设计文档.md"))));
         values.put("mapping_doc", normalizeLogical(firstNonBlank(properties.getMappingDoc(), appendLogical(properties.getDocRoot(), "8583 to json.md"))));
         return values;
@@ -298,6 +301,7 @@ public class SmartEsbReviewPreparation {
                 | --- | --- |
                 | 日期 | {{date}} |
                 | 重构项目 | `{{new_project}}` |
+                | legacy-index | `{{legacy_index}}` |
                 | 交易数 | {{transaction_count}} |
                 | 输出目录 | `{{out}}` |
 
@@ -328,6 +332,7 @@ public class SmartEsbReviewPreparation {
                 {{SUMMARY_NEXT_STEPS}}
                 """.replace("{{date}}", values.getOrDefault("date", ""))
                 .replace("{{new_project}}", values.getOrDefault("new_project", ""))
+                .replace("{{legacy_index}}", values.getOrDefault("legacy_index", ""))
                 .replace("{{transaction_count}}", values.getOrDefault("transaction_count", ""))
                 .replace("{{out}}", values.getOrDefault("out", ""));
     }
@@ -336,8 +341,8 @@ public class SmartEsbReviewPreparation {
         return """
                 # 字段映射矩阵
 
-                | 8583 字段/来源 | 映射文档依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 详细设计依据 | 状态 | 验证方式 |
-                | --- | --- | --- | --- | --- | --- | --- | --- |
+                | 8583 字段/来源 | 映射文档依据 | 老代码详细设计依据 | JSON 路径/目标 | 转换规则 | 新代码依据 | 重构详细设计依据 | 状态 | 验证方式 |
+                | --- | --- | --- | --- | --- | --- | --- | --- | --- |
                 {{MAPPING_ROWS}}
                 """;
     }
