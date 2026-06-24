@@ -14,7 +14,7 @@ public class SmartEsbRewriteProperties {
     private String old8583Doc = "/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md";
     private String mappingDoc;
     private String reconstructedDesign;
-    private String workerMessage = "严格执行附件 worker-prompt.md 中的 SmartESB 单交易审查任务，只输出 DONE 或 BLOCKED。";
+    private String workerMessage = "严格执行附件 worker-prompt.md 中的 SmartESB 单项审查任务，只输出 DONE 或 BLOCKED。";
     private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。";
 
     public String getOut() {

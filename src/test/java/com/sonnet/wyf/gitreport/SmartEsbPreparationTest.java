@@ -42,10 +42,10 @@ class SmartEsbPreparationTest {
         Path dayOut = tempDir.resolve("mirror/2026-06-16");
         assertThat(localOut).isEqualTo(dayOut);
         assertThat(dayOut.resolve("index.md")).content()
-                .contains("## 交易审查状态", "{{TRANSACTION_ROWS}}")
+                .contains("## 交易/模块审查状态", "{{TRANSACTION_ROWS}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:index -->");
         assertThat(dayOut.resolve("summary.md")).content()
-                .contains("## 交易审查状态", "{{SUMMARY_TRANSACTION_ROWS}}")
+                .contains("## 交易/模块审查状态", "{{SUMMARY_TRANSACTION_ROWS}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:summary -->");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
                 .contains("# 交易重构代码审查：CaRolloutRepeal", "{{FINDING_ROWS}}", "{{SUMMARY}}")
@@ -71,8 +71,8 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/rules/template_contract").asText()).contains("只能替换 output_placeholders");
         assertThat(task.at("/rules/scope").asText()).contains("old-8583-doc 老代码详细设计");
         assertThat(task.at("/rules/scope").asText()).contains("不读取或检索 old_project 下的老代码源码");
-        assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 分析文档和代码");
-        assertThat(task.at("/rules/explore_preference").asText()).contains("主交易 session 只消费 explore 返回的短证据摘要");
+        assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 或 intellij-index 分析文档和代码");
+        assertThat(task.at("/rules/explore_preference").asText()).contains("如果 explore 不可用，继续用 intellij-index");
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/documents/mapping_8583_to_json").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\docment\\8583 to json.md");
         assertThat(task.at("/documents/old_8583_doc").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\old-8583.md");
@@ -120,7 +120,7 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/documents/json").isMissingNode()).isTrue();
         assertThat(task.at("/skill/summary_schema").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/schemas/transaction-summary.schema.json");
         assertThat(task.at("/rules/scope").asText()).contains("只审查当前交易的新代码、映射文档、重构详细设计和 old-8583-doc 老代码详细设计");
-        assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 分析文档和代码");
+        assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 或 intellij-index 分析文档和代码");
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("opencode_native");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
@@ -142,6 +142,50 @@ class SmartEsbPreparationTest {
         assertThat(indexInputs.at("/schemas/transaction_summary").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/schemas/transaction-summary.schema.json");
         assertThat(dayOut.resolve("schemas/transaction-summary.schema.json")).content()
                 .contains("\"required\"", "\"finding_counts\"", "\"code_standard_findings\"");
+    }
+
+    @Test
+    void precreatesModuleReviewWorkspaceWithoutTransactionDocumentContract() throws Exception {
+        SmartEsbRewriteProperties properties = new SmartEsbRewriteProperties();
+        properties.setOut("/home/wangyufeng/review-output/smartesb");
+        properties.setLocalOut(tempDir.resolve("mirror"));
+        properties.setNewProject("/home/wangyufeng/upfs-nl-json");
+        properties.setDocRoot("/home/wangyufeng/upfs-nl-json/doc/docment");
+        SmartEsbDailyTransactionPlan plan = new SmartEsbDailyTransactionPlan(
+                LocalDate.of(2026, 6, 24),
+                tempDir.resolve("plans/2026-06-24/transactions.yml"),
+                List.of(new SmartEsbDailyTransactionPlan.Transaction("CaReturnOfGoods", "")),
+                List.of(new SmartEsbDailyTransactionPlan.Module("BaseChnConvReqMsgSop"))
+        );
+
+        Path localOut = new SmartEsbReviewPreparation(objectMapper).prepare(properties, plan, true);
+
+        Path dayOut = tempDir.resolve("mirror/2026-06-24");
+        assertThat(localOut).isEqualTo(dayOut);
+        assertThat(dayOut.resolve("tasks/module-BaseChnConvReqMsgSop.json")).exists();
+        assertThat(dayOut.resolve("reports/BaseChnConvReqMsgSop/review.md")).content()
+                .contains("# 模块代码审查：BaseChnConvReqMsgSop", "{{FINDING_ROWS}}", "{{SUMMARY}}")
+                .doesNotContain("交易重构代码审查");
+        assertThat(dayOut.resolve("reports/BaseChnConvReqMsgSop/mapping-matrix.md")).content()
+                .contains("模块职责/依赖", "{{MAPPING_ROWS}}")
+                .doesNotContain("8583 字段/来源");
+
+        JsonNode task = objectMapper.readTree(dayOut.resolve("tasks/module-BaseChnConvReqMsgSop.json").toFile());
+        assertThat(task.path("review_type").asText()).isEqualTo("module");
+        assertThat(task.path("module").asText()).isEqualTo("BaseChnConvReqMsgSop");
+        assertThat(task.path("transaction").isMissingNode()).isTrue();
+        assertThat(task.path("task_path").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-24/tasks/module-BaseChnConvReqMsgSop.json");
+        assertThat(task.at("/skill/prompt").asText()).isEqualTo("classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-module-review.md");
+        assertThat(task.at("/rules/scope").asText()).contains("只审查当前模块");
+        assertThat(task.at("/rules/scope").asText()).contains("不要求交易名");
+        assertThat(task.at("/documents/mapping_8583_to_json").isMissingNode()).isTrue();
+        assertThat(task.at("/documents/old_8583_doc").isMissingNode()).isTrue();
+        assertThat(task.at("/documents/reconstructed_design").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/重构项目详细设计文档.md");
+
+        JsonNode indexInputs = objectMapper.readTree(dayOut.resolve("index_inputs.json").toFile());
+        assertThat(indexInputs.at("/tasks/1/review_type").asText()).isEqualTo("module");
+        assertThat(indexInputs.at("/tasks/1/module").asText()).isEqualTo("BaseChnConvReqMsgSop");
+        assertThat(indexInputs.at("/prompts/module_review").asText()).isEqualTo("classpath:smartesb-rewrite-code-review-prompt-pack/prompts/run-module-review.md");
     }
 
     @Test

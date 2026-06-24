@@ -25,8 +25,8 @@ mapping-doc:
 # 可选。重构项目详细设计；为空时默认 doc-root/重构项目详细设计文档.md。
 reconstructed-design:
 
-# 必填。发送给单交易 OpenCode session 的附加执行消息。
-worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单交易审查任务，只输出 DONE 或 BLOCKED。"
+# 必填。发送给单项 OpenCode session 的附加执行消息。
+worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单项审查任务，只输出 DONE 或 BLOCKED。"
 
 # 必填。发送给汇总 OpenCode session 的附加执行消息。
 synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。"

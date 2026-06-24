@@ -42,6 +42,19 @@ class WorkflowRunnerTest {
     }
 
     @Test
+    void requestParsesCommaSeparatedRerunIds() {
+        WorkflowRunRequest request = new WorkflowRunRequest(
+                "rerun",
+                "transaction",
+                "\"CaCheckAcct\", \"CaConsumeRev\", \"CaTransferOuter\"",
+                null,
+                new com.sonnet.wyf.gitreport.runner.OpenCodeSettings()
+        );
+
+        assertThat(request.rerunIds()).containsExactly("CaCheckAcct", "CaConsumeRev", "CaTransferOuter");
+    }
+
+    @Test
     void failsClearlyWhenActiveChainIsUnknown() {
         OpenCodeRunnerProperties properties = new OpenCodeRunnerProperties();
         properties.setEnabled(true);

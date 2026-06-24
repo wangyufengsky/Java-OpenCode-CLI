@@ -33,6 +33,23 @@ public class SmartEsbPromptBuilder {
                 + "```\n";
     }
 
+    public String buildModulePrompt(String taskJsonPath, String summarySchema) {
+        return readResource("smartesb-rewrite-code-review-prompt-pack/prompts/run-module-review.md")
+                + "\n\n## 路径载荷\n\n```text\n"
+                + "task_json_path: " + taskJsonPath + "\n"
+                + "summary_schema: " + summarySchema + "\n"
+                + "```\n";
+    }
+
+    public String buildRerunModulePrompt(String taskJsonPath, String previousOutputPath, String summarySchema) {
+        return readResource("smartesb-rewrite-code-review-prompt-pack/prompts/rerun-single-module.md")
+                + "\n\n## 路径载荷\n\n```text\n"
+                + "task_json_path: " + taskJsonPath + "\n"
+                + "previous_output: " + previousOutputPath + "\n"
+                + "summary_schema: " + summarySchema + "\n"
+                + "```\n";
+    }
+
     public String buildSynthesisPrompt(Path summaryJson, Path indexInputsJson) {
         String prompt = readResource("smartesb-rewrite-code-review-prompt-pack/prompts/synthesize-index.md");
         String template = readResource("smartesb-rewrite-code-review-prompt-pack/templates/index.md");

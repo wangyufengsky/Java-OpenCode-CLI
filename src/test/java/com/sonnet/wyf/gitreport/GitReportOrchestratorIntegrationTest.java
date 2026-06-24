@@ -353,6 +353,72 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(bobReport).hasContent("Bob 个人报告\n");
     }
 
+    @Test
+    void rerunMultipleAuthorsUsesExistingPreparationAndRunsSynthesisOnce() throws Exception {
+        Path repo = tempDir.resolve("repo-rerun-authors");
+        Path out = tempDir.resolve("out-rerun-authors");
+        Files.createDirectories(repo);
+        Files.createDirectories(out.resolve("details"));
+        Files.createDirectories(out.resolve("reports/author-001-alice"));
+        Files.createDirectories(out.resolve("reports/author-002-bob"));
+        Files.createDirectories(out.resolve("reports/author-003-carol"));
+        Path aliceDetail = out.resolve("details/author-001-alice.json");
+        Path bobDetail = out.resolve("details/author-002-bob.json");
+        Path carolDetail = out.resolve("details/author-003-carol.json");
+        Path aliceReport = out.resolve("reports/author-001-alice/person-report.md");
+        Path aliceQuality = out.resolve("reports/author-001-alice/quality-summary.json");
+        Path bobReport = out.resolve("reports/author-002-bob/person-report.md");
+        Path bobQuality = out.resolve("reports/author-002-bob/quality-summary.json");
+        Path carolReport = out.resolve("reports/author-003-carol/person-report.md");
+        Path carolQuality = out.resolve("reports/author-003-carol/quality-summary.json");
+        Files.writeString(aliceReport, "# 个人代码提交量报告：Alice <alice@example.com>\n\n{{WORKLOAD_STRUCTURE_ANALYSIS}}\n");
+        Files.writeString(bobReport, "# 个人代码提交量报告：Bob <bob@example.com>\n\n{{WORKLOAD_STRUCTURE_ANALYSIS}}\n");
+        Files.writeString(carolReport, "Carol 个人报告\n");
+        objectMapper.writeValue(aliceQuality.toFile(), pendingQuality("Alice <alice@example.com>"));
+        objectMapper.writeValue(bobQuality.toFile(), pendingQuality("Bob <bob@example.com>"));
+        objectMapper.writeValue(carolQuality.toFile(), completedQuality("Carol <carol@example.com>"));
+        writeAuthorDetail(aliceDetail, "Alice <alice@example.com>", aliceReport, aliceQuality);
+        writeAuthorDetail(bobDetail, "Bob <bob@example.com>", bobReport, bobQuality);
+        writeAuthorDetail(carolDetail, "Carol <carol@example.com>", carolReport, carolQuality);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("summary.json").toFile(), Map.of(
+                "ranking", List.of(
+                        Map.of("author_key", "author-001-alice", "author", "Alice <alice@example.com>", "rank", 1, "base_workload_score", 100.0),
+                        Map.of("author_key", "author-002-bob", "author", "Bob <bob@example.com>", "rank", 2, "base_workload_score", 80.0),
+                        Map.of("author_key", "author-003-carol", "author", "Carol <carol@example.com>", "rank", 3, "base_workload_score", 60.0)
+                )
+        ));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("index_inputs.json").toFile(), Map.of(
+                "final_report", out.resolve("code-contribution-report.md").toString(),
+                "tasks", List.of(
+                        Map.of("author_key", "author-001-alice", "author", "Alice <alice@example.com>", "rank", 1, "detail_json", aliceDetail.toString(), "report_md", aliceReport.toString(), "quality_summary_json", aliceQuality.toString()),
+                        Map.of("author_key", "author-002-bob", "author", "Bob <bob@example.com>", "rank", 2, "detail_json", bobDetail.toString(), "report_md", bobReport.toString(), "quality_summary_json", bobQuality.toString()),
+                        Map.of("author_key", "author-003-carol", "author", "Carol <carol@example.com>", "rank", 3, "detail_json", carolDetail.toString(), "report_md", carolReport.toString(), "quality_summary_json", carolQuality.toString())
+                )
+        ));
+        Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
+        startFakeOpenCodeServer();
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getOpencode().setServerUrl(serverUrl());
+        properties.getOpencode().setManageServer(false);
+        GitReportPreparation preparation = new GitReportPreparation(null, null) {
+            @Override
+            public void prepare(GitReportProperties ignored) {
+                throw new AssertionError("preparation must not run for multi-author rerun");
+            }
+        };
+
+        orchestrator(preparation).runAuthors(properties, List.of("author-001-alice", "author-002-bob"));
+
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json: " + aliceDetail));
+        assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json: " + bobDetail));
+        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("detail_json: " + carolDetail));
+        assertThat(prompts.stream().filter(prompt -> prompt.contains("synthesis_inputs_json:")).count()).isEqualTo(1);
+        assertThat(carolReport).hasContent("Carol 个人报告\n");
+    }
+
     private GitReportOrchestrator orchestrator() {
         return orchestrator(new GitReportPreparation(
                 new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
@@ -630,6 +696,32 @@ class GitReportOrchestratorIntegrationTest {
                 ## 8. 典型低质量代码片段
                 无
                 """;
+    }
+
+    private Map<String, Object> pendingQuality(String author) {
+        return Map.of(
+                "author", author,
+                "status", "pending",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "{{QUALITY_SUMMARY}}"
+        );
+    }
+
+    private Map<String, Object> completedQuality(String author) {
+        return Map.of(
+                "author", author,
+                "status", "completed",
+                "findings", List.of(),
+                "positive_signals", List.of(),
+                "risk_signals", List.of(),
+                "code_snippets", List.of(),
+                "unverified", List.of(),
+                "summary", "无"
+        );
     }
 
     private void writeAuthorDetail(Path detailPath, String author, Path personReport, Path qualitySummary) throws IOException {

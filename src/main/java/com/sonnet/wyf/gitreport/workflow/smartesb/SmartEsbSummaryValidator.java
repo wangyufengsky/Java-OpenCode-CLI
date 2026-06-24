@@ -11,8 +11,6 @@ import java.util.Set;
 
 public class SmartEsbSummaryValidator {
     private static final List<String> REQUIRED = List.of(
-            "transaction",
-            "description",
             "status",
             "review_md",
             "matrix_md",
@@ -47,6 +45,9 @@ public class SmartEsbSummaryValidator {
                 if (!root.containsKey(field)) {
                     return Validation.failed("summary missing required field: " + field);
                 }
+            }
+            if (!root.containsKey("transaction") && !root.containsKey("module")) {
+                return Validation.failed("summary missing required field: transaction or module");
             }
             Object status = root.get("status");
             if (!(status instanceof String value) || !STATUSES.contains(value)) {

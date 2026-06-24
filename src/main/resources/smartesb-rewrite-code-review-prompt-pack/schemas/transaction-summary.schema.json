@@ -1,11 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "smartesb-rewrite-code-review/transaction-summary.schema.json",
-  "title": "SmartESB rewrite transaction review summary",
+  "title": "SmartESB rewrite transaction or module review summary",
   "type": "object",
   "required": [
-    "transaction",
-    "description",
     "status",
     "review_md",
     "matrix_md",
@@ -18,8 +16,16 @@
     "top_findings",
     "unverified"
   ],
+  "anyOf": [
+    {"required": ["transaction"]},
+    {"required": ["module"]}
+  ],
   "properties": {
     "transaction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "module": {
       "type": "string",
       "minLength": 1
     },

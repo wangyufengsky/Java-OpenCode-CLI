@@ -26,12 +26,14 @@ public class SmartEsbDailyTransactionPlanLoader {
         if (!declaredDate.equals(date)) {
             throw new IllegalArgumentException("transactions.yml date " + declaredDate + " does not match run date " + date + ": " + source);
         }
-        if (yaml.transactions == null || yaml.transactions.isEmpty()) {
-            throw new IllegalArgumentException("transactions.yml must contain at least one transaction: " + source);
+        List<TransactionYaml> transactionYamlList = yaml.transactions == null ? List.of() : yaml.transactions;
+        List<ModuleYaml> moduleYamlList = yaml.modules == null ? List.of() : yaml.modules;
+        if (transactionYamlList.isEmpty() && moduleYamlList.isEmpty()) {
+            throw new IllegalArgumentException("transactions.yml must contain at least one transaction or module: " + source);
         }
         Set<String> names = new LinkedHashSet<>();
         List<SmartEsbDailyTransactionPlan.Transaction> transactions = new ArrayList<>();
-        for (TransactionYaml transaction : yaml.transactions) {
+        for (TransactionYaml transaction : transactionYamlList) {
             String name = transaction.name == null ? "" : transaction.name.trim();
             if (name.isBlank()) {
                 throw new IllegalArgumentException("transaction name cannot be blank: " + source);
@@ -42,16 +44,32 @@ public class SmartEsbDailyTransactionPlanLoader {
             String description = transaction.description == null ? "" : transaction.description.trim();
             transactions.add(new SmartEsbDailyTransactionPlan.Transaction(name, description));
         }
-        return new SmartEsbDailyTransactionPlan(date, source, List.copyOf(transactions));
+        List<SmartEsbDailyTransactionPlan.Module> modules = new ArrayList<>();
+        for (ModuleYaml module : moduleYamlList) {
+            String name = module.name == null ? "" : module.name.trim();
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("module name cannot be blank: " + source);
+            }
+            if (!names.add(name)) {
+                throw new IllegalArgumentException("duplicate review item in " + source + ": " + name);
+            }
+            modules.add(new SmartEsbDailyTransactionPlan.Module(name));
+        }
+        return new SmartEsbDailyTransactionPlan(date, source, List.copyOf(transactions), List.copyOf(modules));
     }
 
     static class DailyPlanYaml {
         public String date;
         public List<TransactionYaml> transactions;
+        public List<ModuleYaml> modules;
     }
 
     static class TransactionYaml {
         public String name;
         public String description;
+    }
+
+    static class ModuleYaml {
+        public String name;
     }
 }

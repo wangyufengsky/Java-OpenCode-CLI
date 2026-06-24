@@ -28,7 +28,7 @@
 - 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
-- 优先使用 OpenCode `explore` 分析文档和代码，主交易 session 只消费 `explore` 返回的短证据摘要。
+- 优先使用 OpenCode `explore` 或 `intellij-index` 分析文档和代码；如果 `explore` 不可用，继续用 `intellij-index` 定位和读取代码，不得因此 `BLOCKED`。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -43,7 +43,7 @@
 
 读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 
-分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，优先使用 OpenCode `explore`，让 `explore` 只返回当前交易相关的短证据摘要、文件路径、标题或行号；主交易 session 不直接读取完整文档、完整源码文件或大段摘录。
+分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，优先使用 OpenCode `explore` 或 `intellij-index`，只保留当前交易相关的短证据摘要、文件路径、标题或行号；不要直接读取完整文档、完整源码文件或大段摘录。
 
 写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 

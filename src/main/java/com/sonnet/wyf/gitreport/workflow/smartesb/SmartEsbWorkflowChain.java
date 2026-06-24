@@ -20,9 +20,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.stream.Collectors;
 
 public class SmartEsbWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-rewrite-code-review";
@@ -76,7 +78,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         if ("full".equals(mode)) {
             Path out = preparation.prepare(properties, plan, true);
-            runTransactions(properties, request, out, plan.transactions());
+            runReviewItems(properties, request, out, plan.reviewItems(), false);
             runIndex(properties, request, out);
             return;
         }
@@ -85,38 +87,43 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         }
         Path out = datedLocalOut(properties, plan);
         if ("transaction".equals(request.rerunType())) {
-            SmartEsbDailyTransactionPlan.Transaction transaction = plan.transactions().stream()
-                    .filter(item -> item.name().equals(request.rerunId()))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException("transaction not found in " + plan.source() + ": " + request.rerunId()));
+            List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "transaction", request.rerunIds());
             if (!Files.exists(out.resolve("index_inputs.json"))) {
                 preparation.prepare(properties, plan, true);
             }
-            runTransactions(properties, request, out, List.of(transaction));
+            runReviewItems(properties, request, out, items, true);
+            runIndex(properties, request, out);
+        } else if ("module".equals(request.rerunType())) {
+            List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "module", request.rerunIds());
+            if (!Files.exists(out.resolve("index_inputs.json"))) {
+                preparation.prepare(properties, plan, true);
+            }
+            runReviewItems(properties, request, out, items, true);
             runIndex(properties, request, out);
         } else if ("index".equals(request.rerunType())) {
             runIndex(properties, request, out);
         } else {
-            throw new IllegalArgumentException("SmartESB rerun.type must be one of: transaction, index");
+            throw new IllegalArgumentException("SmartESB rerun.type must be one of: transaction, module, index");
         }
     }
 
-    private void runTransactions(
+    private void runReviewItems(
             SmartEsbRewriteProperties properties,
             WorkflowRunRequest request,
             Path out,
-            List<SmartEsbDailyTransactionPlan.Transaction> transactions
+            List<SmartEsbDailyTransactionPlan.ReviewItem> items,
+            boolean rerun
     ) throws Exception {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
         int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
-        log.info("Starting SmartESB transaction reviews: taskCount={}, concurrency={}", transactions.size(), concurrency);
+        log.info("Starting SmartESB review items: taskCount={}, concurrency={}", items.size(), concurrency);
         Semaphore transactionSlots = new Semaphore(concurrency);
         List<Future<String>> futures = new ArrayList<>();
-        for (SmartEsbDailyTransactionPlan.Transaction transaction : transactions) {
+        for (SmartEsbDailyTransactionPlan.ReviewItem item : items) {
             futures.add(transactionTaskExecutor.submit(limitedTransactionCallable(
                     transactionSlots,
-                    transactionCallable(properties, request, out, indexInputs, server, transaction)
+                    transactionCallable(properties, request, out, indexInputs, server, item, rerun)
             )));
         }
         List<String> failures = new ArrayList<>();
@@ -127,7 +134,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             }
         }
         if (!failures.isEmpty()) {
-            throw new IllegalStateException("SmartESB transaction review failed: " + String.join("; ", failures));
+            throw new IllegalStateException("SmartESB review failed: " + String.join("; ", failures));
         }
     }
 
@@ -148,38 +155,41 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             Path out,
             Map<String, Object> indexInputs,
             OpenCodeServerHandle server,
-            SmartEsbDailyTransactionPlan.Transaction transaction
+            SmartEsbDailyTransactionPlan.ReviewItem item,
+            boolean rerun
     ) {
         return () -> {
             try {
-                return runTransaction(properties, request, out, indexInputs, server, transaction);
+                return runReviewItem(properties, request, out, indexInputs, server, item, rerun);
             } catch (Exception exception) {
-                log.warn("SmartESB transaction review failed: transaction={}, reason={}",
-                        transaction.name(), exception.toString());
-                return transaction.name() + ": " + exception.getMessage();
+                log.warn("SmartESB review failed: kind={}, name={}, reason={}",
+                        item.kind(), item.name(), exception.toString());
+                return item.name() + ": " + exception.getMessage();
             }
         };
     }
 
-    private String runTransaction(
+    private String runReviewItem(
             SmartEsbRewriteProperties properties,
             WorkflowRunRequest request,
             Path out,
             Map<String, Object> indexInputs,
             OpenCodeServerHandle server,
-            SmartEsbDailyTransactionPlan.Transaction transaction
+            SmartEsbDailyTransactionPlan.ReviewItem item,
+            boolean rerun
     ) throws Exception {
-        Map<String, Object> task = taskByTransaction(indexInputs, transaction.name());
-        Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(transaction.name()));
+        Map<String, Object> task = taskByReviewItem(indexInputs, item);
+        Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()));
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("worker-prompt.md");
         String summarySchema = ((Map<?, ?>) indexInputs.get("schemas")).get("transaction_summary").toString();
-        Files.writeString(promptFile, promptBuilder.buildTransactionPrompt(task.get("task_path").toString(), summarySchema));
-        Path summaryJson = localSummaryPath(out, transaction.name());
+        Path summaryJson = localSummaryPath(out, item.name());
+        String prompt = buildWorkerPrompt(item, task, summarySchema, rerun);
+        Files.writeString(promptFile, prompt);
         OpenCodeRunResult result = taskRunner.runUntilValidated(
                 server,
                 Path.of(properties.getNewProject()),
-                "smartesb-review-" + transaction.name(),
+                "smartesb-review-" + item.name(),
                 promptFile,
                 properties.getWorkerMessage(),
                 runDir,
@@ -194,20 +204,34 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         );
         SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryJson);
         if (!validation.ok()) {
-            log.warn("SmartESB transaction review failed after same-session correction attempts: transaction={}, reason={}, sessionId={}, timedOut={}, correctionRounds={}",
-                    transaction.name(), validation.error(), result.sessionId(), result.timedOut(), result.correctionRounds());
+            log.warn("SmartESB review failed after same-session correction attempts: kind={}, name={}, reason={}, sessionId={}, timedOut={}, correctionRounds={}",
+                    item.kind(), item.name(), validation.error(), result.sessionId(), result.timedOut(), result.correctionRounds());
         }
-        return validation.ok() ? "" : transaction.name() + ": " + validation.error();
+        return validation.ok() ? "" : item.name() + ": " + validation.error();
+    }
+
+    private String buildWorkerPrompt(SmartEsbDailyTransactionPlan.ReviewItem item, Map<String, Object> task, String summarySchema, boolean rerun) {
+        String taskPath = task.get("task_path").toString();
+        String summaryJson = task.get("summary_json").toString();
+        if (item.isModule()) {
+            return rerun
+                    ? promptBuilder.buildRerunModulePrompt(taskPath, summaryJson, summarySchema)
+                    : promptBuilder.buildModulePrompt(taskPath, summarySchema);
+        }
+        return rerun
+                ? promptBuilder.buildRerunTransactionPrompt(taskPath, summaryJson, summarySchema)
+                : promptBuilder.buildTransactionPrompt(taskPath, summarySchema);
     }
 
     private void runIndex(SmartEsbRewriteProperties properties, WorkflowRunRequest request, Path out) throws Exception {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         List<String> invalid = new ArrayList<>();
         for (Map<String, Object> task : listOfMaps(indexInputs.get("tasks"))) {
-            Path summaryPath = localSummaryPath(out, task.get("transaction").toString());
+            String name = taskName(task);
+            Path summaryPath = localSummaryPath(out, name);
             SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryPath);
             if (!validation.ok()) {
-                invalid.add(task.get("transaction") + ": " + validation.error());
+                invalid.add(name + ": " + validation.error());
             }
         }
         if (!invalid.isEmpty()) {
@@ -282,15 +306,43 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         return Path.of(SmartEsbReviewPreparation.appendLogical(properties.getOut(), plan.date().toString()));
     }
 
-    private Map<String, Object> taskByTransaction(Map<String, Object> indexInputs, String transaction) {
+    private Map<String, Object> taskByReviewItem(Map<String, Object> indexInputs, SmartEsbDailyTransactionPlan.ReviewItem item) {
         return listOfMaps(indexInputs.get("tasks")).stream()
-                .filter(task -> transaction.equals(task.get("transaction")))
+                .filter(task -> item.kind().equals(task.get("review_type")))
+                .filter(task -> item.name().equals(taskName(task)))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("transaction task missing from index_inputs.json: " + transaction));
+                .orElseThrow(() -> new IllegalArgumentException(item.kind() + " task missing from index_inputs.json: " + item.name()));
     }
 
-    private Path localSummaryPath(Path out, String transaction) {
-        return out.resolve("reports").resolve(SmartEsbReviewPreparation.slugify(transaction)).resolve("summary.json");
+    private List<SmartEsbDailyTransactionPlan.ReviewItem> reviewItemsByName(SmartEsbDailyTransactionPlan plan, String kind, List<String> requestedNames) {
+        if (requestedNames == null || requestedNames.isEmpty()) {
+            throw new IllegalArgumentException(kind + " id is required for SmartESB " + kind + " rerun");
+        }
+        Map<String, SmartEsbDailyTransactionPlan.ReviewItem> byName = plan.reviewItems().stream()
+                .filter(item -> kind.equals(item.kind()))
+                .collect(Collectors.toMap(SmartEsbDailyTransactionPlan.ReviewItem::name, item -> item));
+        Set<String> available = byName.keySet();
+        return requestedNames.stream()
+                .map(name -> {
+                    SmartEsbDailyTransactionPlan.ReviewItem item = byName.get(name);
+                    if (item == null) {
+                        throw new IllegalArgumentException(kind + " not found in " + plan.source() + ": " + name + ", available=" + available);
+                    }
+                    return item;
+                })
+                .toList();
+    }
+
+    private String taskName(Map<String, Object> task) {
+        Object module = task.get("module");
+        if (module != null) {
+            return module.toString();
+        }
+        return task.get("transaction").toString();
+    }
+
+    private Path localSummaryPath(Path out, String name) {
+        return out.resolve("reports").resolve(SmartEsbReviewPreparation.slugify(name)).resolve("summary.json");
     }
 
     private Map<String, Object> readMap(Path path) throws Exception {

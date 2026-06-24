@@ -82,7 +82,7 @@ opencode-runner:
 - `run-date`：SmartESB 使用，格式 `yyyy-MM-dd`；为空时使用应用运行当天日期。
 - `config-dir`：链路配置目录，默认 `classpath:chains`。
 - `rerun.type`：补跑类型。
-- `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name。
+- `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name；多个目标用英文逗号放在同一个字符串中。
 - `opencode.*`：OpenCode Server、模型、并发、超时等共享参数。
 - `opencode.session-model`：可选，向 OpenCode 提交 prompt 时显式指定模型，格式 `provider/model`。内网自定义 provider 建议配置，例如 `spdb-new-api/minimax-m2.7`。
 - `opencode.create-session-timeout-seconds`：创建 session 的 HTTP 上限。Runner 会给 OpenCode session title 追加时间戳，并在 `POST /session` 未返回时并行查询 session 列表；只要发现这个唯一 title 的 session，就立即取得 sessionId 并继续提交 prompt。超时后的恢复查询只是兜底，不是主路径；不要把它当作任务运行时长配置，通常保持 10 秒左右。
@@ -108,7 +108,7 @@ opencode-runner:
 4. Java 生成有界 `synthesis-inputs.json`。
 5. OpenCode 生成最终中文总报告。
 
-### git-report 补跑某个人
+### git-report 补跑一个或多个作者
 
 ```yaml
 opencode-runner:
@@ -116,10 +116,10 @@ opencode-runner:
   mode: "rerun"
   rerun:
     type: "author"
-    id: "author-001-xxx"
+    id: "author-001-xxx, author-002-yyy"
 ```
 
-`id` 必须是 `index_inputs.json` 中的 `tasks[].author_key`。
+`id` 必须是 `index_inputs.json` 中的 `tasks[].author_key`。多个作者会并发补跑，最后只重建一次总报告。
 
 ### git-report 只重跑总报告
 
@@ -142,9 +142,9 @@ opencode-runner:
   run-date: "2026-06-16"
 ```
 
-`full` 只运行 `run-date` 对应交易清单里的交易。
+`full` 运行 `run-date` 对应清单里的交易和模块。
 
-### SmartESB 补跑某个交易
+### SmartESB 补跑一个或多个交易
 
 ```yaml
 opencode-runner:
@@ -153,10 +153,24 @@ opencode-runner:
   run-date: "2026-06-16"
   rerun:
     type: "transaction"
-    id: "CaRolloutRepeal"
+    id: "CaCheckAcct, CaConsumeRev, CaTransferOuter"
 ```
 
-`id` 必须存在于当前 `run-date` 的 `transactions.yml`。
+`id` 必须存在于当前 `run-date` 的 `transactions.yml`。多个交易会使用补审 prompt 并发补跑，然后重建索引。
+
+### SmartESB 补跑一个或多个模块
+
+```yaml
+opencode-runner:
+  active-chain: "smartesb-rewrite-code-review"
+  mode: "rerun"
+  run-date: "2026-06-24"
+  rerun:
+    type: "module"
+    id: "BaseChnConvReqMsgSop, BaseOthCenterCtrl"
+```
+
+`id` 必须存在于当前 `run-date` 的 `transactions.yml` 的 `modules` 列表。多个模块会使用模块补审 prompt 并发补跑，然后重建索引。
 
 ### SmartESB 只重建索引
 
@@ -225,15 +239,13 @@ synthesis-input:
 out: "/home/wangyufeng/review-output/smartesb-rewrite-review"
 local-out:
 transaction-plan-dir: "src/main/resources/smartesb-transactions"
-old-project: "/home/wangyufeng/upfs/qianzhi/upfs-cloud-xc"
 new-project: "/home/wangyufeng/upfs-nl-json"
-legacy-index: "/home/wangyufeng/upfs-nl-json/doc/index.md"
+old-8583-doc: "/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md"
 doc-root: "/home/wangyufeng/upfs-nl-json/doc/docment"
-old-8583-doc:
-json-doc:
 mapping-doc:
 reconstructed-design:
-batch-size: 5
+worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单项审查任务，只输出 DONE 或 BLOCKED。"
+synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。"
 ```
 
 输出目录规则：
@@ -241,9 +253,9 @@ batch-size: 5
 - 如果 `local-out` 为空，使用 `out/<run-date>`。
 - 如果 `local-out` 不为空，使用 `local-out/<run-date>`。
 
-## SmartESB 每日交易清单
+## SmartESB 每日审查清单
 
-SmartESB 按日期读取交易清单。目录结构：
+SmartESB 按日期读取审查清单。目录结构：
 
 ```text
 <transaction-plan-dir>/
@@ -257,9 +269,10 @@ SmartESB 按日期读取交易清单。目录结构：
 date: "2026-06-16"
 transactions:
   - name: "CaRolloutRepeal"
-    description: "转账撤销/冲正"
   - name: "CaAcctInfoCheck"
-    description: "二三类账户信息验证"
+modules:
+  - name: "BaseChnConvReqMsgSop"
+  - name: "BaseOthCenterCtrl"
 ```
 
 规则：
@@ -267,8 +280,9 @@ transactions:
 - 日期目录必须是 `yyyy-MM-dd`。
 - 每天目录下固定读取 `transactions.yml`。
 - `transactions[].name` 必填。
-- 同一天内交易名不能重复。
-- `description` 可为空。
+- `modules[].name` 可选；模块项用于审查基础类、公共处理类、路由类、转换类等非交易入口。
+- 同一天内交易名和模块名不能重复。
+- `description` 已不需要；如果旧清单里存在，仍会兼容读取。
 - 找不到日期目录或 `transactions.yml` 会直接失败，并提示实际查找路径。
 
 ## OpenCode Server

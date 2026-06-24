@@ -124,30 +124,47 @@ public class GitReportOrchestrator {
     }
 
     public void runSingleAuthor(GitReportProperties properties, String authorKey) throws Exception {
-        if (authorKey == null || authorKey.isBlank()) {
-            throw new IllegalArgumentException("authorKey is required for git-report author rerun");
-        }
+        runAuthors(properties, authorKey == null ? List.of() : List.of(authorKey));
+    }
+
+    public void runAuthors(GitReportProperties properties, List<String> authorKeys) throws Exception {
+        List<String> requestedAuthorKeys = normalizeIds(authorKeys, "authorKey is required for git-report author rerun");
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
-        Map<String, Object> target = listOfMaps(indexInputs.get("tasks")).stream()
-                .filter(task -> authorKey.equals(task.get("author_key")))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("author task not found in index_inputs.json: " + authorKey));
-        log.info("Git report single-author rerun started: authorKey={}, author={}, out={}, repo={}",
-                target.get("author_key"),
-                target.get("author"),
+        List<Map<String, Object>> targets = requestedAuthorKeys.stream()
+                .map(authorKey -> taskByAuthorKey(indexInputs, authorKey))
+                .toList();
+        log.info("Git report author rerun started: authorKeys={}, out={}, repo={}",
+                requestedAuthorKeys,
                 out,
                 properties.getPaths().getRepo().toAbsolutePath().normalize());
-        AuthorTaskResult result = authorCallable(properties, out, target, server).call();
-        if (!result.success()) {
-            throw new IllegalStateException("author task failed: " + result.authorKey() + " (" + result.author() + "), status=" + result.statusPath() + ", error=" + result.error());
-        }
+        Map<String, Object> selectedIndexInputs = new LinkedHashMap<>(indexInputs);
+        selectedIndexInputs.put("tasks", targets);
+        runAuthorTasks(properties, out, selectedIndexInputs, server);
         validateExistingAuthorOutputs(indexInputs);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
         runSynthesis(properties, out, qualityScores, server);
-        log.info("Git report single-author rerun completed: authorKey={}, finalReport={}", authorKey, out.resolve("code-contribution-report.md"));
+        log.info("Git report author rerun completed: authorKeys={}, finalReport={}", requestedAuthorKeys, out.resolve("code-contribution-report.md"));
+    }
+
+    private Map<String, Object> taskByAuthorKey(Map<String, Object> indexInputs, String authorKey) {
+        return listOfMaps(indexInputs.get("tasks")).stream()
+                .filter(task -> authorKey.equals(task.get("author_key")))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("author task not found in index_inputs.json: " + authorKey));
+    }
+
+    private List<String> normalizeIds(List<String> values, String blankMessage) {
+        List<String> normalized = values == null ? List.of() : values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .toList();
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException(blankMessage);
+        }
+        return normalized;
     }
 
     private void validateExistingAuthorOutputs(Map<String, Object> indexInputs) {

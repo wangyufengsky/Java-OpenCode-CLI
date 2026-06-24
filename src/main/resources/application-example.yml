@@ -6,7 +6,11 @@ opencode-runner:
   config-dir: "classpath:chains"
   rerun:
     # git-code-contribution-report: author | synthesis
-    # smartesb: transaction | index
+    # smartesb: transaction | module | index
+    # 多个 author/transaction 用英文逗号放在同一个字符串中。
+    # 示例: id: "author-001-xxx, author-002-yyy"
+    # 示例: id: "CaCheckAcct, CaConsumeRev, CaTransferOuter"
+    # 示例: id: "BaseChnConvReqMsgSop, BaseOthCenterCtrl"
     type:
     id:
   opencode:

@@ -70,6 +70,32 @@ class SmartEsbDailyTransactionPlanTest {
     }
 
     @Test
+    void loadsTransactionsAndModulesFromDailyPlan() throws Exception {
+        Path dayDir = tempDir.resolve("2026-06-24");
+        Files.createDirectories(dayDir);
+        Files.writeString(dayDir.resolve("transactions.yml"), """
+                date: "2026-06-24"
+                transactions:
+                  - name: "CaReturnOfGoods"
+                modules:
+                  - name: "BaseChnConvReqMsgSop"
+                  - name: "BaseOthCenterCtrl"
+                """);
+
+        SmartEsbDailyTransactionPlan plan = new SmartEsbDailyTransactionPlanLoader()
+                .load(tempDir, LocalDate.of(2026, 6, 24));
+
+        assertThat(plan.transactions()).extracting(SmartEsbDailyTransactionPlan.Transaction::name)
+                .containsExactly("CaReturnOfGoods");
+        assertThat(plan.modules()).extracting(SmartEsbDailyTransactionPlan.Module::name)
+                .containsExactly("BaseChnConvReqMsgSop", "BaseOthCenterCtrl");
+        assertThat(plan.reviewItems()).extracting(SmartEsbDailyTransactionPlan.ReviewItem::kind)
+                .containsExactly("transaction", "module", "module");
+        assertThat(plan.reviewItems()).extracting(SmartEsbDailyTransactionPlan.ReviewItem::name)
+                .containsExactly("CaReturnOfGoods", "BaseChnConvReqMsgSop", "BaseOthCenterCtrl");
+    }
+
+    @Test
     void failsWithLookedUpPathWhenDailyTransactionsFileIsMissing() {
         assertThatThrownBy(() -> new SmartEsbDailyTransactionPlanLoader()
                 .load(tempDir, LocalDate.of(2026, 6, 16)))

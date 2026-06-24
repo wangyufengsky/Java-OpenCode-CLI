@@ -85,9 +85,11 @@ class PromptPackContractTest {
 
         String worker = Files.readString(promptPack.resolve("prompts/run-transaction-review.md"));
         String rerun = Files.readString(promptPack.resolve("prompts/rerun-single-transaction.md"));
+        String module = Files.readString(promptPack.resolve("prompts/run-module-review.md"));
+        String rerunModule = Files.readString(promptPack.resolve("prompts/rerun-single-module.md"));
         String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-index.md"));
 
-        assertThat(worker).contains(
+        assertThat(worker + "\n" + module).contains(
                 "读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具",
                 "写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具",
                 "路径字段只能使用 `filePath`",
@@ -98,14 +100,18 @@ class PromptPackContractTest {
                 "只能替换 task JSON 中 `output_placeholders` 列出的占位符",
                 "写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符"
         );
-        assertThat(rerun).contains(
-                "写文件优先使用 OpenCode 原生文件编辑工具",
-                "如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具",
+        assertThat(rerun + "\n" + rerunModule).contains(
                 "路径字段只能使用 `filePath`",
                 "只能替换 `output_placeholders` 中列出的占位符"
         );
+        assertThat(module).contains(
+                "模块审查不要求交易名、映射文档、old-8583-doc 或 8583 到 JSON 映射关系存在",
+                "任务复杂、搜索结果少、需要更多分析时间",
+                "想使用额外任务 session、explore 或其他派发能力",
+                "证据不足时必须写 `summary_json`，`status` 设为 `partial`"
+        );
         assertThat(synthesis).contains(
-                "读取汇总输入和交易摘要时，优先使用 OpenCode 原生文件读取工具",
+                "读取汇总输入和审查项摘要时，优先使用 OpenCode 原生文件读取工具",
                 "写入 `index.md` 和 `summary.md` 时，优先使用 OpenCode 原生文件编辑工具",
                 "路径字段只能使用 `filePath`",
                 "两类受控编辑工具都不可用时必须返回 `BLOCKED`",
@@ -118,13 +124,12 @@ class PromptPackContractTest {
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
 
-        String combined = worker + "\n" + rerun + "\n" + synthesis;
+        String combined = worker + "\n" + rerun + "\n" + module + "\n" + rerunModule + "\n" + synthesis;
         assertThat(combined).contains(
                 "可以读取 old-8583-doc 中当前交易相关的老代码详细设计片段",
                 "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据",
                 "只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段",
-                "优先使用 OpenCode `explore` 分析文档和代码",
-                "主交易 session 只消费 `explore` 返回的短证据摘要",
+                "如果 `explore` 不可用，继续用 `intellij-index` 定位和读取代码，不得因此 `BLOCKED`",
                 "`old_code_paths` 必须写空数组"
         );
         assertThat(combined).doesNotContain(

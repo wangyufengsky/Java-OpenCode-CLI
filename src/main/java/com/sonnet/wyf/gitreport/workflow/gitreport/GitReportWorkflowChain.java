@@ -41,7 +41,7 @@ public class GitReportWorkflowChain implements WorkflowChain {
         if ("synthesis".equals(request.rerunType())) {
             orchestrator.runSynthesisOnly(properties);
         } else if ("author".equals(request.rerunType())) {
-            orchestrator.runSingleAuthor(properties, request.rerunId());
+            orchestrator.runAuthors(properties, request.rerunIds());
         } else {
             throw new IllegalArgumentException("git-report rerun.type must be one of: author, synthesis");
         }
