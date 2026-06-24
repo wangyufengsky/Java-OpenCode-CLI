@@ -3,7 +3,10 @@ package com.sonnet.wyf.gitreport.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
+import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
+import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
@@ -16,7 +19,6 @@ import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbSummaryValidator;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbWorkflowChain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.io.ResourceLoader;
 
 import java.util.List;
@@ -64,9 +66,24 @@ public class RunnerConfiguration {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             ObjectMapper objectMapper,
-            AsyncTaskExecutor authorTaskExecutor
+            OutputCompletionGate outputCompletionGate,
+            ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner,
+            ArtifactCompletenessValidator artifactCompletenessValidator
     ) {
-        return new SmartEsbWorkflowChain(chainConfigLoader, runnerProperties, planLoader, preparation, promptBuilder, summaryValidator, serverManager, taskRunner, objectMapper, authorTaskExecutor);
+        return new SmartEsbWorkflowChain(
+                chainConfigLoader,
+                runnerProperties,
+                planLoader,
+                preparation,
+                promptBuilder,
+                summaryValidator,
+                serverManager,
+                taskRunner,
+                objectMapper,
+                outputCompletionGate,
+                concurrentWorkflowTaskRunner,
+                artifactCompletenessValidator
+        );
     }
 
     @Bean

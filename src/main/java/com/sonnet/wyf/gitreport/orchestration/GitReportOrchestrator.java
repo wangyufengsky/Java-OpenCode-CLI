@@ -8,6 +8,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
@@ -17,7 +18,6 @@ import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
 import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,8 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
@@ -49,8 +47,9 @@ public class GitReportOrchestrator {
     private final QualityScoresWriter qualityScoresWriter;
     private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
-    private final AsyncTaskExecutor authorTaskExecutor;
     private final OutputCompletionGate completionGate;
+    private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
+    private final ArtifactCompletenessValidator artifactCompletenessValidator;
 
     public GitReportOrchestrator(
             GitReportPreparation preparation,
@@ -63,7 +62,9 @@ public class GitReportOrchestrator {
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
-            AsyncTaskExecutor authorTaskExecutor
+            OutputCompletionGate completionGate,
+            ConcurrentWorkflowTaskRunner concurrentTaskRunner,
+            ArtifactCompletenessValidator artifactCompletenessValidator
     ) {
         this.preparation = preparation;
         this.objectMapper = objectMapper;
@@ -75,8 +76,9 @@ public class GitReportOrchestrator {
         this.qualityScoresWriter = qualityScoresWriter;
         this.synthesisInputWriter = synthesisInputWriter;
         this.statusRepository = statusRepository;
-        this.authorTaskExecutor = authorTaskExecutor;
-        this.completionGate = new OutputCompletionGate(objectMapper);
+        this.completionGate = completionGate;
+        this.concurrentTaskRunner = concurrentTaskRunner;
+        this.artifactCompletenessValidator = artifactCompletenessValidator;
     }
 
     public void run(GitReportProperties properties) throws Exception {
@@ -154,10 +156,7 @@ public class GitReportOrchestrator {
     }
 
     private Map<String, Object> taskByAuthorKey(Map<String, Object> indexInputs, String authorKey) {
-        return listOfMaps(indexInputs.get("tasks")).stream()
-                .filter(task -> authorKey.equals(task.get("author_key")))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("author task not found in index_inputs.json: " + authorKey));
+        return WorkflowTaskIndex.fromIndexInputs(indexInputs).gitAuthorTask(authorKey);
     }
 
     private List<String> normalizeIds(List<String> values, String blankMessage) {
@@ -206,6 +205,21 @@ public class GitReportOrchestrator {
         for (Map<String, Object> task : listOfMaps(indexInputs.get("tasks"))) {
             Path report = Path.of(task.get("report_md").toString());
             Path qualitySummary = Path.of(task.get("quality_summary_json").toString());
+            ArtifactCompletenessValidator.Validation artifactValidation = artifactCompletenessValidator.validateFile(
+                    "person report",
+                    report,
+                    List.of()
+            );
+            if (!artifactValidation.ok()) {
+                incomplete.add(new IncompleteOutput(
+                        "author",
+                        task.get("author_key").toString(),
+                        report,
+                        task.getOrDefault("detail_json", "").toString(),
+                        task.get("author") + ": " + artifactValidation.error()
+                ));
+                continue;
+            }
             AuthorValidationResult validation = outputValidator.validate(report, qualitySummary);
             if (!validation.ok()) {
                 incomplete.add(new IncompleteOutput(
@@ -223,43 +237,16 @@ public class GitReportOrchestrator {
     private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs, OpenCodeServerHandle server) throws Exception {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
         int concurrency = Math.max(1, Math.min(properties.getOpencode().getConcurrency(), properties.getOpencode().getMaxConcurrency()));
-        log.info("Starting author tasks: taskCount={}, concurrency={}", tasks.size(), concurrency);
-        Semaphore authorSlots = new Semaphore(concurrency);
-        List<Future<AuthorTaskResult>> futures = new ArrayList<>();
-        for (Map<String, Object> task : tasks) {
-            futures.add(authorTaskExecutor.submit(limitedAuthorCallable(authorSlots, authorCallable(properties, out, task, server))));
-        }
-        List<AuthorTaskResult> failures = new ArrayList<>();
-        for (Future<AuthorTaskResult> future : futures) {
-            AuthorTaskResult result = future.get();
-            if (!result.success()) {
-                failures.add(result);
-            }
-        }
-        if (!failures.isEmpty()) {
-            String summary = failures.stream()
-                    .map(result -> result.authorKey() + " (" + result.author() + "), status=" + result.statusPath() + ", error=" + result.error())
-                    .reduce((left, right) -> left + "; " + right)
-                    .orElse("");
-            String firstReason = failures.get(0).error();
-            log.warn("AUTHOR_FAILURE_SUMMARY firstReason=\"{}\" failedCount={} failures={}", firstReason, failures.size(), summary);
-            return;
-        }
-        log.info("All author tasks completed successfully");
+        concurrentTaskRunner.run(
+                "git-report author",
+                tasks,
+                concurrency,
+                task -> task.get("author_key").toString(),
+                task -> authorCallable(properties, out, task, server)
+        );
     }
 
-    private Callable<AuthorTaskResult> limitedAuthorCallable(Semaphore authorSlots, Callable<AuthorTaskResult> delegate) {
-        return () -> {
-            authorSlots.acquire();
-            try {
-                return delegate.call();
-            } finally {
-                authorSlots.release();
-            }
-        };
-    }
-
-    private Callable<AuthorTaskResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
+    private Callable<TaskRunResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
         return () -> {
             String authorKey = task.get("author_key").toString();
             String author = task.get("author").toString();
@@ -282,7 +269,7 @@ public class GitReportOrchestrator {
                     Files.writeString(promptFile, prompt);
                     Path reportMd = Path.of(task.get("report_md").toString());
                     Path qualitySummaryJson = Path.of(task.get("quality_summary_json").toString());
-                    runResult = taskRunner.runUntilValidated(
+                    runResult = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
                             server,
                             properties.getPaths().getRepo(),
                             "git-report-" + authorKey,
@@ -297,7 +284,7 @@ public class GitReportOrchestrator {
                             properties.getOpencode().getTimeoutMinutes(),
                             properties.getOpencode().getOutputWaitSeconds(),
                             0
-                    );
+                    ));
                     timedOut = runResult.timedOut();
                     AuthorValidationResult validation = outputValidator.validate(reportMd, qualitySummaryJson);
                     if (validation.ok()) {
@@ -313,7 +300,7 @@ public class GitReportOrchestrator {
                                 runResult.serverState(),
                                 task.get("report_md"),
                                 task.get("quality_summary_json"));
-                        return AuthorTaskResult.success(authorKey, author, statusPath);
+                        return TaskRunResult.success(authorKey, author, statusPath);
                     }
                     state = timedOut ? "timeout" : "failed";
                     error = validation.error();
@@ -331,7 +318,7 @@ public class GitReportOrchestrator {
                         error, state, timedOut, authorKey, author, attempt);
             }
             log.error("AUTHOR_FAILED reason=\"{}\" status={} authorKey={} author={} attempts={}", lastError, statusPath, authorKey, author, attemptsRun);
-            return AuthorTaskResult.failed(authorKey, author, statusPath, lastError);
+            return TaskRunResult.failed(authorKey, author, statusPath, lastError);
         };
     }
 
@@ -362,7 +349,7 @@ public class GitReportOrchestrator {
                 synthesisInputs,
                 qualityScores,
                 out.resolve("code-contribution-report.md"));
-        OpenCodeRunResult result = taskRunner.runUntilValidated(
+        OpenCodeRunResult result = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
                 server,
                 properties.getPaths().getRepo(),
                 "git-report-synthesis",
@@ -377,7 +364,7 @@ public class GitReportOrchestrator {
                 properties.getOpencode().getTimeoutMinutes(),
                 properties.getOpencode().getOutputWaitSeconds(),
                 properties.getOpencode().getValidationMaxCorrections()
-        );
+        ));
         FinalReportValidator.Validation finalReportValidation = finalReportValidator.validate(finalReport);
         boolean ok = finalReportValidation.ok();
         Map<String, Object> status = new LinkedHashMap<>();

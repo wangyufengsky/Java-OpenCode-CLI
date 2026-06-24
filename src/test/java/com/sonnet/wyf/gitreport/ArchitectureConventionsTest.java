@@ -25,7 +25,7 @@ class ArchitectureConventionsTest {
         String orchestrator = read("src/main/java/com/sonnet/wyf/gitreport/orchestration/GitReportOrchestrator.java");
         String taskRunner = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
 
-        assertThat(orchestrator).contains("AsyncTaskExecutor");
+        assertThat(orchestrator).contains("ConcurrentWorkflowTaskRunner");
         assertThat(orchestrator).doesNotContain("Executors.");
         assertThat(orchestrator).doesNotContain("TimeUnit.SECONDS.sleep");
         assertThat(taskRunner).contains("ScheduledProbeWaiter");

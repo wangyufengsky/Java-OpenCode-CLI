@@ -7,6 +7,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -474,6 +475,52 @@ class OpenCodeServerTaskRunnerTest {
         assertThat(result.correctionRounds()).isEqualTo(1);
         String status = Files.readString(runDir.resolve("session-status.json"));
         assertThat(status).contains("\"correctionRound\" : 1");
+    }
+
+    @Test
+    void runUntilValidatedAcceptsTaskSpec() throws Exception {
+        Path output = tempDir.resolve("spec-output.txt");
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"spec-session\"}"));
+        server.createContext("/session/spec-session/prompt_async", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (body.contains("spec message") && body.contains("spec prompt")) {
+                Files.writeString(output, "done");
+            }
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/spec-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
+                ]
+                """));
+        server.start();
+
+        Path promptFile = tempDir.resolve("spec-prompt.md");
+        Files.writeString(promptFile, "spec prompt");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
+                handle,
+                tempDir,
+                "spec-title",
+                promptFile,
+                "spec message",
+                tempDir.resolve("spec-run"),
+                () -> Files.exists(output) ? ValidationCheck.success() : ValidationCheck.failed("missing spec output"),
+                "",
+                60,
+                60,
+                50,
+                1,
+                0,
+                0
+        ));
+
+        assertThat(result.sessionId()).isEqualTo("spec-session");
+        assertThat(result.validationOk()).isTrue();
     }
 
     @Test

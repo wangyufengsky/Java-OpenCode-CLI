@@ -6,7 +6,10 @@ import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
+import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
+import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.RunStatusRepository;
 import com.sonnet.wyf.gitreport.orchestration.SynthesisInputWriter;
 import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
@@ -451,7 +454,9 @@ class GitReportOrchestratorIntegrationTest {
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
                 new SynthesisInputWriter(objectMapper),
                 new RunStatusRepository(objectMapper),
-                authorTaskExecutor()
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor()),
+                new ArtifactCompletenessValidator()
         );
     }
 

@@ -71,6 +71,27 @@ public class OpenCodeServerTaskRunner {
     }
 
     public OpenCodeRunResult runUntilValidated(
+            ValidatedOpenCodeTaskSpec spec
+    ) throws Exception {
+        return runUntilValidated(
+                spec.server(),
+                spec.repo(),
+                spec.title(),
+                spec.promptFile(),
+                spec.message(),
+                spec.runDir(),
+                spec.validationProbe(),
+                spec.sessionModel(),
+                spec.createSessionTimeoutSeconds(),
+                spec.requestTimeoutSeconds(),
+                spec.pollMillis(),
+                spec.timeoutMinutes(),
+                spec.validationSettleSeconds(),
+                spec.validationMaxCorrections()
+        );
+    }
+
+    public OpenCodeRunResult runUntilValidated(
             OpenCodeServerHandle server,
             Path repo,
             String title,

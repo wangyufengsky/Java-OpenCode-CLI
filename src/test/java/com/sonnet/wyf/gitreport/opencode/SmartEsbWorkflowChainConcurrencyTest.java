@@ -6,6 +6,9 @@ import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
+import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
+import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
+import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbDailyTransactionPlanLoader;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbRewriteProperties;
@@ -70,7 +73,9 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
-                authorTaskExecutor(3)
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor(3)),
+                new ArtifactCompletenessValidator()
         );
 
         chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings));
@@ -103,7 +108,9 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
-                authorTaskExecutor(3)
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor(3)),
+                new ArtifactCompletenessValidator()
         );
 
         chain.run(new WorkflowRunRequest("rerun", "transaction", "\"Alpha\", \"Beta\"", LocalDate.of(2026, 6, 17), settings));
@@ -139,7 +146,9 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
-                authorTaskExecutor(3)
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor(3)),
+                new ArtifactCompletenessValidator()
         );
 
         chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 24), settings));
@@ -175,7 +184,9 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
-                authorTaskExecutor(3)
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor(3)),
+                new ArtifactCompletenessValidator()
         );
 
         chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings));
@@ -213,7 +224,9 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
-                authorTaskExecutor(3)
+                new OutputCompletionGate(objectMapper),
+                new ConcurrentWorkflowTaskRunner(authorTaskExecutor(3)),
+                new ArtifactCompletenessValidator()
         );
 
         assertThatThrownBy(() -> chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings)))

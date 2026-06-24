@@ -7,15 +7,19 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
+import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
+import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
+import com.sonnet.wyf.gitreport.orchestration.WorkflowTaskIndex;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.task.AsyncTaskExecutor;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,8 +28,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 public class SmartEsbWorkflowChain implements WorkflowChain {
@@ -42,8 +44,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     private final OpenCodeServerManager serverManager;
     private final OpenCodeServerTaskRunner taskRunner;
     private final ObjectMapper objectMapper;
-    private final AsyncTaskExecutor transactionTaskExecutor;
     private final OutputCompletionGate completionGate;
+    private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
+    private final ArtifactCompletenessValidator artifactCompletenessValidator;
 
     public SmartEsbWorkflowChain(
             ChainConfigLoader configLoader,
@@ -55,7 +58,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
             ObjectMapper objectMapper,
-            AsyncTaskExecutor transactionTaskExecutor
+            OutputCompletionGate completionGate,
+            ConcurrentWorkflowTaskRunner concurrentTaskRunner,
+            ArtifactCompletenessValidator artifactCompletenessValidator
     ) {
         this.configLoader = configLoader;
         this.runnerProperties = runnerProperties;
@@ -66,8 +71,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.objectMapper = objectMapper;
-        this.transactionTaskExecutor = transactionTaskExecutor;
-        this.completionGate = new OutputCompletionGate(objectMapper);
+        this.completionGate = completionGate;
+        this.concurrentTaskRunner = concurrentTaskRunner;
+        this.artifactCompletenessValidator = artifactCompletenessValidator;
     }
 
     @Override
@@ -125,40 +131,24 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
         int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
-        log.info("Starting SmartESB review items: taskCount={}, concurrency={}", items.size(), concurrency);
-        Semaphore transactionSlots = new Semaphore(concurrency);
-        List<Future<String>> futures = new ArrayList<>();
-        for (SmartEsbDailyTransactionPlan.ReviewItem item : items) {
-            futures.add(transactionTaskExecutor.submit(limitedTransactionCallable(
-                    transactionSlots,
-                    transactionCallable(properties, request, out, indexInputs, server, item, rerun)
-            )));
-        }
-        List<String> failures = new ArrayList<>();
-        for (Future<String> future : futures) {
-            String failure = future.get();
-            if (failure != null && !failure.isBlank()) {
-                failures.add(failure);
-            }
-        }
+        List<TaskRunResult> results = concurrentTaskRunner.run(
+                "SmartESB review",
+                items,
+                concurrency,
+                item -> item.kind() + ":" + item.name(),
+                item -> transactionCallable(properties, request, out, indexInputs, server, item, rerun)
+        );
+        List<String> failures = results.stream()
+                .filter(result -> !result.success())
+                .map(result -> result.taskName() + ": " + result.error())
+                .toList();
         if (!failures.isEmpty()) {
             log.warn("SmartESB review item sessions finished with incomplete outputs; summary gate will rerun incomplete items: {}",
                     String.join("; ", failures));
         }
     }
 
-    private Callable<String> limitedTransactionCallable(Semaphore transactionSlots, Callable<String> delegate) {
-        return () -> {
-            transactionSlots.acquire();
-            try {
-                return delegate.call();
-            } finally {
-                transactionSlots.release();
-            }
-        };
-    }
-
-    private Callable<String> transactionCallable(
+    private Callable<TaskRunResult> transactionCallable(
             SmartEsbRewriteProperties properties,
             WorkflowRunRequest request,
             Path out,
@@ -168,12 +158,17 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             boolean rerun
     ) {
         return () -> {
+            Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()));
             try {
-                return runReviewItem(properties, request, out, indexInputs, server, item, rerun);
+                String failure = runReviewItem(properties, request, out, indexInputs, server, item, rerun);
+                if (failure == null || failure.isBlank()) {
+                    return TaskRunResult.success(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"));
+                }
+                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"), failure);
             } catch (Exception exception) {
                 log.warn("SmartESB review failed: kind={}, name={}, reason={}",
                         item.kind(), item.name(), exception.toString());
-                return item.name() + ": " + exception.getMessage();
+                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"), exception.getMessage());
             }
         };
     }
@@ -195,7 +190,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Path summaryJson = localSummaryPath(out, item.name());
         String prompt = buildWorkerPrompt(item, task, summarySchema, rerun);
         Files.writeString(promptFile, prompt);
-        OpenCodeRunResult result = taskRunner.runUntilValidated(
+        OpenCodeRunResult result = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
                 server,
                 Path.of(properties.getNewProject()),
                 "smartesb-review-" + item.name(),
@@ -210,7 +205,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 request.openCode().getTimeoutMinutes(),
                 request.openCode().getOutputWaitSeconds(),
                 0
-        );
+        ));
         SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryJson);
         if (!validation.ok()) {
             log.warn("SmartESB review session completed with incomplete output: kind={}, name={}, reason={}, sessionId={}, timedOut={}, correctionRounds={}",
@@ -265,20 +260,11 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         if (!(placeholders instanceof Map<?, ?> placeholderMap)) {
             return "output_placeholders missing or invalid: " + task.get("task_path");
         }
-        for (Map.Entry<?, ?> entry : placeholderMap.entrySet()) {
-            String outputKey = entry.getKey().toString();
-            Path outputPath = localOutputPath(out, name, outputKey);
-            if (!Files.exists(outputPath)) {
-                return outputKey + " missing: " + outputPath;
-            }
-            if (entry.getValue() instanceof List<?> values) {
-                List<String> markers = values.stream().map(Object::toString).toList();
-                if (!placeholdersReplaced(outputPath, markers)) {
-                    return outputKey + " still contains template placeholder: " + outputPath;
-                }
-            }
-        }
-        return "";
+        ArtifactCompletenessValidator.Validation validation = artifactCompletenessValidator.validateOutputs(
+                placeholderMap,
+                outputKey -> localOutputPath(out, name, outputKey)
+        );
+        return validation.ok() ? "" : validation.error();
     }
 
     private Path localOutputPath(Path out, String name, String outputKey) {
@@ -349,7 +335,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));
         Path indexMd = out.resolve("index.md");
         Path summaryMd = out.resolve("summary.md");
-        taskRunner.runUntilValidated(
+        taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
                 server,
                 Path.of(properties.getNewProject()),
                 "smartesb-review-index",
@@ -364,18 +350,11 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
                 request.openCode().getTimeoutMinutes(),
                 request.openCode().getOutputWaitSeconds(),
                 request.openCode().getValidationMaxCorrections()
-        );
+        ));
         ValidationCheck validation = topLevelValidation(indexMd, summaryMd);
         if (!validation.ok()) {
             throw new IllegalStateException("SmartESB index synthesis failed: " + indexMd + ", " + summaryMd);
         }
-    }
-
-    private boolean topLevelReady(Path indexMd, Path summaryMd) throws Exception {
-        return Files.exists(indexMd)
-                && Files.exists(summaryMd)
-                && placeholdersReplaced(indexMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md"))
-                && placeholdersReplaced(summaryMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md"));
     }
 
     private ValidationCheck summaryValidationCheck(Path summaryJson) {
@@ -384,24 +363,23 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     }
 
     private ValidationCheck topLevelValidation(Path indexMd, Path summaryMd) throws Exception {
-        if (!Files.exists(indexMd)) {
-            return ValidationCheck.failed("SmartESB index missing: " + indexMd);
+        ArtifactCompletenessValidator.Validation indexValidation = artifactCompletenessValidator.validateFile(
+                "SmartESB index",
+                indexMd,
+                SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md")
+        );
+        if (!indexValidation.ok()) {
+            return ValidationCheck.failed(indexValidation.error());
         }
-        if (!Files.exists(summaryMd)) {
-            return ValidationCheck.failed("SmartESB summary missing: " + summaryMd);
-        }
-        if (!placeholdersReplaced(indexMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("index_md"))) {
-            return ValidationCheck.failed("SmartESB index still contains template placeholder: " + indexMd);
-        }
-        if (!placeholdersReplaced(summaryMd, SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md"))) {
-            return ValidationCheck.failed("SmartESB summary still contains template placeholder: " + summaryMd);
+        ArtifactCompletenessValidator.Validation summaryValidation = artifactCompletenessValidator.validateFile(
+                "SmartESB summary",
+                summaryMd,
+                SmartEsbReviewPreparation.TOP_LEVEL_OUTPUT_PLACEHOLDERS.get("summary_md")
+        );
+        if (!summaryValidation.ok()) {
+            return ValidationCheck.failed(summaryValidation.error());
         }
         return ValidationCheck.success();
-    }
-
-    private boolean placeholdersReplaced(Path path, List<String> placeholders) throws Exception {
-        String content = Files.readString(path);
-        return placeholders.stream().noneMatch(content::contains);
     }
 
     private Path datedLocalOut(SmartEsbRewriteProperties properties, SmartEsbDailyTransactionPlan plan) {
@@ -412,11 +390,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     }
 
     private Map<String, Object> taskByReviewItem(Map<String, Object> indexInputs, SmartEsbDailyTransactionPlan.ReviewItem item) {
-        return listOfMaps(indexInputs.get("tasks")).stream()
-                .filter(task -> item.kind().equals(task.get("review_type")))
-                .filter(task -> item.name().equals(taskName(task)))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(item.kind() + " task missing from index_inputs.json: " + item.name()));
+        return WorkflowTaskIndex.fromIndexInputs(indexInputs).smartEsbReviewTask(item.kind(), item.name());
     }
 
     private List<SmartEsbDailyTransactionPlan.ReviewItem> reviewItemsByName(SmartEsbDailyTransactionPlan plan, String kind, List<String> requestedNames) {

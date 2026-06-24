@@ -3,8 +3,8 @@ package com.sonnet.wyf.gitreport.workflow.gitreport;
 import com.sonnet.wyf.gitreport.GitReportProperties;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
+import com.sonnet.wyf.gitreport.runner.OpenCodeSettingsApplier;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
@@ -29,7 +29,7 @@ public class GitReportWorkflowChain implements WorkflowChain {
     @Override
     public void run(WorkflowRunRequest request) throws Exception {
         GitReportProperties properties = configLoader.load(runnerProperties.getConfigDir(), id(), GitReportProperties.class);
-        applySharedOpenCode(properties, request.openCode());
+        OpenCodeSettingsApplier.apply(request.openCode(), properties);
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         if ("full".equals(mode)) {
             orchestrator.run(properties);
@@ -45,22 +45,5 @@ public class GitReportWorkflowChain implements WorkflowChain {
         } else {
             throw new IllegalArgumentException("git-report rerun.type must be one of: author, synthesis");
         }
-    }
-
-    private void applySharedOpenCode(GitReportProperties properties, OpenCodeSettings settings) {
-        properties.getOpencode().setServerUrl(settings.getServerUrl());
-        properties.getOpencode().setManageServer(settings.isManageServer());
-        properties.getOpencode().setServerStartTimeoutSeconds(settings.getServerStartTimeoutSeconds());
-        properties.getOpencode().setCreateSessionTimeoutSeconds(settings.getCreateSessionTimeoutSeconds());
-        properties.getOpencode().setRequestTimeoutSeconds(settings.getRequestTimeoutSeconds());
-        properties.getOpencode().setConcurrency(settings.getConcurrency());
-        properties.getOpencode().setTimeoutMinutes(settings.getTimeoutMinutes());
-        properties.getOpencode().setOutputWaitSeconds(settings.getOutputWaitSeconds());
-        properties.getOpencode().setValidationMaxCorrections(settings.getValidationMaxCorrections());
-        properties.getOpencode().setMaxRetries(settings.getMaxRetries());
-        properties.getOpencode().setMaxConcurrency(settings.getMaxConcurrency());
-        properties.getOpencode().setSessionModel(settings.getSessionModel());
-        properties.getOpencode().setEnvironment(settings.getEnvironment());
-        properties.getPaths().setOpencodeBin(settings.getOpencodeBin());
     }
 }

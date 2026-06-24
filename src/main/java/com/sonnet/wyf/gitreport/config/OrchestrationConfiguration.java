@@ -3,7 +3,10 @@ package com.sonnet.wyf.gitreport.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
+import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
+import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.RunStatusRepository;
 import com.sonnet.wyf.gitreport.orchestration.SynthesisInputWriter;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
@@ -38,6 +41,21 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
+    OutputCompletionGate outputCompletionGate(ObjectMapper objectMapper) {
+        return new OutputCompletionGate(objectMapper);
+    }
+
+    @Bean
+    ArtifactCompletenessValidator artifactCompletenessValidator() {
+        return new ArtifactCompletenessValidator();
+    }
+
+    @Bean
+    ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner(AsyncTaskExecutor authorTaskExecutor) {
+        return new ConcurrentWorkflowTaskRunner(authorTaskExecutor);
+    }
+
+    @Bean
     GitReportOrchestrator gitReportOrchestrator(
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
@@ -49,7 +67,9 @@ public class OrchestrationConfiguration {
             QualityScoresWriter qualityScoresWriter,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository,
-            AsyncTaskExecutor authorTaskExecutor
+            OutputCompletionGate outputCompletionGate,
+            ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner,
+            ArtifactCompletenessValidator artifactCompletenessValidator
     ) {
         return new GitReportOrchestrator(
                 preparation,
@@ -62,7 +82,9 @@ public class OrchestrationConfiguration {
                 qualityScoresWriter,
                 synthesisInputWriter,
                 statusRepository,
-                authorTaskExecutor
+                outputCompletionGate,
+                concurrentWorkflowTaskRunner,
+                artifactCompletenessValidator
         );
     }
 }
