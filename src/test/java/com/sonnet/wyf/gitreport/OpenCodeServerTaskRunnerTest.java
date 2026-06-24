@@ -154,11 +154,16 @@ class OpenCodeServerTaskRunnerTest {
         );
 
         assertThat(result.sessionId()).isEqualTo("new-managed");
-        assertThat(requests).containsSubsequence(
-                "GET /session query=search=smartesb-review-&limit=100 directoryHeader=" + tempDir.toAbsolutePath().normalize(),
-                "DELETE /session/old-managed query=null directoryHeader=" + tempDir.toAbsolutePath().normalize(),
-                "POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize()
-        );
+        assertThat(requests).anySatisfy(request -> assertThat(request)
+                .startsWith("GET /session query=directory=")
+                .contains("search=smartesb-review-")
+                .contains("limit=100")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize()));
+        assertThat(requests).anySatisfy(request -> assertThat(request)
+                .startsWith("DELETE /session/old-managed query=directory=")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize()));
+        assertThat(requests).anySatisfy(request -> assertThat(request)
+                .isEqualTo("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize()));
         assertThat(requests).noneMatch(request -> request.contains("/session/manual-session"));
     }
 

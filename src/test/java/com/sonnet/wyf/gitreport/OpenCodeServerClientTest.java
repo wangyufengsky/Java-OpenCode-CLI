@@ -142,7 +142,8 @@ class OpenCodeServerClientTest {
         assertThat(session.id()).isEqualTo("recovered-session");
         assertThat(requests).contains("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize());
         assertThat(requests).anySatisfy(request -> assertThat(request)
-                .startsWith("GET /session query=search=git-report-author-timeout-")
+                .startsWith("GET /session query=directory=")
+                .contains("search=git-report-author-timeout-")
                 .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize())
                 .contains("&limit=100"));
     }
@@ -196,7 +197,8 @@ class OpenCodeServerClientTest {
         assertThat(session.id()).isEqualTo("listed-before-response");
         assertThat(requests).contains("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize());
         assertThat(requests).anySatisfy(request -> assertThat(request)
-                .startsWith("GET /session query=search=git-report-author-inflight-")
+                .startsWith("GET /session query=directory=")
+                .contains("search=git-report-author-inflight-")
                 .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize())
                 .contains("&limit=100"));
     }

@@ -29,8 +29,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SmartEsbWorkflowChainConcurrencyTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -153,6 +155,81 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 .contains("task_json_path: " + logicalOut.resolve("tasks/transaction-CaReturnOfGoods.json")));
     }
 
+    @Test
+    void rerunsIncompleteReviewOutputsBeforeIndexWithoutSameSessionCorrections() throws Exception {
+        SmartEsbRewriteProperties properties = smartEsbProperties();
+        writeTransactions(properties.getTransactionPlanDir());
+        OpenCodeSettings settings = new OpenCodeSettings();
+        settings.setConcurrency(2);
+        settings.setMaxConcurrency(2);
+        settings.setValidationMaxCorrections(3);
+        TrackingTaskRunner taskRunner = new TrackingTaskRunner();
+        taskRunner.completeAfterAttempt("smartesb-review-Beta", 2);
+        SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
+                new FixedChainConfigLoader(properties),
+                new OpenCodeRunnerProperties(),
+                new SmartEsbDailyTransactionPlanLoader(),
+                new SmartEsbReviewPreparation(objectMapper),
+                new SmartEsbPromptBuilder(new DefaultResourceLoader()),
+                new SmartEsbSummaryValidator(objectMapper),
+                new HealthyServerManager(),
+                taskRunner,
+                objectMapper,
+                authorTaskExecutor(3)
+        );
+
+        chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings));
+
+        assertThat(taskRunner.titles).filteredOn("smartesb-review-Beta"::equals).hasSize(2);
+        assertThat(taskRunner.prompts).anySatisfy(prompt -> assertThat(prompt)
+                .contains("正在重跑一个失败或未完成的交易审查")
+                .contains("task_json_path: " + Path.of(properties.getOut()).resolve("2026-06-17/tasks/transaction-Beta.json")));
+        assertThat(taskRunner.validationMaxCorrectionsByTitle)
+                .containsEntry("smartesb-review-Alpha", 0)
+                .containsEntry("smartesb-review-Beta", 0)
+                .containsEntry("smartesb-review-Gamma", 0)
+                .containsEntry("smartesb-review-index", 3);
+        assertThat(Files.readString(properties.getLocalOut().resolve("2026-06-17/runs/incomplete-reports.json")))
+                .contains("\"state\" : \"completed\"")
+                .contains("\"rerunRounds\" : 1");
+    }
+
+    @Test
+    void stopsAfterFiveIncompleteRerunRoundsAndRecordsUnfinishedReports() throws Exception {
+        SmartEsbRewriteProperties properties = smartEsbProperties();
+        writeSingleTransaction(properties.getTransactionPlanDir());
+        OpenCodeSettings settings = new OpenCodeSettings();
+        settings.setConcurrency(2);
+        settings.setMaxConcurrency(2);
+        TrackingTaskRunner taskRunner = new TrackingTaskRunner();
+        taskRunner.neverComplete("smartesb-review-Alpha");
+        SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
+                new FixedChainConfigLoader(properties),
+                new OpenCodeRunnerProperties(),
+                new SmartEsbDailyTransactionPlanLoader(),
+                new SmartEsbReviewPreparation(objectMapper),
+                new SmartEsbPromptBuilder(new DefaultResourceLoader()),
+                new SmartEsbSummaryValidator(objectMapper),
+                new HealthyServerManager(),
+                taskRunner,
+                objectMapper,
+                authorTaskExecutor(3)
+        );
+
+        assertThatThrownBy(() -> chain.run(new WorkflowRunRequest("full", null, null, LocalDate.of(2026, 6, 17), settings)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SmartESB review outputs incomplete after 5 rerun rounds")
+                .hasMessageContaining("Alpha");
+
+        assertThat(taskRunner.titles).filteredOn("smartesb-review-Alpha"::equals).hasSize(6);
+        assertThat(taskRunner.titles).doesNotContain("smartesb-review-index");
+        assertThat(Files.readString(properties.getLocalOut().resolve("2026-06-17/runs/incomplete-reports.json")))
+                .contains("\"state\" : \"failed\"")
+                .contains("\"rerunRounds\" : 5")
+                .contains("\"name\" : \"Alpha\"")
+                .contains("summary missing");
+    }
+
     private SmartEsbRewriteProperties smartEsbProperties() {
         SmartEsbRewriteProperties properties = new SmartEsbRewriteProperties();
         properties.setOut(tempDir.resolve("logical-out").toString());
@@ -175,6 +252,17 @@ class SmartEsbWorkflowChainConcurrencyTest {
                     description: second
                   - name: Gamma
                     description: third
+                """);
+    }
+
+    private void writeSingleTransaction(Path planDir) throws IOException {
+        Path day = planDir.resolve("2026-06-17");
+        Files.createDirectories(day);
+        Files.writeString(day.resolve("transactions.yml"), """
+                date: 2026-06-17
+                transactions:
+                  - name: Alpha
+                    description: first
                 """);
     }
 
@@ -211,6 +299,11 @@ class SmartEsbWorkflowChainConcurrencyTest {
         private final AtomicInteger activeTransactions = new AtomicInteger();
         private final AtomicInteger maxActiveTransactions = new AtomicInteger();
         private final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
+        private final CopyOnWriteArrayList<String> titles = new CopyOnWriteArrayList<>();
+        private final Map<String, Integer> validationMaxCorrectionsByTitle = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> attemptsByTitle = new ConcurrentHashMap<>();
+        private final Map<String, Integer> completeAfterAttemptByTitle = new ConcurrentHashMap<>();
+        private final java.util.Set<String> neverCompleteTitles = ConcurrentHashMap.newKeySet();
 
         TrackingTaskRunner() {
             super(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
@@ -232,7 +325,8 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 int timeoutMinutes
         ) throws Exception {
             prompts.add(Files.readString(promptFile));
-            return runTrackedTask(server, runDir);
+            titles.add(title);
+            return runTrackedTask(server, title, promptFile, runDir);
         }
 
         @Override
@@ -253,32 +347,49 @@ class SmartEsbWorkflowChainConcurrencyTest {
                 int validationMaxCorrections
         ) throws Exception {
             prompts.add(Files.readString(promptFile));
-            return runTrackedTask(server, runDir);
+            titles.add(title);
+            validationMaxCorrectionsByTitle.put(title, validationMaxCorrections);
+            return runTrackedTask(server, title, promptFile, runDir);
         }
 
-        private OpenCodeRunResult runTrackedTask(OpenCodeServerHandle server, Path runDir) throws Exception {
+        void completeAfterAttempt(String title, int attempt) {
+            completeAfterAttemptByTitle.put(title, attempt);
+        }
+
+        void neverComplete(String title) {
+            neverCompleteTitles.add(title);
+        }
+
+        private OpenCodeRunResult runTrackedTask(OpenCodeServerHandle server, String title, Path promptFile, Path runDir) throws Exception {
             if ("index".equals(runDir.getFileName().toString())) {
                 writeIndexOutputs(runDir);
                 return new OpenCodeRunResult("index-session", server.serverUrl().toString(), false, false, true, false, "idle");
             }
+            int attempt = attemptsByTitle.computeIfAbsent(title, ignored -> new AtomicInteger()).incrementAndGet();
             int active = activeTransactions.incrementAndGet();
             maxActiveTransactions.accumulateAndGet(active, Math::max);
             try {
                 Thread.sleep(150);
-                writeTransactionSummary(runDir);
+                if (!neverCompleteTitles.contains(title)
+                        && attempt >= completeAfterAttemptByTitle.getOrDefault(title, 1)) {
+                    writeReviewOutputs(promptFile, runDir);
+                }
                 return new OpenCodeRunResult("session-" + runDir.getFileName(), server.serverUrl().toString(), false, false, true, false, "idle");
             } finally {
                 activeTransactions.decrementAndGet();
             }
         }
 
-        private void writeTransactionSummary(Path runDir) throws IOException {
-            String transaction = runDir.getFileName().toString();
+        private void writeReviewOutputs(Path promptFile, Path runDir) throws IOException {
+            String prompt = Files.readString(promptFile);
+            String name = runDir.getFileName().toString();
+            boolean module = prompt.contains("tasks/module-");
             Path out = runDir.getParent().getParent();
-            Path reportDir = out.resolve("reports").resolve(transaction);
+            Path reportDir = out.resolve("reports").resolve(name);
             Files.createDirectories(reportDir);
+            writeCompletedReportArtifacts(reportDir);
             Map<String, Object> summary = new LinkedHashMap<>();
-            summary.put("transaction", transaction);
+            summary.put(module ? "module" : "transaction", name);
             summary.put("description", "done");
             summary.put("status", "completed");
             summary.put("review_md", reportDir.resolve("review.md").toString());
@@ -304,6 +415,7 @@ class SmartEsbWorkflowChainConcurrencyTest {
     private void writeCompletedSummary(Path out, String transaction) throws IOException {
         Path reportDir = out.resolve("reports").resolve(transaction);
         Files.createDirectories(reportDir);
+        writeCompletedReportArtifacts(reportDir);
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("transaction", transaction);
         summary.put("description", "done");
@@ -319,6 +431,19 @@ class SmartEsbWorkflowChainConcurrencyTest {
         summary.put("top_findings", List.of());
         summary.put("unverified", List.of());
         objectMapper.writeValue(reportDir.resolve("summary.json").toFile(), summary);
+    }
+
+    private void writeCompletedReportArtifacts(Path reportDir) throws IOException {
+        Files.writeString(reportDir.resolve("review.md"), "# review\n完成\n");
+        Files.writeString(reportDir.resolve("mapping-matrix.md"), "# matrix\n完成\n");
+        Path sections = reportDir.resolve("sections");
+        Files.createDirectories(sections);
+        Files.writeString(sections.resolve("01-findings.md"), "# findings\n完成\n");
+        Files.writeString(sections.resolve("02-code-chains.md"), "# code chains\n完成\n");
+        Files.writeString(sections.resolve("03-protocol-review.md"), "# protocol\n完成\n");
+        Files.writeString(sections.resolve("04-behavior-review.md"), "# behavior\n完成\n");
+        Files.writeString(sections.resolve("05-verification.md"), "# verification\n完成\n");
+        Files.writeString(sections.resolve("06-code-standard.md"), "# code standard\n完成\n");
     }
 
     private class HealthyServerManager extends OpenCodeServerManager {

@@ -282,7 +282,7 @@ public class OpenCodeServerClient {
     }
 
     private void deleteSession(URI serverUrl, String directory, String sessionId, Duration timeout) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/" + pathEncode(sessionId), ""))
+        HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/" + pathEncode(sessionId), "directory=" + queryEncode(directory)))
                 .timeout(timeout)
                 .header(DIRECTORY_HEADER, directory)
                 .DELETE()
@@ -299,7 +299,9 @@ public class OpenCodeServerClient {
     }
 
     private URI sessionsByTitleEndpoint(URI serverUrl, String directory, String title) {
-        String suffix = title == null || title.isBlank() ? "limit=100" : "search=" + queryEncode(title) + "&limit=100";
+        String suffix = "directory=" + queryEncode(directory)
+                + (title == null || title.isBlank() ? "" : "&search=" + queryEncode(title))
+                + "&limit=100";
         return resolveWithQuery(serverUrl, "/session", suffix);
     }
 

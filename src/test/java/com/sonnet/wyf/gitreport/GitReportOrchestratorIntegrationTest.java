@@ -41,7 +41,6 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -111,7 +110,7 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     @Test
-    void doesNotCreateAnotherAuthorSessionAfterPromptWasSubmitted() throws Exception {
+    void rerunsIncompleteAuthorOutputsBeforeSynthesis() throws Exception {
         Path repo = tempDir.resolve("repo-no-auto-retry-after-submit");
         Path out = tempDir.resolve("out-no-auto-retry-after-submit");
         Files.createDirectories(repo);
@@ -137,16 +136,24 @@ class GitReportOrchestratorIntegrationTest {
 
         assertThatThrownBy(() -> orchestrator().run(properties))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("author task failed");
+                .hasMessageContaining("git-report author outputs incomplete after 5 rerun rounds")
+                .hasMessageContaining("author-001-alice-alice-example-com");
 
-        assertThat(sessions).hasValue(1);
-        assertThat(prompts).hasSize(1);
+        assertThat(sessions).hasValue(6);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(6);
+        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("Java 产物校验失败"));
+        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
+        assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
+                .contains("\"state\" : \"failed\"")
+                .contains("\"rerunRounds\" : 5")
+                .contains("author-001-alice-alice-example-com")
+                .contains("person report contains unresolved template placeholder");
     }
 
     @Test
-    void correctsInvalidAuthorOutputInSameSessionWithoutOuterRetry() throws Exception {
-        Path repo = tempDir.resolve("repo-same-session-correction");
-        Path out = tempDir.resolve("out-same-session-correction");
+    void rerunsInvalidAuthorOutputInFreshSessionWithoutSameSessionCorrection() throws Exception {
+        Path repo = tempDir.resolve("repo-fresh-rerun-correction");
+        Path out = tempDir.resolve("out-fresh-rerun-correction");
         Files.createDirectories(repo);
         GitTestSupport.run(repo, "git", "init", "-q");
         GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
@@ -155,7 +162,7 @@ class GitReportOrchestratorIntegrationTest {
         GitTestSupport.run(repo, "git", "add", "Demo.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
 
-        AtomicInteger sessions = startFakeOpenCodeServerWithInvalidAuthorThenCorrection();
+        AtomicInteger sessions = startFakeOpenCodeServerWithInvalidAuthorThenFreshRerun();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
@@ -170,12 +177,16 @@ class GitReportOrchestratorIntegrationTest {
 
         orchestrator().run(properties);
 
-        assertThat(sessions).hasValue(2);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(1);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).hasSize(1);
+        assertThat(sessions).hasValue(3);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(2);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).isEmpty();
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("synthesis_inputs_json:")).hasSize(1);
+        assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
+                .contains("\"state\" : \"completed\"")
+                .contains("\"rerunRounds\" : 1");
         JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
         assertThat(authorStatus.path("attempt").asInt()).isEqualTo(1);
-        assertThat(authorStatus.path("sessionId").asText()).isEqualTo("session-1");
+        assertThat(authorStatus.path("sessionId").asText()).isEqualTo("session-2");
     }
 
     @Test
@@ -600,9 +611,9 @@ class GitReportOrchestratorIntegrationTest {
         return maxActiveOpenCodeTasks;
     }
 
-    private AtomicInteger startFakeOpenCodeServerWithInvalidAuthorThenCorrection() throws IOException {
+    private AtomicInteger startFakeOpenCodeServerWithInvalidAuthorThenFreshRerun() throws IOException {
         AtomicInteger ids = new AtomicInteger();
-        AtomicReference<Path> authorDetail = new AtomicReference<>();
+        AtomicInteger authorRuns = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
         server.createContext("/session", exchange -> {
@@ -621,10 +632,11 @@ class GitReportOrchestratorIntegrationTest {
                     prompts.add(prompt);
                     if (prompt.contains("detail_json:")) {
                         Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
-                        authorDetail.set(detailPath);
-                        writeInvalidAuthorOutput(detailPath);
-                    } else if (prompt.contains("Java 产物校验失败") && authorDetail.get() != null) {
-                        writeValidAuthorOutput(authorDetail.get());
+                        if (authorRuns.incrementAndGet() == 1) {
+                            writeInvalidAuthorOutput(detailPath);
+                        } else {
+                            writeValidAuthorOutput(detailPath);
+                        }
                     } else if (prompt.contains("synthesis_inputs_json:")) {
                         writeFakeOpenCodeOutput(prompt);
                     }
