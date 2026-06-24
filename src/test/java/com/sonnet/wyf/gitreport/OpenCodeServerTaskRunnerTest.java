@@ -99,6 +99,70 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
+    void clearsPriorManagedProjectSessionsBeforeCreatingFirstSession() throws Exception {
+        Path output = tempDir.resolve("cleaned-done.txt");
+        java.util.List<String> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> {
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, """
+                        [
+                          {"id":"old-managed","title":"smartesb-review-CaReturnOfGoods-20260624024705062"},
+                          {"id":"manual-session","title":"手工调试会话"}
+                        ]
+                        """);
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"new-managed\"}");
+        });
+        server.createContext("/session/", exchange -> {
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
+            if (exchange.getRequestURI().getPath().equals("/session/new-managed/prompt_async")) {
+                Files.writeString(output, "done");
+                respond(exchange, 204, "");
+                return;
+            }
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("worker-prompt.md");
+        Files.writeString(promptFile, "persisted prompt");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "smartesb-review-CaReturnOfGoods",
+                promptFile,
+                "worker message",
+                tempDir.resolve("cleaned-run"),
+                () -> Files.exists(output),
+                "",
+                60,
+                60,
+                50,
+                1
+        );
+
+        assertThat(result.sessionId()).isEqualTo("new-managed");
+        assertThat(requests).containsSubsequence(
+                "GET /session query=search=smartesb-review-&limit=100 directoryHeader=" + tempDir.toAbsolutePath().normalize(),
+                "DELETE /session/old-managed query=null directoryHeader=" + tempDir.toAbsolutePath().normalize(),
+                "POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize()
+        );
+        assertThat(requests).noneMatch(request -> request.contains("/session/manual-session"));
+    }
+
+    @Test
     void waitsForOutputWhenAsyncPromptSubmissionReturnsBeforeServerLeavesIdle() throws Exception {
         Path output = tempDir.resolve("delayed-done.txt");
         AtomicInteger statusRequests = new AtomicInteger();

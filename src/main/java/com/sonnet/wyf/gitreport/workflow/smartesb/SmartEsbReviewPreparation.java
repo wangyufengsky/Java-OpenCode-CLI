@@ -303,6 +303,7 @@ public class SmartEsbReviewPreparation {
                 : "只审查当前交易的新代码、映射文档、重构详细设计和 old-8583-doc 老代码详细设计；不读取或检索 old_project 下的老代码源码。");
         rules.put("precreated_outputs", "准备器已预创建包含完整模板和占位符的 review.md、mapping-matrix.md、sections/*.md，以及初始 summary.json；只能替换这些已存在文件中的 output_placeholders，占位符之外的标题结构不得删除、重命名或重排。");
         rules.put("template_contract", "只能替换 output_placeholders 中列出的占位符；写入完成后所有 Markdown 报告不得残留 {{...}} 占位符。");
+        rules.put("external_skill_policy", "本任务 prompt 已包含完整执行规则；不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md、超能力规则或通用规划能力，包括 brainstorming、superpowers、context-engineering、gitnexus。task JSON 中的 skill 只是本链路配置字段，不表示可以加载外部技能。");
         rules.put("reader_preference", "读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 fallback_file_tools 中的读取工具。");
         rules.put("explore_preference", item.isModule()
                 ? "优先使用 OpenCode explore 或 intellij-index 分析当前模块相关代码；如果 explore 不可用，继续用 intellij-index 定位和读取代码，不得因此 BLOCKED。"

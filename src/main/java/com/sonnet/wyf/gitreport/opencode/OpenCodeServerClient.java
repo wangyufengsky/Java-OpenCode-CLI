@@ -18,8 +18,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -243,6 +247,55 @@ public class OpenCodeServerClient {
             return objectMapper.createArrayNode();
         }
         return sessions;
+    }
+
+    public int deleteSessionsByTitlePrefixes(URI serverUrl, Path repo, List<String> titlePrefixes, int requestTimeoutSeconds) throws IOException, InterruptedException {
+        if (titlePrefixes == null || titlePrefixes.isEmpty()) {
+            return 0;
+        }
+        String directory = repo.toAbsolutePath().normalize().toString();
+        Duration timeout = Duration.ofSeconds(Math.max(2, Math.min(30, requestTimeoutSeconds)));
+        Set<String> sessionIds = new LinkedHashSet<>();
+        List<String> matchedTitles = new ArrayList<>();
+        for (String prefix : titlePrefixes) {
+            if (prefix == null || prefix.isBlank()) {
+                continue;
+            }
+            JsonNode sessions = listSessionsByTitle(serverUrl, directory, prefix, timeout);
+            for (JsonNode session : sessions) {
+                String id = firstText(session, "id");
+                String title = firstText(session, "title");
+                if (!id.isBlank() && title.startsWith(prefix) && matchesDirectory(session, directory)) {
+                    sessionIds.add(id);
+                    matchedTitles.add(title);
+                }
+            }
+        }
+        for (String sessionId : sessionIds) {
+            deleteSession(serverUrl, directory, sessionId, timeout);
+        }
+        if (!sessionIds.isEmpty()) {
+            log.info("Deleted prior OpenCode sessions created by this runner: count={}, directory={}, titles={}",
+                    sessionIds.size(), directory, matchedTitles);
+        }
+        return sessionIds.size();
+    }
+
+    private void deleteSession(URI serverUrl, String directory, String sessionId, Duration timeout) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/" + pathEncode(sessionId), ""))
+                .timeout(timeout)
+                .header(DIRECTORY_HEADER, directory)
+                .DELETE()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("OpenCode Server request failed: DELETE " + request.uri() + " status=" + response.statusCode() + " body=" + response.body());
+        }
+    }
+
+    private boolean matchesDirectory(JsonNode session, String directory) {
+        String sessionDirectory = firstText(session, "directory", "path");
+        return sessionDirectory.isBlank() || Path.of(sessionDirectory).toAbsolutePath().normalize().toString().equals(directory);
     }
 
     private URI sessionsByTitleEndpoint(URI serverUrl, String directory, String title) {

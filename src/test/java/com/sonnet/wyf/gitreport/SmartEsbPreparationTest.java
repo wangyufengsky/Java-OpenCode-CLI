@@ -69,6 +69,8 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/rules/writer_preference").asText()).contains("优先使用 OpenCode 原生文件编辑工具");
         assertThat(task.at("/rules/writer_preference").asText()).contains("路径字段只能使用 filePath");
         assertThat(task.at("/rules/template_contract").asText()).contains("只能替换 output_placeholders");
+        assertThat(task.at("/rules/external_skill_policy").asText()).contains("不要在执行前搜索、读取、加载或调用任何外部 skill");
+        assertThat(task.at("/rules/external_skill_policy").asText()).contains("brainstorming");
         assertThat(task.at("/rules/scope").asText()).contains("old-8583-doc 老代码详细设计");
         assertThat(task.at("/rules/scope").asText()).contains("不读取或检索 old_project 下的老代码源码");
         assertThat(task.at("/rules/explore_preference").asText()).contains("优先使用 OpenCode explore 或 intellij-index 分析文档和代码");

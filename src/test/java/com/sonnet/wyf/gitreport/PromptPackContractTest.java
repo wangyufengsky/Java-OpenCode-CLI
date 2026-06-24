@@ -104,6 +104,13 @@ class PromptPackContractTest {
                 "路径字段只能使用 `filePath`",
                 "只能替换 `output_placeholders` 中列出的占位符"
         );
+        assertThat(worker + "\n" + rerun + "\n" + module + "\n" + rerunModule + "\n" + synthesis).contains(
+                "不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md、超能力规则或通用规划能力",
+                "包括但不限于 `brainstorming`、`superpowers`、`context-engineering`、`gitnexus`"
+        );
+        assertThat(worker + "\n" + rerun + "\n" + module + "\n" + rerunModule).contains(
+                "task JSON 中的 `skill` 只是本链路的配置字段，不表示可以加载外部技能"
+        );
         assertThat(module).contains(
                 "模块审查不要求交易名、映射文档、old-8583-doc 或 8583 到 JSON 映射关系存在",
                 "任务复杂、搜索结果少、需要更多分析时间",

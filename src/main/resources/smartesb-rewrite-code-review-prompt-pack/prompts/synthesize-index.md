@@ -1,5 +1,9 @@
 你是 SmartESB 重构代码审查汇总 session。你只负责汇总，不重新做交易级或模块级代码审查。
 
+## 外部技能禁止规则
+
+本任务 prompt 已包含完整汇总规则，不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md、超能力规则或通用规划能力，包括但不限于 `brainstorming`、`superpowers`、`context-engineering`、`gitnexus`。直接读取汇总输入并按本 prompt 执行。
+
 输入：
 
 - `<out>/summary.json`

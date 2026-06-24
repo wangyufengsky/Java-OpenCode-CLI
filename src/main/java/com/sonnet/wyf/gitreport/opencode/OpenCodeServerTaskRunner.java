@@ -14,9 +14,12 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -26,6 +29,7 @@ public class OpenCodeServerTaskRunner {
     private final OpenCodeServerClient client;
     private final ScheduledProbeWaiter scheduledProbeWaiter;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final Set<String> cleanedManagedSessionScopes = ConcurrentHashMap.newKeySet();
 
     public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this.client = client;
@@ -49,6 +53,7 @@ public class OpenCodeServerTaskRunner {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
+        clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
         OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, createSessionTimeoutSeconds);
         RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
@@ -84,6 +89,7 @@ public class OpenCodeServerTaskRunner {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
+        clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
         OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, createSessionTimeoutSeconds);
         RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
         log.info("Starting validated OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}, validationSettleSeconds={}, validationMaxCorrections={}",
@@ -132,6 +138,40 @@ public class OpenCodeServerTaskRunner {
             return prompt;
         }
         return message + "\n\n" + prompt;
+    }
+
+    private void clearPriorManagedSessionsIfNeeded(OpenCodeServerHandle server, Path repo, String title, int requestTimeoutSeconds) throws InterruptedException {
+        List<String> prefixes = managedSessionTitlePrefixes(title);
+        if (prefixes.isEmpty()) {
+            return;
+        }
+        String key = server.serverUrl() + "|" + repo.toAbsolutePath().normalize() + "|" + String.join(",", prefixes);
+        if (!cleanedManagedSessionScopes.add(key)) {
+            return;
+        }
+        try {
+            int deleted = client.deleteSessionsByTitlePrefixes(server.serverUrl(), repo, prefixes, requestTimeoutSeconds);
+            log.info("OpenCode managed session cleanup completed before task startup: title={}, deletedCount={}", title, deleted);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw exception;
+        } catch (Exception exception) {
+            log.warn("OpenCode managed session cleanup failed before task startup; continuing: title={}, reason={}",
+                    title, exception.toString());
+        }
+    }
+
+    private List<String> managedSessionTitlePrefixes(String title) {
+        if (title == null || title.isBlank()) {
+            return List.of();
+        }
+        if (title.startsWith("smartesb-review-")) {
+            return List.of("smartesb-review-");
+        }
+        if (title.startsWith("git-report-")) {
+            return List.of("git-report-");
+        }
+        return List.of();
     }
 
     private boolean isComplete(CompletionProbe completionProbe, Path runDir) throws IOException {

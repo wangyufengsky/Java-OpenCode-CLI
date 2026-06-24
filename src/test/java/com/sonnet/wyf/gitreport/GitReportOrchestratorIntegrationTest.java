@@ -475,7 +475,13 @@ class GitReportOrchestratorIntegrationTest {
         AtomicInteger ids = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session", exchange -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, "[]");
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+        });
         server.createContext("/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
@@ -508,7 +514,13 @@ class GitReportOrchestratorIntegrationTest {
         AtomicInteger ids = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session", exchange -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, "[]");
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+        });
         server.createContext("/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
@@ -542,7 +554,13 @@ class GitReportOrchestratorIntegrationTest {
         delayedOutputExecutor = Executors.newCachedThreadPool();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session", exchange -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, "[]");
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+        });
         server.createContext("/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
@@ -587,7 +605,13 @@ class GitReportOrchestratorIntegrationTest {
         AtomicReference<Path> authorDetail = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
-        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}"));
+        server.createContext("/session", exchange -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, "[]");
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+        });
         server.createContext("/session/", exchange -> {
             try {
                 String path = exchange.getRequestURI().getPath();
