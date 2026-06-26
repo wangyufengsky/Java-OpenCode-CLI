@@ -1,0 +1,29 @@
+# Sm@rtESB 代码阅读链路配置。Java 运行时读取这些字段并生成任务 JSON，不调用旧 skill 脚本或 writer MCP。
+
+# 必填。报告逻辑输出目录；可以是 Linux 或 Windows 绝对路径。
+out: "/home/wangyufeng/review-output/smartesb-code-reader"
+
+# 可选。本机实际落盘目录；为空时直接使用 out。
+local-out:
+
+# 必填。一个或多个 serviceIdentify.xml。
+service-identify:
+  - "/home/wangyufeng/upfs-production/serviceIdentify.xml"
+
+# 必填。交易 XML 和 base XML 根目录。
+xml-root: "/home/wangyufeng/upfs-production"
+
+# 可选。.biz 根目录；为空时等于 xml-root。
+biz-root:
+
+# 必填。Java 源码根目录，也是 OpenCode session directory。
+java-root: "/home/wangyufeng/upfs-production"
+
+# 必填。serviceIdentify.xml 中要读取的 switch mode。
+mode: "8583"
+
+# 必填。发送给模块/交易 OpenCode session 的附加执行消息。
+worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，只输出 DONE 或 BLOCKED。"
+
+# 必填。发送给索引 OpenCode session 的附加执行消息。
+synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md。"

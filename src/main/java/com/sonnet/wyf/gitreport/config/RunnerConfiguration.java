@@ -17,6 +17,10 @@ import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbReviewPreparation;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbSummaryValidator;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderPreparation;
+import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderPromptBuilder;
+import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderWorkflowChain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
@@ -48,6 +52,21 @@ public class RunnerConfiguration {
     @Bean
     SmartEsbSummaryValidator smartEsbSummaryValidator(ObjectMapper objectMapper) {
         return new SmartEsbSummaryValidator(objectMapper);
+    }
+
+    @Bean
+    SmartEsbCodeReaderPreparation smartEsbCodeReaderPreparation(ObjectMapper objectMapper) {
+        return new SmartEsbCodeReaderPreparation(objectMapper);
+    }
+
+    @Bean
+    SmartEsbCodeReaderPromptBuilder smartEsbCodeReaderPromptBuilder(ResourceLoader resourceLoader) {
+        return new SmartEsbCodeReaderPromptBuilder(resourceLoader);
+    }
+
+    @Bean
+    SmartEsbCodeReaderOutputValidator smartEsbCodeReaderOutputValidator(ObjectMapper objectMapper) {
+        return new SmartEsbCodeReaderOutputValidator(objectMapper);
     }
 
     @Bean
@@ -83,6 +102,33 @@ public class RunnerConfiguration {
                 outputCompletionGate,
                 concurrentWorkflowTaskRunner,
                 artifactCompletenessValidator
+        );
+    }
+
+    @Bean
+    WorkflowChain smartEsbCodeReaderWorkflowChain(
+            ChainConfigLoader chainConfigLoader,
+            OpenCodeRunnerProperties runnerProperties,
+            SmartEsbCodeReaderPreparation preparation,
+            SmartEsbCodeReaderPromptBuilder promptBuilder,
+            SmartEsbCodeReaderOutputValidator outputValidator,
+            OpenCodeServerManager serverManager,
+            OpenCodeServerTaskRunner taskRunner,
+            ObjectMapper objectMapper,
+            OutputCompletionGate outputCompletionGate,
+            ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner
+    ) {
+        return new SmartEsbCodeReaderWorkflowChain(
+                chainConfigLoader,
+                runnerProperties,
+                preparation,
+                promptBuilder,
+                outputValidator,
+                serverManager,
+                taskRunner,
+                objectMapper,
+                outputCompletionGate,
+                concurrentWorkflowTaskRunner
         );
     }
 

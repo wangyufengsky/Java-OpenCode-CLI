@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport;
 
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbRewriteProperties;
+import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
@@ -28,5 +29,17 @@ class ChainConfigLoaderTest {
         assertThat(properties.getOut()).isEqualTo("/home/wangyufeng/review-output/smartesb-rewrite-review");
         assertThat(properties.getTransactionPlanDir()).hasToString("src/main/resources/smartesb-transactions");
         assertThat(properties.getOld8583Doc()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md");
+    }
+
+    @Test
+    void loadsSmartEsbCodeReaderChainYamlFromClasspath() throws Exception {
+        SmartEsbCodeReaderProperties properties = new ChainConfigLoader(new DefaultResourceLoader())
+                .load("classpath:chains", "smartesb-code-reader", SmartEsbCodeReaderProperties.class);
+
+        assertThat(properties.getOut()).isEqualTo("/home/wangyufeng/review-output/smartesb-code-reader");
+        assertThat(properties.getMode()).isEqualTo("8583");
+        assertThat(properties.getServiceIdentify()).isNotEmpty();
+        assertThat(properties.getXmlRoot()).hasToString("/home/wangyufeng/upfs-production");
+        assertThat(properties.getWorkerMessage()).contains("SmartESB code-reader");
     }
 }

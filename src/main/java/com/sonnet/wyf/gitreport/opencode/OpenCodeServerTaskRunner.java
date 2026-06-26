@@ -189,6 +189,9 @@ public class OpenCodeServerTaskRunner {
         if (title.startsWith("smartesb-review-")) {
             return List.of("smartesb-review-");
         }
+        if (title.startsWith("smartesb-reader-")) {
+            return List.of("smartesb-reader-");
+        }
         if (title.startsWith("git-report-")) {
             return List.of("git-report-");
         }

@@ -1,5 +1,6 @@
 opencode-runner:
   enabled: true
+  # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader
   active-chain: "git-code-contribution-report"
   mode: "full"
   run-date:

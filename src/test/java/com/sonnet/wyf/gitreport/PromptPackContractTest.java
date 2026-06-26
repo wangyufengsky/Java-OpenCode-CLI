@@ -152,6 +152,38 @@ class PromptPackContractTest {
     }
 
     @Test
+    void smartEsbCodeReaderPromptPackUsesJavaRuntimeContractAndNoLegacyScriptsOrMcp() throws Exception {
+        Path promptPack = Path.of("src/main/resources/smartesb-code-reader-prompt-pack");
+
+        String module = Files.readString(promptPack.resolve("prompts/run-module-reader.md"));
+        String transaction = Files.readString(promptPack.resolve("prompts/run-transaction-reader.md"));
+        String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-index.md"));
+        String combined = module + "\n" + transaction + "\n" + synthesis;
+
+        assertThat(combined).contains(
+                "优先使用 OpenCode 原生文件编辑工具",
+                "路径字段只能使用 `filePath`",
+                "禁止使用 `pathInProject`、`file_path`、`path`",
+                "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
+                "不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md"
+        );
+        assertThat(module).contains("SmartESB code-reader 模块阅读任务", "review_type: module");
+        assertThat(transaction).contains("SmartESB code-reader 交易阅读任务", "review_type: transaction");
+        assertThat(synthesis).contains("index_inputs_json");
+        assertThat(combined).doesNotContain(
+                "smartesb_writer_mcp",
+                "write_markdown_chunk.py",
+                "write_json_file.py",
+                "prepare_smartesb_tasks.py",
+                "tasks/batches",
+                "module-batch",
+                "transaction-batch",
+                "smartesb_begin_markdown",
+                "smartesb_append_markdown"
+        );
+    }
+
+    @Test
     void promptBuilderLoadsClasspathResourcesAndEmbedsTemplates() throws Exception {
         PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
 
