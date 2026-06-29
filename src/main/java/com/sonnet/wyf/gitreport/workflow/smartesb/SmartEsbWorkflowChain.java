@@ -83,7 +83,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
 
     @Override
     public void run(WorkflowRunRequest request) throws Exception {
-        SmartEsbRewriteProperties properties = configLoader.load(runnerProperties.getConfigDir(), id(), SmartEsbRewriteProperties.class);
+        SmartEsbRewriteProperties properties = configLoader.load(configDir(request), id(), SmartEsbRewriteProperties.class);
         SmartEsbDailyTransactionPlan plan = planLoader.load(properties.getTransactionPlanDir(), request.effectiveRunDate());
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         if ("full".equals(mode)) {
@@ -119,6 +119,12 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         } else {
             throw new IllegalArgumentException("SmartESB rerun.type must be one of: transaction, module, index");
         }
+    }
+
+    private String configDir(WorkflowRunRequest request) {
+        return request.configDir() == null || request.configDir().isBlank()
+                ? runnerProperties.getConfigDir()
+                : request.configDir();
     }
 
     private void runReviewItems(

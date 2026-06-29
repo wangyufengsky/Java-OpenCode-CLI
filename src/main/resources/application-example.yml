@@ -1,6 +1,6 @@
 opencode-runner:
-  enabled: true
-  # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader
+  enabled: false
+  # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader, weekly-engineering-report
   active-chain: "git-code-contribution-report"
   mode: "full"
   run-date:
@@ -36,3 +36,7 @@ opencode-runner:
     environment:
       # 内网/离线环境避免 OpenCode 创建 session 时联网拉取 models.dev。
       OPENCODE_DISABLE_MODELS_FETCH: "true"
+
+task-console:
+  database-path: "data/opencode-task-console.sqlite"
+  run-config-dir: "data/run-configs"

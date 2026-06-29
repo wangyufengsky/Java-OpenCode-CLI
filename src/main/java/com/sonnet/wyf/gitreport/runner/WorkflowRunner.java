@@ -38,7 +38,8 @@ public class WorkflowRunner implements ApplicationRunner {
                 normalize(properties.getRerun().getType()),
                 properties.getRerun().getId(),
                 properties.getRunDate(),
-                properties.getOpencode()
+                properties.getOpencode(),
+                properties.getConfigDir()
         );
         log.info("Starting workflow chain: id={}, mode={}, rerunType={}, rerunId={}, runDate={}",
                 chain.id(), request.mode(), request.rerunType(), request.rerunId(), request.effectiveRunDate());

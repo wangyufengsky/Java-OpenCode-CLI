@@ -17,7 +17,8 @@ class ArchitectureConventionsTest {
         assertThat(code).doesNotContain("new GitReportPreparation");
         assertThat(code).doesNotContain("new GitReportOrchestrator");
         assertThat(code).doesNotContain("new OpenCodeServerTaskRunner");
-        assertThat(code).contains("SpringApplication.exit(context)");
+        assertThat(code).contains("SpringApplication.run(GitReportApplication.class, args)");
+        assertThat(code).doesNotContain("SpringApplication.exit");
     }
 
     @Test

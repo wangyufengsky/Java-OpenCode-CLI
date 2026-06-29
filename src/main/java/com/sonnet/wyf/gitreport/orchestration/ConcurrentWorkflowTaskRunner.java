@@ -1,5 +1,7 @@
 package com.sonnet.wyf.gitreport.orchestration;
 
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
+import com.sonnet.wyf.gitreport.console.WorkflowRunContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -15,9 +17,15 @@ public class ConcurrentWorkflowTaskRunner {
     private static final Logger log = LoggerFactory.getLogger(ConcurrentWorkflowTaskRunner.class);
 
     private final AsyncTaskExecutor taskExecutor;
+    private final WorkflowEventSink eventSink;
 
     public ConcurrentWorkflowTaskRunner(AsyncTaskExecutor taskExecutor) {
+        this(taskExecutor, new WorkflowEventSink());
+    }
+
+    public ConcurrentWorkflowTaskRunner(AsyncTaskExecutor taskExecutor, WorkflowEventSink eventSink) {
         this.taskExecutor = taskExecutor;
+        this.eventSink = eventSink;
     }
 
     public <T> List<TaskRunResult> run(
@@ -29,16 +37,26 @@ public class ConcurrentWorkflowTaskRunner {
     ) throws Exception {
         int slots = Math.max(1, concurrency);
         log.info("Starting workflow tasks: workflow={}, taskCount={}, concurrency={}", workflowName, tasks.size(), slots);
+        eventSink.emitCurrent("TASK_GROUP_STARTED", workflowName + "，任务数=" + tasks.size());
         Semaphore semaphore = new Semaphore(slots);
         List<Future<TaskRunResult>> futures = new ArrayList<>();
+        Long runId = WorkflowRunContext.currentRunId();
         for (T task : tasks) {
-            futures.add(taskExecutor.submit(limitedCallable(semaphore, task, taskKey, taskFactory)));
+            futures.add(taskExecutor.submit(limitedCallable(semaphore, task, taskKey, taskFactory, runId)));
         }
         List<TaskRunResult> results = new ArrayList<>();
         List<TaskRunResult> failures = new ArrayList<>();
         for (Future<TaskRunResult> future : futures) {
             TaskRunResult result = future.get();
             results.add(result);
+            eventSink.taskStatusCurrent(
+                    result.taskKey(),
+                    result.taskName(),
+                    result.success() ? "SUCCEEDED" : "FAILED",
+                    workflowName,
+                    result.statusPath() == null ? "" : result.statusPath().toString(),
+                    result.error()
+            );
             if (!result.success()) {
                 failures.add(result);
             }
@@ -62,6 +80,7 @@ public class ConcurrentWorkflowTaskRunner {
             return results;
         }
         log.info("Workflow tasks completed successfully: workflow={}", workflowName);
+        eventSink.emitCurrent("TASK_GROUP_SUCCEEDED", workflowName);
         return results;
     }
 
@@ -69,14 +88,19 @@ public class ConcurrentWorkflowTaskRunner {
             Semaphore semaphore,
             T task,
             Function<T, String> taskKey,
-            Function<T, Callable<TaskRunResult>> taskFactory
+            Function<T, Callable<TaskRunResult>> taskFactory,
+            Long runId
     ) {
         return () -> {
             boolean acquired = false;
-            try {
+            try (WorkflowRunContext.Scope ignored = WorkflowRunContext.open(runId)) {
                 semaphore.acquire();
                 acquired = true;
-                return taskFactory.apply(task).call();
+                String key = taskKey.apply(task);
+                try (WorkflowRunContext.Scope ignoredTask = WorkflowRunContext.openTask(key, key)) {
+                    eventSink.taskStatusCurrent(key, key, "RUNNING", "已开始", "", "");
+                    return taskFactory.apply(task).call();
+                }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 String key = taskKey.apply(task);

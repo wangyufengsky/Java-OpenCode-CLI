@@ -28,7 +28,7 @@ public class GitReportWorkflowChain implements WorkflowChain {
 
     @Override
     public void run(WorkflowRunRequest request) throws Exception {
-        GitReportProperties properties = configLoader.load(runnerProperties.getConfigDir(), id(), GitReportProperties.class);
+        GitReportProperties properties = configLoader.load(configDir(request), id(), GitReportProperties.class);
         OpenCodeSettingsApplier.apply(request.openCode(), properties);
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         if ("full".equals(mode)) {
@@ -45,5 +45,11 @@ public class GitReportWorkflowChain implements WorkflowChain {
         } else {
             throw new IllegalArgumentException("git-report rerun.type must be one of: author, synthesis");
         }
+    }
+
+    private String configDir(WorkflowRunRequest request) {
+        return request.configDir() == null || request.configDir().isBlank()
+                ? runnerProperties.getConfigDir()
+                : request.configDir();
     }
 }

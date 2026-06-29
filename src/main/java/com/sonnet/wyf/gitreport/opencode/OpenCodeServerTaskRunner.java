@@ -1,6 +1,8 @@
 package com.sonnet.wyf.gitreport.opencode;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
+import com.sonnet.wyf.gitreport.console.WorkflowRunContext;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,12 +30,18 @@ public class OpenCodeServerTaskRunner {
 
     private final OpenCodeServerClient client;
     private final ScheduledProbeWaiter scheduledProbeWaiter;
+    private final WorkflowEventSink eventSink;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Set<String> cleanedManagedSessionScopes = ConcurrentHashMap.newKeySet();
 
     public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
+        this(client, scheduledProbeWaiter, new WorkflowEventSink());
+    }
+
+    public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter, WorkflowEventSink eventSink) {
         this.client = client;
         this.scheduledProbeWaiter = scheduledProbeWaiter;
+        this.eventSink = eventSink;
     }
 
     public OpenCodeRunResult runUntil(
@@ -458,6 +466,15 @@ public class OpenCodeServerTaskRunner {
             } catch (IOException exception) {
                 log.warn("Unable to write OpenCode session status: sessionId={}, runDir={}, reason={}", sessionId, runDir, exception.getMessage());
             }
+            WorkflowRunContext.TaskIdentity task = WorkflowRunContext.currentTask();
+            eventSink.taskStatusCurrent(
+                    task == null ? title : task.taskKey(),
+                    task == null ? title : task.taskName(),
+                    terminalState(phase, timedOut, aborted),
+                    phase,
+                    runDir.resolve("session-status.json").toString(),
+                    validationError
+            );
         }
 
         private void writeQuietly(String phase, String serverState, boolean timedOut, boolean aborted) {
@@ -491,6 +508,19 @@ public class OpenCodeServerTaskRunner {
 
         private long elapsedSeconds() {
             return Duration.between(startedAt, Instant.now()).toSeconds();
+        }
+
+        private String terminalState(String phase, boolean timedOut, boolean aborted) {
+            if (timedOut || aborted || phase.toLowerCase(Locale.ROOT).contains("failed")) {
+                return "FAILED";
+            }
+            if (phase.toLowerCase(Locale.ROOT).contains("completed")) {
+                return "SUCCEEDED";
+            }
+            if ("created".equals(phase)) {
+                return "QUEUED";
+            }
+            return "RUNNING";
         }
     }
 }
