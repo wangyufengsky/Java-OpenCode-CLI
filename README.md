@@ -2,12 +2,12 @@
 
 这是一个基于 Spring Boot 的 OpenCode 多链路 Runner。主应用只负责选择链路和运行方式，链路自身的业务配置放在独立 YAML 中。
 
-当前支持四条链路，其中 `weekly-engineering-report` 会按周窗口重新统计 Git 代码事实，并对本周 changed regions 启动代码审查批次：
+当前支持四条链路，其中 `weekly-engineering-report` 会按配置的 `startday`/`endday` 统计窗口重新统计 Git 代码事实，并对窗口内 changed regions 启动代码审查批次：
 
 - `git-code-contribution-report`：代码提交量统计和个人/总报告生成。
 - `smartesb-rewrite-code-review`：SmartESB 8583 到 JSON 改造审查。
 - `smartesb-code-reader`：从 serviceIdentify/XML/BIZ/Java 生成 SmartESB 模块和交易阅读索引。
-- `weekly-engineering-report`：重新生成本周 Git 证据和代码审查结果，生成项目经理周会报告、研发负责人团队风险报告、代码维度审查报告和个人证据包。
+- `weekly-engineering-report`：重新生成统计窗口内 Git 证据和代码审查结果，生成项目经理周会报告、研发负责人团队风险报告、代码维度审查报告和个人证据包。
 
 ## 快速开始
 
@@ -83,7 +83,7 @@ opencode-runner:
 - `enabled`：是否启动 Runner。
 - `active-chain`：要运行的链路 ID。
 - `mode`：`full` 或 `rerun`。
-- `run-date`：SmartESB 和周报链路使用，格式 `yyyy-MM-dd`；为空时使用应用运行当天日期。
+- `run-date`：SmartESB 使用，格式 `yyyy-MM-dd`；周报链路未配置 `startday`/`endday` 时才用它推导自然周。
 - `config-dir`：链路配置目录，默认 `classpath:chains`。
 - `rerun.type`：补跑类型。
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name；多个目标用英文逗号放在同一个字符串中。
@@ -221,10 +221,10 @@ opencode-runner:
   run-date: "2026-06-26"
 ```
 
-周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按周窗口重新统计 Git，生成本周 changed regions 和审查批次，然后启动 weekly code-review worker 审查这些批次，最后从 Git 证据和代码审查结果投影 Markdown 报告。输出包括：
+周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按 `startday`/`endday` 指定的任意统计窗口重新统计 Git，生成窗口内 changed regions 和审查批次，然后启动 weekly code-review worker 审查这些批次，最后从 Git 证据和代码审查结果投影 Markdown 报告。输出包括：
 
 - `weekly-git-evidence.json`：周报链路本次重新生成的 Git 证据。
-- `review-batches.json`：本周代码审查批次清单。
+- `review-batches.json`：统计窗口内代码审查批次清单。
 - `review-batches/<batch_id>/input.json`：单个审查批次输入，只包含该批次 changed regions。
 - `review-batches/<batch_id>/code-review-summary.json`、`review-batches/<batch_id>/code-review.md`：OpenCode worker 写入的批次审查结果。
 - `weekly-evidence.json`：统一证据层，引用 Git 证据和审查批次。
@@ -241,7 +241,7 @@ opencode-runner:
 - `team-risk-assessment.md` 面向研发负责人，展示团队贡献分布、风险集中和 review 建议。
 - `people/<author_key>/weekly-person-report.md` 面向 1:1、辅导和绩效校准证据包，不输出绩效定级。
 
-v1 不接 Jira/禅道/CI/PR review，不做最终绩效判断，也不复用历史代码审查结论作为本周证据。代码审查 finding 只能归因到本周 `changed_regions` 中的 `region_id`、`author_key`、`commit`、`file` 和行号范围。
+v1 不接 Jira/禅道/CI/PR review，不做最终绩效判断，也不复用历史代码审查结论作为当前统计窗口证据。代码审查 finding 只能归因到统计窗口内 `changed_regions` 中的 `region_id`、`author_key`、`commit`、`file` 和行号范围。
 
 ### weekly-engineering-report 补跑审查批次
 
@@ -378,6 +378,9 @@ project:
 paths:
   out: "/home/wangyufeng/reports/weekly-engineering/2026-W26"
 
+startday: "2026-06-19"
+endday: "2026-06-26"
+
 git:
   exclude:
     - "target/**"
@@ -395,7 +398,9 @@ opencode:
 说明：
 
 - `project.revision` 不配时默认 `HEAD`。
-- `week` 不配时，使用 `opencode-runner.run-date` 所在自然周的周一到周日。
+- `startday` 和 `endday` 是周报统计窗口，格式 `yyyy-MM-dd`；可以配置周四到周四、两周一次或任意不固定周期。
+- `startday` 和 `endday` 必须成对配置，且 `endday` 不能早于 `startday`。
+- `startday`/`endday` 都不配时，才使用 `opencode-runner.run-date` 所在自然周的周一到周日作为兜底。
 - `git.exclude` 建议保留，用于排除构建产物、锁文件、生成物等噪声。
 - `git.include`、`git.include-merges` 和 `git.author-map` 都是可选高级配置；不配时使用默认统计口径。
 - `review.max-regions-per-batch` 控制每个 OpenCode 审查批次最多包含多少个 changed regions。

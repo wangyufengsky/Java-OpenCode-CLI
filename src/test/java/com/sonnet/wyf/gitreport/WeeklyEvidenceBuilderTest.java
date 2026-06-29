@@ -38,7 +38,7 @@ class WeeklyEvidenceBuilderTest {
         assertThat((Map<String, Object>) evidence.get("week"))
                 .containsEntry("start", "2000-01-01")
                 .containsEntry("end", "2099-12-31")
-                .containsEntry("label", "test-week");
+                .containsEntry("label", "2000-01-01_to_2099-12-31");
 
         Map<String, Object> sourceRuns = (Map<String, Object>) evidence.get("source_runs");
         assertThat((Map<String, Object>) sourceRuns.get("weekly_git"))
@@ -81,9 +81,8 @@ class WeeklyEvidenceBuilderTest {
         properties.getProject().setRepo(repo);
         properties.getProject().setRevision("HEAD");
         properties.getPaths().setOut(out);
-        properties.getWeek().setStart(LocalDate.of(2000, 1, 1));
-        properties.getWeek().setEnd(LocalDate.of(2099, 12, 31));
-        properties.getWeek().setLabel("test-week");
+        properties.setStartday(LocalDate.of(2000, 1, 1));
+        properties.setEndday(LocalDate.of(2099, 12, 31));
         properties.getGit().setExclude(List.of("target/**", "*.lock"));
         properties.getReview().setMaxRegionsPerBatch(8);
         properties.getReview().setMaxHunkLines(24);

@@ -162,7 +162,7 @@ public class WeeklyEvidenceBuilder {
                 "known_biases", List.of(
                         "提交量不等于业务价值",
                         "Git 无法覆盖沟通、排障、设计和评审投入",
-                        "代码审查 finding 只允许归因到本周 changed regions"
+                        "代码审查 finding 只允许归因到统计窗口内 changed regions"
                 )
         );
     }

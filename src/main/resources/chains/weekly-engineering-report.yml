@@ -1,4 +1,4 @@
-# 周度工程报告链路。只读取本周 Git 代码改动，并由本链路即时生成代码审查和周报产物。
+# 周度工程报告链路。按 startday/endday 指定的任意统计窗口读取 Git 代码改动，并由本链路即时生成代码审查和周报产物。
 
 project:
   id: "upfs-production"
@@ -7,6 +7,9 @@ project:
 
 paths:
   out: "/home/wangyufeng/reports/weekly-engineering/2026-W26"
+
+startday: "2026-06-19"
+endday: "2026-06-26"
 
 git:
   exclude:

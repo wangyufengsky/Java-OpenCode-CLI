@@ -128,7 +128,7 @@ public class WeeklyReportRenderer {
         }
         StringBuilder md = new StringBuilder("# 代码审查热点\n\n");
         if (counts.isEmpty()) {
-            md.append("本周未发现代码审查热点。\n");
+            md.append("统计窗口内未发现代码审查热点。\n");
             return md.toString();
         }
         md.append("| 文件 | 问题数 |\n| --- | ---: |\n");
@@ -159,7 +159,7 @@ public class WeeklyReportRenderer {
 
     private String renderPersonReport(PersonAggregate person) {
         StringBuilder md = new StringBuilder("# 个人周报：").append(person.author()).append("\n\n");
-        md.append("## 本周工作范围\n\n");
+        md.append("## 统计窗口工作范围\n\n");
         md.append("- 提交数：").append(number(person.authorFacts.get("commit_count"))).append("\n");
         md.append("- 去注释变更量：").append(number(person.authorFacts.get("non_comment_churn"))).append("\n");
         md.append("- Top 文件：").append(joinPaths(listOfMaps(person.authorFacts.get("top_files")))).append("\n\n");
@@ -167,7 +167,7 @@ public class WeeklyReportRenderer {
         appendFindingTable(md, person.findings);
         md.append("\n## 下周建议\n\n");
         if (person.findings.isEmpty()) {
-            md.append("本周未发现需要单独跟进的代码审查问题。\n");
+            md.append("统计窗口内未发现需要单独跟进的代码审查问题。\n");
         } else {
             md.append("- 优先处理 P0/P1 问题，并为关联 changed regions 补齐回归验证。\n");
         }
@@ -182,22 +182,22 @@ public class WeeklyReportRenderer {
         StringBuilder md = new StringBuilder("# 周度工程项目周报：").append(string(project.get("name"))).append("\n\n");
         md.append("## 项目经理周会重点\n\n");
         md.append("- 周期：").append(string(week.get("label"))).append("（").append(string(week.get("start"))).append(" 至 ").append(string(week.get("end"))).append("）\n");
-        md.append("- 本周审查批次：").append(listOfMaps(evidence.get("review_batches")).size()).append("\n");
+        md.append("- 统计窗口审查批次：").append(listOfMaps(evidence.get("review_batches")).size()).append("\n");
         md.append("- 项目状态：").append(aggregation.hasP0OrP1() ? "at_risk" : "normal").append("\n\n");
-        md.append("## 本周完成范围\n\n");
+        md.append("## 统计窗口完成范围\n\n");
         appendHotFiles(md, evidence);
         md.append("\n## 主要风险\n\n");
         appendFindingTable(md, aggregation.findings.stream().filter(row -> List.of("P0", "P1").contains(string(row.get("severity")))).toList());
         md.append("\n## 下周展望\n\n");
         md.append("- 优先关闭 P0/P1 代码审查问题。\n");
-        md.append("- 对本周热点文件安排回归验证和风险复核。\n");
+        md.append("- 对统计窗口热点文件安排回归验证和风险复核。\n");
         return md.toString();
     }
 
     private String renderTeamRiskAssessment(Map<String, Object> evidence, Aggregation aggregation) {
         StringBuilder md = new StringBuilder("# 团队贡献与风险辅助评估\n\n");
         md.append("## 团队概览\n\n");
-        md.append("本报告聚合本周 Git 改动与本链路即时代码审查结果，用于团队风险识别和辅导，不作为绩效定级。\n\n");
+        md.append("本报告聚合统计窗口内 Git 改动与本链路即时代码审查结果，用于团队风险识别和辅导，不作为绩效定级。\n\n");
         md.append("## 人员风险分布\n\n");
         md.append(renderPeopleRanking(aggregation.people.values().stream().map(PersonAggregate::rankingRow).toList()));
         md.append("\n## 高优先级问题\n\n");
@@ -210,13 +210,13 @@ public class WeeklyReportRenderer {
         StringBuilder md = new StringBuilder("# 数据质量说明\n\n");
         md.append("- 状态：").append(string(dataQuality.get("status"))).append("\n\n");
         md.append("## 已知偏差\n\n");
-        appendBullets(md, listValue(dataQuality.get("known_biases")), "本周未登记已知偏差。");
+        appendBullets(md, listValue(dataQuality.get("known_biases")), "统计窗口内未登记已知偏差。");
         return md.toString();
     }
 
     private void appendFindingTable(StringBuilder md, List<Map<String, Object>> findings) {
         if (findings.isEmpty()) {
-            md.append("本周未发现匹配条件的问题。\n");
+            md.append("统计窗口内未发现匹配条件的问题。\n");
             return;
         }
         md.append("| 级别 | 维度 | 文件 | 行号 | 人员 | 规则 | 建议 |\n");
@@ -237,7 +237,7 @@ public class WeeklyReportRenderer {
         List<Map<String, Object>> authors = listOfMaps(mapValue(evidence.get("weekly_git")).get("authors"));
         List<Map<String, Object>> files = authors.stream().flatMap(author -> listOfMaps(author.get("top_files")).stream()).toList();
         if (files.isEmpty()) {
-            md.append("本周未发现可汇总的代码改动文件。\n");
+            md.append("统计窗口内未发现可汇总的代码改动文件。\n");
             return;
         }
         md.append("| 文件 | 去注释变更量 |\n| --- | ---: |\n");
@@ -255,7 +255,7 @@ public class WeeklyReportRenderer {
     }
 
     private String joinPaths(List<Map<String, Object>> rows) {
-        return rows.stream().map(row -> string(row.get("path"))).filter(value -> !value.isBlank()).reduce((left, right) -> left + ", " + right).orElse("本周未发现");
+        return rows.stream().map(row -> string(row.get("path"))).filter(value -> !value.isBlank()).reduce((left, right) -> left + ", " + right).orElse("统计窗口内未发现");
     }
 
     private int severityOrder(String severity) {

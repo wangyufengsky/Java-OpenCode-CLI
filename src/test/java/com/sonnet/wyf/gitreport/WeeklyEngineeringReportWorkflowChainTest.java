@@ -101,10 +101,8 @@ class WeeklyEngineeringReportWorkflowChainTest {
                   repo: "%s"
                 paths:
                   out: "%s"
-                week:
-                  start: "2000-01-01"
-                  end: "2099-12-31"
-                  label: "test-week"
+                startday: "2000-01-01"
+                endday: "2099-12-31"
                 git:
                   exclude:
                     - "target/**"

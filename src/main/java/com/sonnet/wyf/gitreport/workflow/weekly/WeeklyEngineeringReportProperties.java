@@ -14,6 +14,8 @@ public class WeeklyEngineeringReportProperties {
     private final Project project = new Project();
     private final Paths paths = new Paths();
     private final Week week = new Week();
+    private LocalDate startday;
+    private LocalDate endday;
     private final Git git = new Git();
     private final Review review = new Review();
     private final GitReportProperties.OpenCode opencode = new GitReportProperties.OpenCode();
@@ -30,6 +32,22 @@ public class WeeklyEngineeringReportProperties {
         return week;
     }
 
+    public LocalDate getStartday() {
+        return startday;
+    }
+
+    public void setStartday(LocalDate startday) {
+        this.startday = startday;
+    }
+
+    public LocalDate getEndday() {
+        return endday;
+    }
+
+    public void setEndday(LocalDate endday) {
+        this.endday = endday;
+    }
+
     public Git getGit() {
         return git;
     }
@@ -43,6 +61,10 @@ public class WeeklyEngineeringReportProperties {
     }
 
     public LocalDate effectiveWeekStart(LocalDate runDate) {
+        validateExplicitPeriod();
+        if (startday != null) {
+            return startday;
+        }
         if (week.start != null) {
             return week.start;
         }
@@ -51,6 +73,10 @@ public class WeeklyEngineeringReportProperties {
     }
 
     public LocalDate effectiveWeekEnd(LocalDate runDate) {
+        validateExplicitPeriod();
+        if (endday != null) {
+            return endday;
+        }
         if (week.end != null) {
             return week.end;
         }
@@ -58,12 +84,26 @@ public class WeeklyEngineeringReportProperties {
     }
 
     public String effectiveWeekLabel(LocalDate runDate) {
+        validateExplicitPeriod();
         if (week.label != null && !week.label.isBlank()) {
             return week.label;
         }
         LocalDate start = effectiveWeekStart(runDate);
+        LocalDate end = effectiveWeekEnd(runDate);
+        if (startday != null || endday != null || week.start != null || week.end != null) {
+            return start + "_to_" + end;
+        }
         WeekFields fields = WeekFields.ISO;
         return "%d-W%02d".formatted(start.get(fields.weekBasedYear()), start.get(fields.weekOfWeekBasedYear()));
+    }
+
+    private void validateExplicitPeriod() {
+        if ((startday == null) != (endday == null)) {
+            throw new IllegalArgumentException("weekly-engineering-report startday and endday must be configured together");
+        }
+        if (startday != null && endday.isBefore(startday)) {
+            throw new IllegalArgumentException("weekly-engineering-report endday must not be before startday");
+        }
     }
 
     public static class Project {
