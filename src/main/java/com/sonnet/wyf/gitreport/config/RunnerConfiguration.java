@@ -7,6 +7,7 @@ import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
+import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
@@ -21,6 +22,10 @@ import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderOutput
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderPreparation;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEngineeringReportWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceBuilder;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceValidator;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyReportRenderer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
@@ -67,6 +72,21 @@ public class RunnerConfiguration {
     @Bean
     SmartEsbCodeReaderOutputValidator smartEsbCodeReaderOutputValidator(ObjectMapper objectMapper) {
         return new SmartEsbCodeReaderOutputValidator(objectMapper);
+    }
+
+    @Bean
+    WeeklyEvidenceBuilder weeklyEvidenceBuilder(ObjectMapper objectMapper, GitReportPreparation gitReportPreparation) {
+        return new WeeklyEvidenceBuilder(objectMapper, gitReportPreparation);
+    }
+
+    @Bean
+    WeeklyEvidenceValidator weeklyEvidenceValidator(ObjectMapper objectMapper) {
+        return new WeeklyEvidenceValidator(objectMapper);
+    }
+
+    @Bean
+    WeeklyReportRenderer weeklyReportRenderer(ObjectMapper objectMapper) {
+        return new WeeklyReportRenderer(objectMapper);
     }
 
     @Bean
@@ -129,6 +149,23 @@ public class RunnerConfiguration {
                 objectMapper,
                 outputCompletionGate,
                 concurrentWorkflowTaskRunner
+        );
+    }
+
+    @Bean
+    WorkflowChain weeklyEngineeringReportWorkflowChain(
+            ChainConfigLoader chainConfigLoader,
+            OpenCodeRunnerProperties runnerProperties,
+            WeeklyEvidenceBuilder evidenceBuilder,
+            WeeklyEvidenceValidator evidenceValidator,
+            WeeklyReportRenderer reportRenderer
+    ) {
+        return new WeeklyEngineeringReportWorkflowChain(
+                chainConfigLoader,
+                runnerProperties,
+                evidenceBuilder,
+                evidenceValidator,
+                reportRenderer
         );
     }
 
