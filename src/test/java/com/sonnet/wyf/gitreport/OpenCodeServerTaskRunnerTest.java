@@ -219,7 +219,8 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
-    void recordsTimeoutWithoutAbortWhenUsingOpenCodeV2Api() throws Exception {
+    void abortsSessionWhenPollingTimesOut() throws Exception {
+        AtomicInteger abortRequests = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"timeout-session\"}"));
         server.createContext("/session/timeout-session/prompt_async", exchange -> respond(exchange, 204, ""));
@@ -229,6 +230,10 @@ class OpenCodeServerTaskRunnerTest {
                     {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[],"time":{"created":2}}
                 ]
                 """));
+        server.createContext("/session/timeout-session/abort", exchange -> {
+            abortRequests.incrementAndGet();
+            respond(exchange, 204, "");
+        });
         server.start();
 
         Path promptFile = tempDir.resolve("worker-prompt.md");
@@ -252,7 +257,8 @@ class OpenCodeServerTaskRunnerTest {
         );
 
         assertThat(result.timedOut()).isTrue();
-        assertThat(result.aborted()).isFalse();
+        assertThat(result.aborted()).isTrue();
+        assertThat(abortRequests).hasValue(1);
     }
 
     @Test

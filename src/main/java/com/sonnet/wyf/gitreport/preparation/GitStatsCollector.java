@@ -150,12 +150,30 @@ public class GitStatsCollector {
             if (parts.length < 3 || "-".equals(parts[0]) || "-".equals(parts[1])) {
                 continue;
             }
-            String path = parts[parts.length - 1];
+            String path = normalizeNumstatPath(parts[parts.length - 1]);
             if (filter.isCounted(path)) {
                 rows.add(Map.of("added", Integer.parseInt(parts[0]), "deleted", Integer.parseInt(parts[1]), "path", path));
             }
         }
         return rows;
+    }
+
+    private String normalizeNumstatPath(String path) {
+        if (path == null || !path.contains(" => ")) {
+            return path;
+        }
+        int openBrace = path.indexOf('{');
+        int closeBrace = path.indexOf('}', openBrace + 1);
+        if (openBrace >= 0 && closeBrace > openBrace) {
+            String prefix = path.substring(0, openBrace);
+            String suffix = path.substring(closeBrace + 1);
+            String[] renameParts = path.substring(openBrace + 1, closeBrace).split(" => ", 2);
+            if (renameParts.length == 2) {
+                return prefix + renameParts[1] + suffix;
+            }
+        }
+        String[] renameParts = path.split(" => ", 2);
+        return renameParts.length == 2 ? renameParts[1] : path;
     }
 
     private List<Map<String, Object>> parseChangedRegions(Path repo, String commitHash, FileScopeFilter filter, int maxHunkLines) throws Exception {

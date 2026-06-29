@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -85,6 +86,13 @@ class OpenCodeServerClientTest {
                     ]
                     """);
         });
+        server.createContext("/session/session-1/abort", exchange -> {
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
+            respond(exchange, 204, "");
+        });
         server.start();
 
         URI serverUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
@@ -95,12 +103,13 @@ class OpenCodeServerClientTest {
         client.sendPromptAsync(serverUrl, tempDir, session.id(), "hello prompt", "spdb-new-api/minimax-m2.7", 60);
         waitUntil(() -> requests.stream().anyMatch(request -> request.startsWith("POST /session/session-1/prompt_async")));
         assertThat(client.getSessionStatus(serverUrl, tempDir, session.id())).isEqualTo("idle");
-        assertThat(client.abortSession(serverUrl, tempDir, session.id())).isFalse();
+        assertThat(client.abortSession(serverUrl, tempDir, session.id())).isTrue();
 
         assertThat(requests).containsExactly(
                 "POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize() + " titlePrefix=true titleChanged=true modelProvider=spdb-new-api modelId=minimax-m2.7 hasPromptModelId=false",
                 "POST /session/session-1/prompt_async query=null directoryHeader=" + tempDir.toAbsolutePath().normalize() + " text=hello prompt modelProvider=spdb-new-api modelId=minimax-m2.7",
-                "GET /session/session-1/message query=limit=100 directoryHeader=" + tempDir.toAbsolutePath().normalize()
+                "GET /session/session-1/message query=limit=100 directoryHeader=" + tempDir.toAbsolutePath().normalize(),
+                "POST /session/session-1/abort query=directory=" + queryEncode(tempDir.toAbsolutePath().normalize().toString()) + " directoryHeader=" + tempDir.toAbsolutePath().normalize()
         );
     }
 
@@ -311,5 +320,9 @@ class OpenCodeServerClientTest {
             sleep(20);
         }
         throw new AssertionError("condition was not met before timeout");
+    }
+
+    private String queryEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 }

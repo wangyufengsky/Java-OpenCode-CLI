@@ -408,7 +408,39 @@ public class OpenCodeServerClient {
     }
 
     public boolean abortSession(URI serverUrl, Path repo, String sessionId) {
-        return false;
+        String directory = repo.toAbsolutePath().normalize().toString();
+        HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/" + pathEncode(sessionId) + "/abort", "directory=" + queryEncode(directory)))
+                .timeout(Duration.ofSeconds(10))
+                .header(DIRECTORY_HEADER, directory)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                boolean aborted = response.body() == null || response.body().isBlank() || objectMapper.readTree(response.body()).asBoolean(true);
+                log.info("OpenCode session abort request succeeded: endpoint={}, sessionId={}, status={}",
+                        request.uri(),
+                        sessionId,
+                        response.statusCode());
+                return aborted;
+            }
+            log.warn("OpenCode session abort request failed: endpoint={}, sessionId={}, status={}, body={}",
+                    request.uri(),
+                    sessionId,
+                    response.statusCode(),
+                    response.body());
+            return false;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            log.warn("OpenCode session abort request interrupted: endpoint={}, sessionId={}", request.uri(), sessionId);
+            return false;
+        } catch (IOException | RuntimeException exception) {
+            log.warn("OpenCode session abort request failed: endpoint={}, sessionId={}, reason={}",
+                    request.uri(),
+                    sessionId,
+                    exception.toString());
+            return false;
+        }
     }
 
     private JsonNode sendJson(HttpRequest request) throws IOException, InterruptedException {
