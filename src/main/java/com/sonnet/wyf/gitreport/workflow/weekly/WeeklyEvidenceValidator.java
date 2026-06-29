@@ -15,11 +15,8 @@ public class WeeklyEvidenceValidator {
             "week",
             "project",
             "source_runs",
-            "project_weekly",
-            "team_risk",
-            "people",
-            "risks",
-            "action_items",
+            "weekly_git",
+            "review_batches",
             "data_quality"
     );
 
@@ -42,12 +39,12 @@ public class WeeklyEvidenceValidator {
         if (!WeeklyEvidenceBuilder.SCHEMA_VERSION.equals(root.get("schema_version"))) {
             throw new IllegalStateException("weekly evidence schema_version mismatch: " + root.get("schema_version"));
         }
-        for (String field : List.of("people", "risks", "action_items")) {
+        for (String field : List.of("review_batches")) {
             if (!(root.get(field) instanceof List<?>)) {
                 throw new IllegalStateException("weekly evidence field must be array: " + field);
             }
         }
-        for (String field : List.of("week", "project", "source_runs", "project_weekly", "team_risk", "data_quality")) {
+        for (String field : List.of("week", "project", "source_runs", "weekly_git", "data_quality")) {
             if (!(root.get(field) instanceof Map<?, ?>)) {
                 throw new IllegalStateException("weekly evidence field must be object: " + field);
             }

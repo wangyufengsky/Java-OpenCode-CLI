@@ -6,107 +6,202 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 public class WeeklyReportRenderer {
     private final ObjectMapper objectMapper;
+    private final WeeklyCodeReviewOutputValidator reviewOutputValidator;
 
     public WeeklyReportRenderer(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        this.reviewOutputValidator = new WeeklyCodeReviewOutputValidator(objectMapper);
     }
 
     public void render(Path evidencePath) throws IOException {
         Map<String, Object> evidence = objectMapper.readValue(evidencePath.toFile(), new TypeReference<>() {});
         Path out = evidencePath.toAbsolutePath().normalize().getParent();
         Files.createDirectories(out);
-        Files.writeString(out.resolve("weekly-report.md"), renderWeeklyReport(evidence));
-        Files.writeString(out.resolve("team-risk-assessment.md"), renderTeamRiskAssessment(evidence));
-        Files.writeString(out.resolve("action-items.md"), renderActionItems(evidence));
-        Files.writeString(out.resolve("risk-register.md"), renderRiskRegister(evidence));
+        Aggregation aggregation = aggregate(evidence);
+        writeCodeReviewReports(out, evidence, aggregation);
+        writePeopleReports(out, evidence, aggregation);
+        writeFinalReports(out, evidence, aggregation);
         Files.writeString(out.resolve("data-quality.md"), renderDataQuality(evidence));
-        for (Map<String, Object> person : listOfMaps(evidence.get("people"))) {
-            String authorKey = firstNonBlank(string(person.get("author_key")), "unknown");
-            Path personDir = out.resolve("people").resolve(authorKey);
+    }
+
+    private Aggregation aggregate(Map<String, Object> evidence) throws IOException {
+        Aggregation aggregation = new Aggregation();
+        for (Map<String, Object> batch : listOfMaps(evidence.get("review_batches"))) {
+            Path summaryPath = Path.of(string(batch.get("summary_json")));
+            var validation = reviewOutputValidator.validate(batch, summaryPath);
+            if (!validation.ok()) {
+                throw new IllegalStateException("review batch output incomplete: " + string(batch.get("batch_id")) + ": " + validation.error());
+            }
+            Map<String, Object> summary = objectMapper.readValue(summaryPath.toFile(), new TypeReference<>() {});
+            aggregation.batchSummaries.add(summary);
+            aggregation.findings.addAll(listOfMaps(summary.get("findings")));
+            for (Map<String, Object> region : listOfMaps(batch.get("changed_regions"))) {
+                aggregation.regionsById.put(string(region.get("region_id")), region);
+            }
+        }
+        for (Map<String, Object> author : listOfMaps(mapValue(evidence.get("weekly_git")).get("authors"))) {
+            aggregation.people.put(string(author.get("author_key")), new PersonAggregate(author));
+        }
+        for (Map<String, Object> finding : aggregation.findings) {
+            String authorKey = string(finding.get("author_key"));
+            aggregation.people.computeIfAbsent(authorKey, ignored -> new PersonAggregate(Map.of("author_key", authorKey, "author", authorKey)))
+                    .findings.add(finding);
+        }
+        aggregation.rankPeople();
+        return aggregation;
+    }
+
+    private void writeCodeReviewReports(Path out, Map<String, Object> evidence, Aggregation aggregation) throws IOException {
+        Path dir = out.resolve("code-review");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("overview.md"), renderCodeReviewOverview(evidence, aggregation));
+        Files.writeString(dir.resolve("p0-p1-p2-issues.md"), renderP0P1P2Issues(aggregation));
+        Files.writeString(dir.resolve("code-standards.md"), renderCodeStandards(aggregation));
+        Files.writeString(dir.resolve("hotspots.md"), renderHotspots(aggregation));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("index.json").toFile(), Map.of(
+                "schema_version", "weekly-code-review-index/v1",
+                "finding_count", aggregation.findings.size(),
+                "findings", aggregation.findings,
+                "batch_summaries", aggregation.batchSummaries
+        ));
+    }
+
+    private void writePeopleReports(Path out, Map<String, Object> evidence, Aggregation aggregation) throws IOException {
+        List<Map<String, Object>> rankings = aggregation.people.values().stream().map(PersonAggregate::rankingRow).toList();
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("quality-scores.json").toFile(), Map.of(
+                "schema_version", "weekly-quality-scores/v1",
+                "rankings", rankings
+        ));
+        Files.writeString(out.resolve("people-ranking.md"), renderPeopleRanking(rankings));
+        for (PersonAggregate person : aggregation.people.values()) {
+            Path personDir = out.resolve("people").resolve(firstNonBlank(person.authorKey(), "unknown"));
             Files.createDirectories(personDir);
             Files.writeString(personDir.resolve("weekly-person-report.md"), renderPersonReport(person));
         }
     }
 
-    private String renderWeeklyReport(Map<String, Object> evidence) {
+    private void writeFinalReports(Path out, Map<String, Object> evidence, Aggregation aggregation) throws IOException {
+        Files.writeString(out.resolve("weekly-report.md"), renderWeeklyReport(evidence, aggregation));
+        Files.writeString(out.resolve("team-risk-assessment.md"), renderTeamRiskAssessment(evidence, aggregation));
+    }
+
+    private String renderCodeReviewOverview(Map<String, Object> evidence, Aggregation aggregation) {
         Map<String, Object> project = mapValue(evidence.get("project"));
         Map<String, Object> week = mapValue(evidence.get("week"));
-        Map<String, Object> weekly = mapValue(evidence.get("project_weekly"));
-        StringBuilder md = new StringBuilder();
-        md.append("# 周度工程项目周报：").append(string(project.get("name"))).append("\n\n");
-        md.append("## 项目经理周会重点\n\n");
+        StringBuilder md = new StringBuilder("# 代码维度审查总览：").append(string(project.get("name"))).append("\n\n");
         md.append("- 周期：").append(string(week.get("label"))).append("（").append(string(week.get("start"))).append(" 至 ").append(string(week.get("end"))).append("）\n");
-        md.append("- 项目状态：").append(string(weekly.get("overall_status"))).append("\n");
-        md.append("- 摘要：").append(firstNonBlank(string(weekly.get("executive_summary")), "本周暂无项目摘要。")).append("\n\n");
-        md.append("## 本周完成范围\n\n");
-        appendScopeTable(md, listOfMaps(weekly.get("completed_scope")));
-        md.append("\n## 交付风险\n\n");
-        appendRiskTable(md, listOfMaps(weekly.get("delivery_risks")));
-        md.append("\n## 下周建议\n\n");
-        appendBullets(md, listValue(weekly.get("next_week_plan_suggestions")), "本周未发现需要项目经理协调的下周建议。");
+        md.append("- 审查批次：").append(listOfMaps(evidence.get("review_batches")).size()).append("\n");
+        md.append("- 问题总数：").append(aggregation.findings.size()).append("\n\n");
+        appendFindingTable(md, aggregation.findings);
         return md.toString();
     }
 
-    private String renderTeamRiskAssessment(Map<String, Object> evidence) {
-        Map<String, Object> teamRisk = mapValue(evidence.get("team_risk"));
-        StringBuilder md = new StringBuilder();
-        md.append("# 团队贡献与风险辅助评估\n\n");
-        md.append("## 团队概览\n\n").append(firstNonBlank(string(teamRisk.get("team_summary")), "本周暂无团队风险摘要。")).append("\n\n");
-        md.append("## 贡献分布\n\n");
-        List<Map<String, Object>> distribution = listOfMaps(teamRisk.get("contribution_distribution"));
-        if (distribution.isEmpty()) {
-            md.append("本周未发现可汇总的人员贡献证据。\n");
-        } else {
-            md.append("| 人员 | 主要区域 | 提交数 | 去注释变更量 | 文件数 | 说明 |\n");
-            md.append("| --- | --- | ---: | ---: | ---: | --- |\n");
-            for (Map<String, Object> row : distribution) {
-                Map<String, Object> workload = mapValue(row.get("workload_evidence"));
-                md.append("| ").append(cell(row.get("author")))
-                        .append(" | ").append(cell(join(listValue(row.get("primary_areas")))))
-                        .append(" | ").append(number(workload.get("commit_count")))
-                        .append(" | ").append(number(workload.get("non_comment_churn")))
-                        .append(" | ").append(number(workload.get("changed_files")))
-                        .append(" | ").append(cell(row.get("interpretation")))
-                        .append(" |\n");
-            }
+    private String renderP0P1P2Issues(Aggregation aggregation) {
+        StringBuilder md = new StringBuilder("# P0/P1/P2 级别问题报告\n\n");
+        appendFindingTable(md, aggregation.findings.stream()
+                .sorted(Comparator.comparingInt(row -> severityOrder(string(row.get("severity")))))
+                .toList());
+        return md.toString();
+    }
+
+    private String renderCodeStandards(Aggregation aggregation) {
+        StringBuilder md = new StringBuilder("# 代码规范报告\n\n");
+        appendFindingTable(md, aggregation.findings.stream()
+                .filter(row -> "code_standard".equals(string(row.get("dimension"))))
+                .toList());
+        return md.toString();
+    }
+
+    private String renderHotspots(Aggregation aggregation) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Map<String, Object> finding : aggregation.findings) {
+            counts.put(string(finding.get("file")), counts.getOrDefault(string(finding.get("file")), 0) + 1);
         }
-        md.append("\n## 风险集中\n\n");
-        appendRiskConcentration(md, listOfMaps(teamRisk.get("risk_concentration")));
-        md.append("\n## Review 建议\n\n");
-        appendBullets(md, listValue(teamRisk.get("review_recommendations")), "本周未发现需要升级的 review 建议。");
-        return md.toString();
-    }
-
-    private String renderActionItems(Map<String, Object> evidence) {
-        StringBuilder md = new StringBuilder("# 行动项清单\n\n");
-        List<Map<String, Object>> actions = listOfMaps(evidence.get("action_items"));
-        if (actions.isEmpty()) {
-            md.append("本周未发现需要登记的行动项。\n");
+        StringBuilder md = new StringBuilder("# 代码审查热点\n\n");
+        if (counts.isEmpty()) {
+            md.append("本周未发现代码审查热点。\n");
             return md.toString();
         }
-        md.append("| ID | 受众 | 优先级 | 标题 | 完成定义 | 证据 |\n");
-        md.append("| --- | --- | --- | --- | --- | --- |\n");
-        for (Map<String, Object> action : actions) {
-            md.append("| ").append(cell(action.get("action_id")))
-                    .append(" | ").append(cell(action.get("audience")))
-                    .append(" | ").append(cell(action.get("priority")))
-                    .append(" | ").append(cell(action.get("title")))
-                    .append(" | ").append(cell(action.get("done_definition")))
-                    .append(" | ").append(cell(join(listValue(action.get("evidence_refs")))))
+        md.append("| 文件 | 问题数 |\n| --- | ---: |\n");
+        counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .forEach(entry -> md.append("| ").append(cell(entry.getKey())).append(" | ").append(entry.getValue()).append(" |\n"));
+        return md.toString();
+    }
+
+    private String renderPeopleRanking(List<Map<String, Object>> rankings) {
+        StringBuilder md = new StringBuilder("# 人员周度代码报告排名\n\n");
+        md.append("| 最终排名 | 初始排名 | 人员 | 工作量分 | 质量调整 | 最终分 | P0 | P1 | P2 |\n");
+        md.append("| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+        for (Map<String, Object> row : rankings) {
+            md.append("| ").append(number(row.get("final_rank")))
+                    .append(" | ").append(number(row.get("base_rank")))
+                    .append(" | ").append(cell(row.get("author")))
+                    .append(" | ").append(decimal(row.get("base_workload_score")))
+                    .append(" | ").append(decimal(row.get("quality_adjustment_percent")))
+                    .append(" | ").append(decimal(row.get("workload_score")))
+                    .append(" | ").append(number(row.get("p0_count")))
+                    .append(" | ").append(number(row.get("p1_count")))
+                    .append(" | ").append(number(row.get("p2_count")))
                     .append(" |\n");
         }
         return md.toString();
     }
 
-    private String renderRiskRegister(Map<String, Object> evidence) {
-        StringBuilder md = new StringBuilder("# 风险登记表\n\n");
-        appendRiskTable(md, listOfMaps(evidence.get("risks")));
+    private String renderPersonReport(PersonAggregate person) {
+        StringBuilder md = new StringBuilder("# 个人周报：").append(person.author()).append("\n\n");
+        md.append("## 本周工作范围\n\n");
+        md.append("- 提交数：").append(number(person.authorFacts.get("commit_count"))).append("\n");
+        md.append("- 去注释变更量：").append(number(person.authorFacts.get("non_comment_churn"))).append("\n");
+        md.append("- Top 文件：").append(joinPaths(listOfMaps(person.authorFacts.get("top_files")))).append("\n\n");
+        md.append("## 代码审查问题\n\n");
+        appendFindingTable(md, person.findings);
+        md.append("\n## 下周建议\n\n");
+        if (person.findings.isEmpty()) {
+            md.append("本周未发现需要单独跟进的代码审查问题。\n");
+        } else {
+            md.append("- 优先处理 P0/P1 问题，并为关联 changed regions 补齐回归验证。\n");
+        }
+        md.append("\n## 证据边界\n\n");
+        md.append("仅作为研发负责人 1:1、辅导和绩效校准的证据包，不直接给出绩效结论。\n");
+        return md.toString();
+    }
+
+    private String renderWeeklyReport(Map<String, Object> evidence, Aggregation aggregation) {
+        Map<String, Object> project = mapValue(evidence.get("project"));
+        Map<String, Object> week = mapValue(evidence.get("week"));
+        StringBuilder md = new StringBuilder("# 周度工程项目周报：").append(string(project.get("name"))).append("\n\n");
+        md.append("## 项目经理周会重点\n\n");
+        md.append("- 周期：").append(string(week.get("label"))).append("（").append(string(week.get("start"))).append(" 至 ").append(string(week.get("end"))).append("）\n");
+        md.append("- 本周审查批次：").append(listOfMaps(evidence.get("review_batches")).size()).append("\n");
+        md.append("- 项目状态：").append(aggregation.hasP0OrP1() ? "at_risk" : "normal").append("\n\n");
+        md.append("## 本周完成范围\n\n");
+        appendHotFiles(md, evidence);
+        md.append("\n## 主要风险\n\n");
+        appendFindingTable(md, aggregation.findings.stream().filter(row -> List.of("P0", "P1").contains(string(row.get("severity")))).toList());
+        md.append("\n## 下周展望\n\n");
+        md.append("- 优先关闭 P0/P1 代码审查问题。\n");
+        md.append("- 对本周热点文件安排回归验证和风险复核。\n");
+        return md.toString();
+    }
+
+    private String renderTeamRiskAssessment(Map<String, Object> evidence, Aggregation aggregation) {
+        StringBuilder md = new StringBuilder("# 团队贡献与风险辅助评估\n\n");
+        md.append("## 团队概览\n\n");
+        md.append("本报告聚合本周 Git 改动与本链路即时代码审查结果，用于团队风险识别和辅导，不作为绩效定级。\n\n");
+        md.append("## 人员风险分布\n\n");
+        md.append(renderPeopleRanking(aggregation.people.values().stream().map(PersonAggregate::rankingRow).toList()));
+        md.append("\n## 高优先级问题\n\n");
+        appendFindingTable(md, aggregation.findings.stream().filter(row -> List.of("P0", "P1").contains(string(row.get("severity")))).toList());
         return md.toString();
     }
 
@@ -114,117 +209,39 @@ public class WeeklyReportRenderer {
         Map<String, Object> dataQuality = mapValue(evidence.get("data_quality"));
         StringBuilder md = new StringBuilder("# 数据质量说明\n\n");
         md.append("- 状态：").append(string(dataQuality.get("status"))).append("\n\n");
-        md.append("## 问题\n\n");
-        List<Map<String, Object>> issues = listOfMaps(dataQuality.get("issues"));
-        if (issues.isEmpty()) {
-            md.append("本周未发现数据质量问题。\n");
-        } else {
-            md.append("| 来源 | 级别 | 信息 | 影响 |\n| --- | --- | --- | --- |\n");
-            for (Map<String, Object> issue : issues) {
-                md.append("| ").append(cell(issue.get("source")))
-                        .append(" | ").append(cell(issue.get("severity")))
-                        .append(" | ").append(cell(issue.get("message")))
-                        .append(" | ").append(cell(issue.get("impact")))
-                        .append(" |\n");
-            }
-        }
-        md.append("\n## 已知偏差\n\n");
+        md.append("## 已知偏差\n\n");
         appendBullets(md, listValue(dataQuality.get("known_biases")), "本周未登记已知偏差。");
         return md.toString();
     }
 
-    private String renderPersonReport(Map<String, Object> person) {
-        StringBuilder md = new StringBuilder();
-        md.append("# 个人周报：").append(string(person.get("author"))).append("\n\n");
-        md.append("## 本周工作范围\n\n");
-        Map<String, Object> scope = mapValue(person.get("work_scope"));
-        md.append("- 工作类型：").append(firstNonBlank(join(listValue(scope.get("work_types"))), "本周未发现")).append("\n");
-        md.append("- Top 文件：").append(firstNonBlank(joinPaths(listOfMaps(scope.get("top_files"))), "本周未发现")).append("\n");
-        md.append("- 提交：").append(firstNonBlank(joinCommitSubjects(listOfMaps(scope.get("commits"))), "本周未发现")).append("\n\n");
-        md.append("## 贡献亮点\n\n");
-        appendTitledItems(md, listOfMaps(person.get("contribution_highlights")), "本周未发现可汇总的贡献亮点。");
-        md.append("\n## 质量信号\n\n");
-        Map<String, Object> quality = mapValue(person.get("quality_signals"));
-        md.append("正向信号：\n");
-        appendBullets(md, listValue(quality.get("positive")), "本周未发现。");
-        md.append("\n风险信号：\n");
-        appendBullets(md, listValue(quality.get("risks")), "本周未发现。");
-        md.append("\n未验证项：\n");
-        appendBullets(md, listValue(quality.get("unverified")), "本周未发现。");
-        md.append("\n## 下周建议\n\n");
-        appendSuggestions(md, listOfMaps(person.get("next_week_suggestions")));
-        md.append("\n## 证据边界\n\n");
-        md.append(firstNonBlank(string(person.get("assessment_boundary")), "仅作为研发负责人 1:1、辅导和绩效校准的证据包，不直接给出绩效结论。")).append("\n");
-        return md.toString();
-    }
-
-    private void appendScopeTable(StringBuilder md, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
-            md.append("本周未发现已完成范围。\n");
+    private void appendFindingTable(StringBuilder md, List<Map<String, Object>> findings) {
+        if (findings.isEmpty()) {
+            md.append("本周未发现匹配条件的问题。\n");
             return;
         }
-        md.append("| 类型 | 名称 | 说明 | 证据 |\n| --- | --- | --- | --- |\n");
-        for (Map<String, Object> row : rows) {
-            md.append("| ").append(cell(row.get("type")))
-                    .append(" | ").append(cell(row.get("name")))
-                    .append(" | ").append(cell(row.get("description")))
-                    .append(" | ").append(cell(join(listValue(row.get("evidence_refs")))))
+        md.append("| 级别 | 维度 | 文件 | 行号 | 人员 | 规则 | 建议 |\n");
+        md.append("| --- | --- | --- | --- | --- | --- | --- |\n");
+        for (Map<String, Object> finding : findings) {
+            md.append("| ").append(cell(finding.get("severity")))
+                    .append(" | ").append(cell(finding.get("dimension")))
+                    .append(" | ").append(cell(finding.get("file")))
+                    .append(" | ").append(number(finding.get("line_start"))).append("-").append(number(finding.get("line_end")))
+                    .append(" | ").append(cell(finding.get("author_key")))
+                    .append(" | ").append(cell(finding.get("rule_id")))
+                    .append(" | ").append(cell(finding.get("suggestion")))
                     .append(" |\n");
         }
     }
 
-    private void appendRiskTable(StringBuilder md, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
-            md.append("本周未发现需要登记的风险。\n");
+    private void appendHotFiles(StringBuilder md, Map<String, Object> evidence) {
+        List<Map<String, Object>> authors = listOfMaps(mapValue(evidence.get("weekly_git")).get("authors"));
+        List<Map<String, Object>> files = authors.stream().flatMap(author -> listOfMaps(author.get("top_files")).stream()).toList();
+        if (files.isEmpty()) {
+            md.append("本周未发现可汇总的代码改动文件。\n");
             return;
         }
-        md.append("| ID | 级别 | 标题 | 影响 | 建议 |\n| --- | --- | --- | --- | --- |\n");
-        for (Map<String, Object> row : rows) {
-            md.append("| ").append(cell(firstNonBlank(string(row.get("risk_id")), string(row.get("id")))))
-                    .append(" | ").append(cell(row.get("severity")))
-                    .append(" | ").append(cell(row.get("title")))
-                    .append(" | ").append(cell(row.get("impact")))
-                    .append(" | ").append(cell(row.get("recommended_action")))
-                    .append(" |\n");
-        }
-    }
-
-    private void appendRiskConcentration(StringBuilder md, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
-            md.append("本周未发现团队风险集中项。\n");
-            return;
-        }
-        md.append("| 类型 | 目标 | 级别 | 建议 | 证据 |\n| --- | --- | --- | --- | --- |\n");
-        for (Map<String, Object> row : rows) {
-            md.append("| ").append(cell(row.get("type")))
-                    .append(" | ").append(cell(row.get("target")))
-                    .append(" | ").append(cell(row.get("severity")))
-                    .append(" | ").append(cell(row.get("recommendation")))
-                    .append(" | ").append(cell(join(listValue(row.get("evidence_refs")))))
-                    .append(" |\n");
-        }
-    }
-
-    private void appendTitledItems(StringBuilder md, List<Map<String, Object>> rows, String empty) {
-        if (rows.isEmpty()) {
-            md.append(empty).append("\n");
-            return;
-        }
-        for (Map<String, Object> row : rows) {
-            md.append("- ").append(string(row.get("title"))).append("：").append(string(row.get("reason"))).append("\n");
-        }
-    }
-
-    private void appendSuggestions(StringBuilder md, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) {
-            md.append("本周未发现需要单独跟进的个人建议。\n");
-            return;
-        }
-        for (Map<String, Object> row : rows) {
-            md.append("- [").append(string(row.get("priority"))).append("] ")
-                    .append(string(row.get("suggestion")))
-                    .append("：").append(string(row.get("reason"))).append("\n");
-        }
+        md.append("| 文件 | 去注释变更量 |\n| --- | ---: |\n");
+        files.stream().limit(10).forEach(file -> md.append("| ").append(cell(file.get("path"))).append(" | ").append(number(file.get("non_comment_churn"))).append(" |\n"));
     }
 
     private void appendBullets(StringBuilder md, List<?> values, String empty) {
@@ -238,19 +255,15 @@ public class WeeklyReportRenderer {
     }
 
     private String joinPaths(List<Map<String, Object>> rows) {
-        return rows.stream().map(row -> string(row.get("path"))).filter(value -> !value.isBlank()).reduce((left, right) -> left + ", " + right).orElse("");
+        return rows.stream().map(row -> string(row.get("path"))).filter(value -> !value.isBlank()).reduce((left, right) -> left + ", " + right).orElse("本周未发现");
     }
 
-    private String joinCommitSubjects(List<Map<String, Object>> rows) {
-        return rows.stream()
-                .map(row -> firstNonBlank(string(row.get("short_hash")), string(row.get("hash"))) + " " + string(row.get("subject")))
-                .filter(value -> !value.isBlank())
-                .reduce((left, right) -> left + "; " + right)
-                .orElse("");
-    }
-
-    private String join(List<?> values) {
-        return values.stream().map(Objects::toString).reduce((left, right) -> left + ", " + right).orElse("");
+    private int severityOrder(String severity) {
+        return switch (severity) {
+            case "P0" -> 0;
+            case "P1" -> 1;
+            default -> 2;
+        };
     }
 
     private String cell(Object value) {
@@ -269,6 +282,10 @@ public class WeeklyReportRenderer {
         return value instanceof Number number ? number.intValue() : 0;
     }
 
+    private double decimal(Object value) {
+        return value instanceof Number number ? Math.round(number.doubleValue() * 10.0) / 10.0 : 0.0;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapValue(Object value) {
         return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
@@ -281,5 +298,78 @@ public class WeeklyReportRenderer {
 
     private List<?> listValue(Object value) {
         return value instanceof List<?> list ? list : List.of();
+    }
+
+    private static class Aggregation {
+        private final List<Map<String, Object>> batchSummaries = new ArrayList<>();
+        private final List<Map<String, Object>> findings = new ArrayList<>();
+        private final Map<String, Map<String, Object>> regionsById = new LinkedHashMap<>();
+        private final Map<String, PersonAggregate> people = new LinkedHashMap<>();
+
+        private void rankPeople() {
+            List<PersonAggregate> ranked = people.values().stream()
+                    .sorted(Comparator.comparingDouble(PersonAggregate::adjustedScore).reversed())
+                    .toList();
+            for (int index = 0; index < ranked.size(); index++) {
+                ranked.get(index).finalRank = index + 1;
+            }
+        }
+
+        private boolean hasP0OrP1() {
+            return findings.stream().anyMatch(finding -> List.of("P0", "P1").contains(Objects.toString(finding.get("severity"), "")));
+        }
+    }
+
+    private static class PersonAggregate {
+        private final Map<String, Object> authorFacts;
+        private final List<Map<String, Object>> findings = new ArrayList<>();
+        private int finalRank;
+
+        private PersonAggregate(Map<String, Object> authorFacts) {
+            this.authorFacts = authorFacts;
+        }
+
+        private String authorKey() {
+            return Objects.toString(authorFacts.get("author_key"), "");
+        }
+
+        private String author() {
+            return Objects.toString(authorFacts.get("author"), authorKey());
+        }
+
+        private double baseScore() {
+            Object value = authorFacts.get("workload_score");
+            return value instanceof Number number ? number.doubleValue() : 0.0;
+        }
+
+        private double qualityAdjustment() {
+            int p0 = count("P0");
+            int p1 = count("P1");
+            int p2 = count("P2");
+            return -(p0 * 20 + p1 * 10 + p2 * 3);
+        }
+
+        private double adjustedScore() {
+            return Math.max(0, baseScore() + qualityAdjustment());
+        }
+
+        private int count(String severity) {
+            return (int) findings.stream().filter(finding -> severity.equals(Objects.toString(finding.get("severity"), ""))).count();
+        }
+
+        private Map<String, Object> rankingRow() {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("author_key", authorKey());
+            row.put("author", author());
+            row.put("base_rank", authorFacts.getOrDefault("rank", 0));
+            row.put("final_rank", finalRank);
+            row.put("base_workload_score", baseScore());
+            row.put("quality_adjustment_percent", qualityAdjustment());
+            row.put("workload_score", adjustedScore());
+            row.put("p0_count", count("P0"));
+            row.put("p1_count", count("P1"));
+            row.put("p2_count", count("P2"));
+            return row;
+        }
     }
 }

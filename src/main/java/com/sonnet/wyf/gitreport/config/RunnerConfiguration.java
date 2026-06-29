@@ -6,6 +6,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
+import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
@@ -25,6 +26,9 @@ import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderWorkfl
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEngineeringReportWorkflowChain;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceBuilder;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceValidator;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewRunner;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyOpenCodeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyReportRenderer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -75,13 +79,29 @@ public class RunnerConfiguration {
     }
 
     @Bean
-    WeeklyEvidenceBuilder weeklyEvidenceBuilder(ObjectMapper objectMapper, GitReportPreparation gitReportPreparation) {
-        return new WeeklyEvidenceBuilder(objectMapper, gitReportPreparation);
+    WeeklyEvidenceBuilder weeklyEvidenceBuilder(ObjectMapper objectMapper, GitStatsCollector gitStatsCollector) {
+        return new WeeklyEvidenceBuilder(objectMapper, gitStatsCollector);
     }
 
     @Bean
     WeeklyEvidenceValidator weeklyEvidenceValidator(ObjectMapper objectMapper) {
         return new WeeklyEvidenceValidator(objectMapper);
+    }
+
+    @Bean
+    WeeklyCodeReviewOutputValidator weeklyCodeReviewOutputValidator(ObjectMapper objectMapper) {
+        return new WeeklyCodeReviewOutputValidator(objectMapper);
+    }
+
+    @Bean
+    WeeklyCodeReviewRunner weeklyCodeReviewRunner(
+            ObjectMapper objectMapper,
+            OpenCodeServerManager serverManager,
+            OpenCodeServerTaskRunner taskRunner,
+            ConcurrentWorkflowTaskRunner concurrentTaskRunner,
+            WeeklyCodeReviewOutputValidator outputValidator
+    ) {
+        return new WeeklyOpenCodeReviewRunner(objectMapper, serverManager, taskRunner, concurrentTaskRunner, outputValidator);
     }
 
     @Bean
@@ -158,6 +178,7 @@ public class RunnerConfiguration {
             OpenCodeRunnerProperties runnerProperties,
             WeeklyEvidenceBuilder evidenceBuilder,
             WeeklyEvidenceValidator evidenceValidator,
+            WeeklyCodeReviewRunner codeReviewRunner,
             WeeklyReportRenderer reportRenderer
     ) {
         return new WeeklyEngineeringReportWorkflowChain(
@@ -165,6 +186,7 @@ public class RunnerConfiguration {
                 runnerProperties,
                 evidenceBuilder,
                 evidenceValidator,
+                codeReviewRunner,
                 reportRenderer
         );
     }

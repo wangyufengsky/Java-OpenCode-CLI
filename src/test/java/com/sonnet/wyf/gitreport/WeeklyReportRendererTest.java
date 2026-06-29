@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WeeklyReportRendererTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -20,76 +21,114 @@ class WeeklyReportRendererTest {
     Path tempDir;
 
     @Test
-    void rendersAudienceSpecificMarkdownFromWeeklyEvidenceOnly() throws Exception {
+    void rendersCodePeopleAndFinalReportsOnlyAfterBatchReviewOutputsAreComplete() throws Exception {
         Path evidencePath = tempDir.resolve("weekly-evidence.json");
-        objectMapper.writerWithDefaultPrettyPrinter().writeValue(evidencePath.toFile(), minimalEvidence());
+        Map<String, Object> evidence = evidence();
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(evidencePath.toFile(), evidence);
+        writeBatchSummary();
 
         new WeeklyReportRenderer(objectMapper).render(evidencePath);
 
-        Path weeklyReport = tempDir.resolve("weekly-report.md");
-        Path teamRisk = tempDir.resolve("team-risk-assessment.md");
-        Path actionItems = tempDir.resolve("action-items.md");
-        Path riskRegister = tempDir.resolve("risk-register.md");
-        Path dataQuality = tempDir.resolve("data-quality.md");
-        Path personReport = tempDir.resolve("people/author-001-alice/weekly-person-report.md");
-        assertThat(weeklyReport).exists();
-        assertThat(teamRisk).exists();
-        assertThat(actionItems).exists();
-        assertThat(riskRegister).exists();
-        assertThat(dataQuality).exists();
-        assertThat(personReport).exists();
-
-        assertThat(weeklyReport).content()
-                .contains("# 周度工程项目周报：UPFS Production", "## 项目经理周会重点", "src/Foo.java")
-                .doesNotContain("final_rank", "绩效结论", "Alice <alice@example.com>");
-        assertThat(teamRisk).content()
-                .contains("# 团队贡献与风险辅助评估", "Alice <alice@example.com>", "本周 Git changed regions");
-        assertThat(personReport).content()
-                .contains("# 个人周报：Alice <alice@example.com>")
-                .contains("仅作为研发负责人 1:1、辅导和绩效校准的证据包，不直接给出绩效结论。")
+        assertThat(tempDir.resolve("code-review/overview.md")).content().contains("代码维度审查总览", "src/Foo.java");
+        assertThat(tempDir.resolve("code-review/p0-p1-p2-issues.md")).content().contains("P0/P1/P2", "P1");
+        assertThat(tempDir.resolve("code-review/code-standards.md")).content().contains("代码规范");
+        assertThat(tempDir.resolve("code-review/hotspots.md")).content().contains("热点");
+        assertThat(tempDir.resolve("code-review/index.json")).exists();
+        assertThat(tempDir.resolve("quality-scores.json")).content().contains("author-001-alice");
+        assertThat(tempDir.resolve("people-ranking.md")).content().contains("最终排名", "初始排名", "Alice <alice@example.com>");
+        assertThat(tempDir.resolve("people/author-001-alice/weekly-person-report.md")).content()
+                .contains("个人周报", "P1", "src/Foo.java")
                 .doesNotContain("优秀", "不合格");
-        assertThat(Files.readString(weeklyReport)).doesNotContain("{{");
-        assertThat(Files.readString(personReport)).doesNotContain("{{");
+        assertThat(tempDir.resolve("weekly-report.md")).content()
+                .contains("周度工程项目周报", "项目经理周会重点")
+                .doesNotContain("Alice <alice@example.com>");
+        assertThat(tempDir.resolve("team-risk-assessment.md")).content()
+                .contains("团队贡献与风险辅助评估", "Alice <alice@example.com>");
     }
 
-    private Map<String, Object> minimalEvidence() {
+    @Test
+    void refusesFinalReportsWhenBatchReviewOutputIsMissing() throws Exception {
+        Path evidencePath = tempDir.resolve("weekly-evidence.json");
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(evidencePath.toFile(), evidence());
+
+        assertThatThrownBy(() -> new WeeklyReportRenderer(objectMapper).render(evidencePath))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("review batch output incomplete");
+        assertThat(tempDir.resolve("weekly-report.md")).doesNotExist();
+        assertThat(tempDir.resolve("team-risk-assessment.md")).doesNotExist();
+    }
+
+    private Map<String, Object> evidence() {
+        String summaryJson = tempDir.resolve("review-batches/review-batch-001-src-foo-java/code-review-summary.json").toString();
+        Map<String, Object> region = new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("region_id", "region-00001"),
+                Map.entry("author_key", "author-001-alice"),
+                Map.entry("author", "Alice <alice@example.com>"),
+                Map.entry("commit", "abcdef1234567890"),
+                Map.entry("short_hash", "abcdef123456"),
+                Map.entry("file", "src/Foo.java"),
+                Map.entry("line_start", 10),
+                Map.entry("line_end", 12),
+                Map.entry("hunk", "@@ -10 +10 @@\n+return value.trim();")
+        ));
+        Map<String, Object> author = new LinkedHashMap<>();
+        author.put("rank", 1);
+        author.put("author_key", "author-001-alice");
+        author.put("author", "Alice <alice@example.com>");
+        author.put("commit_count", 2);
+        author.put("non_comment_churn", 42);
+        author.put("workload_score", 100.0);
+        author.put("top_files", List.of(Map.of("path", "src/Foo.java", "non_comment_churn", 42)));
+        author.put("commits", List.of(Map.of("short_hash", "abcdef123456", "subject", "Add parser")));
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("schema_version", "weekly-engineering-report/v1");
         root.put("generated_at", "2026-06-26T10:00:00+08:00");
         root.put("week", Map.of("start", "2026-06-22", "end", "2026-06-28", "label", "2026-W26"));
         root.put("project", Map.of("id", "upfs-production", "name", "UPFS Production", "repo", "/repo", "revision", "HEAD", "out", tempDir.toString()));
-        root.put("source_runs", Map.of(
-                        "weekly_git", Map.of("status", "generated", "summary_json", "/weekly/sources/weekly-git/summary.json")
-                ));
-        root.put("project_weekly", Map.of(
-                        "overall_status", "at_risk",
-                        "executive_summary", "本周完成消费交易审查并发现一个高优先级验证风险。",
-                        "completed_scope", List.of(Map.of("type", "code_change", "name", "src/Foo.java", "description", "Alice 本周改动", "evidence_refs", List.of("git:author-001-alice:abcdef123456"))),
-                        "scope_changes", List.of(),
-                        "delivery_risks", List.of(),
-                        "decisions_needed", List.of(),
-                        "next_week_plan_suggestions", List.of("优先补齐 CaConsume 验证证据")
-                ));
-        root.put("team_risk", Map.of(
-                        "team_summary", "团队风险集中在验证闭环。",
-                        "contribution_distribution", List.of(Map.of("author_key", "author-001-alice", "author", "Alice <alice@example.com>", "primary_areas", List.of("src/Foo.java"), "workload_evidence", Map.of("commit_count", 2, "non_comment_churn", 42, "changed_files", 3), "interpretation", "用于识别本周投入范围和协作风险，不作为绩效定级。")),
-                        "risk_concentration", List.of(),
-                        "quality_aggregate", Map.of("dimensions", Map.of(), "top_recurring_rules", List.of()),
-                        "review_recommendations", List.of("如需代码质量结论，应基于本周 Git changed regions 另行触发当周代码审查")
-                ));
-        root.put("people", List.of(Map.of(
-                        "author_key", "author-001-alice",
-                        "author", "Alice <alice@example.com>",
-                        "work_scope", Map.of("commits", List.of(Map.of("short_hash", "abcdef123456", "subject", "Add parser")), "top_files", List.of(Map.of("path", "src/Foo.java")), "transactions", List.of(), "modules", List.of(), "work_types", List.of("component")),
-                        "contribution_highlights", List.of(Map.of("title", "本周主要贡献", "reason", "完成解析链路", "evidence_refs", List.of("git-report:author-001-alice:quality-summary"))),
-                        "quality_signals", Map.of("positive", List.of("拆分公共解析逻辑"), "risks", List.of("缺少回归测试"), "unverified", List.of("未看到端到端验证记录"), "low_quality_snippets", List.of()),
-                        "collaboration_and_impact", Map.of("shared_modules_touched", List.of(), "hotspot_files_touched", List.of("src/Foo.java"), "cross_author_areas", List.of()),
-                        "next_week_suggestions", List.of(Map.of("suggestion", "补齐验证证据", "reason", "存在 unverified 项", "priority", "high")),
-                        "assessment_boundary", "仅作为研发负责人 1:1、辅导和绩效校准的证据包，不直接给出绩效结论。"
-                )));
-        root.put("risks", List.of());
-        root.put("action_items", List.of());
+        root.put("source_runs", Map.of("weekly_git", Map.of("status", "generated")));
+        root.put("weekly_git", Map.of("authors", List.of(author), "totals", Map.of("commit_count", 2)));
+        root.put("review_batches", List.of(Map.of(
+                "batch_id", "review-batch-001-src-foo-java",
+                "scope", Map.of("type", "file", "path", "src/Foo.java"),
+                "changed_regions", List.of(region),
+                "summary_json", summaryJson,
+                "review_md", tempDir.resolve("review-batches/review-batch-001-src-foo-java/code-review.md").toString()
+        )));
         root.put("data_quality", Map.of("status", "clean", "issues", List.of(), "known_biases", List.of("提交量不等于业务价值")));
         return root;
+    }
+
+    private void writeBatchSummary() throws Exception {
+        Path summary = tempDir.resolve("review-batches/review-batch-001-src-foo-java/code-review-summary.json");
+        Files.createDirectories(summary.getParent());
+        Files.writeString(tempDir.resolve("review-batches/review-batch-001-src-foo-java/code-review.md"), "# 批次代码审查\n\n发现一个 P1 可维护性问题。\n");
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("schema_version", "weekly-code-review-output/v1");
+        root.put("batch_id", "review-batch-001-src-foo-java");
+        root.put("status", "completed");
+        root.put("summary", "发现一个 P1 可维护性问题。");
+        root.put("reviewed_region_ids", List.of("region-00001"));
+        root.put("finding_counts", Map.of("P0", 0, "P1", 1, "P2", 0));
+        root.put("findings", List.of(new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("id", "F-001"),
+                Map.entry("region_id", "region-00001"),
+                Map.entry("author_key", "author-001-alice"),
+                Map.entry("commit", "abcdef1234567890"),
+                Map.entry("dimension", "maintainability"),
+                Map.entry("polarity", "negative"),
+                Map.entry("severity", "P1"),
+                Map.entry("rule_id", "null-trim-branch"),
+                Map.entry("file", "src/Foo.java"),
+                Map.entry("line_start", 10),
+                Map.entry("line_end", 12),
+                Map.entry("evidence", "提交区域内直接调用 trim，需要确认 null 分支覆盖。"),
+                Map.entry("reason", "可维护性风险。"),
+                Map.entry("suggestion", "补齐单测并拆分解析逻辑。")
+        ))));
+        root.put("positive_signals", List.of());
+        root.put("risk_signals", List.of());
+        root.put("code_snippets", List.of());
+        root.put("unverified", List.of());
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(summary.toFile(), root);
     }
 }

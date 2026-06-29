@@ -4,9 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
 import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
-import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
-import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEngineeringReportProperties;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceBuilder;
@@ -28,7 +26,7 @@ class WeeklyEvidenceBuilderTest {
     Path tempDir;
 
     @Test
-    void buildsWeeklyEvidenceFromFreshGitStats() throws Exception {
+    void buildsWeeklyGitEvidenceAndReviewBatchesWithoutGitReportArtifacts() throws Exception {
         Path repo = writeGitRepo();
         WeeklyEngineeringReportProperties properties = properties(repo, tempDir.resolve("weekly"));
 
@@ -36,7 +34,7 @@ class WeeklyEvidenceBuilderTest {
 
         Map<String, Object> evidence = readMap(evidencePath);
         assertThat(evidence.get("schema_version")).isEqualTo("weekly-engineering-report/v1");
-        assertThat(evidence).containsKeys("week", "project", "source_runs", "project_weekly", "team_risk", "people", "risks", "action_items", "data_quality");
+        assertThat(evidence).containsKeys("week", "project", "source_runs", "weekly_git", "review_batches", "data_quality");
         assertThat((Map<String, Object>) evidence.get("week"))
                 .containsEntry("start", "2000-01-01")
                 .containsEntry("end", "2099-12-31")
@@ -46,33 +44,34 @@ class WeeklyEvidenceBuilderTest {
         assertThat((Map<String, Object>) sourceRuns.get("weekly_git"))
                 .containsEntry("status", "generated");
         assertThat(sourceRuns).doesNotContainKeys("git_report", "smartesb_rewrite_review", "smartesb_code_reader");
-        assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("summary_json").toString())).exists();
+        assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("weekly_git_evidence_json").toString())).exists();
+        assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("review_batches_json").toString())).exists();
+        assertThat(properties.getPaths().getOut().resolve("sources/weekly-git/index_inputs.json")).doesNotExist();
+        assertThat(properties.getPaths().getOut().resolve("sources/weekly-git/reports")).doesNotExist();
 
-        Map<String, Object> projectWeekly = (Map<String, Object>) evidence.get("project_weekly");
-        assertThat((List<Map<String, Object>>) projectWeekly.get("completed_scope"))
-                .extracting(row -> row.get("name"))
-                .contains("src/main/java/Foo.java");
-
-        Map<String, Object> teamRisk = (Map<String, Object>) evidence.get("team_risk");
-        assertThat((List<Map<String, Object>>) teamRisk.get("contribution_distribution"))
+        Map<String, Object> weeklyGit = (Map<String, Object>) evidence.get("weekly_git");
+        assertThat((List<Map<String, Object>>) weeklyGit.get("authors"))
                 .extracting(row -> row.get("author_key"))
                 .containsExactly("author-001-alice-alice-example-com");
 
-        List<Map<String, Object>> people = (List<Map<String, Object>>) evidence.get("people");
-        assertThat(people).hasSize(1);
-        assertThat(people.get(0).get("author_key")).isEqualTo("author-001-alice-alice-example-com");
-        assertThat((List<Map<String, Object>>) people.get(0).get("contribution_highlights"))
+        List<Map<String, Object>> batches = (List<Map<String, Object>>) evidence.get("review_batches");
+        assertThat(batches).hasSize(1);
+        assertThat(batches.get(0)).containsEntry("batch_id", "review-batch-001-src-main-java-foo-java");
+        assertThat((List<Map<String, Object>>) batches.get(0).get("changed_regions"))
                 .singleElement()
-                .satisfies(highlight -> assertThat((List<String>) highlight.get("evidence_refs"))
-                        .allMatch(ref -> ref.startsWith("git:author-001-alice-alice-example-com:")));
+                .satisfies(region -> {
+                    assertThat(region).containsEntry("author_key", "author-001-alice-alice-example-com");
+                    assertThat(region).containsEntry("author", "Alice <alice@example.com>");
+                    assertThat(region.get("commit").toString()).isNotBlank();
+                    assertThat(region).containsEntry("file", "src/main/java/Foo.java");
+                    assertThat(region.get("hunk").toString()).contains("return value == null");
+                });
+
         assertThat((Map<String, Object>) evidence.get("data_quality")).containsEntry("status", "clean");
     }
 
     private WeeklyEvidenceBuilder newBuilder() {
-        return new WeeklyEvidenceBuilder(objectMapper, new GitReportPreparation(
-                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
-                new ReportPreparationWriter(objectMapper)
-        ));
+        return new WeeklyEvidenceBuilder(objectMapper, new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper));
     }
 
     private WeeklyEngineeringReportProperties properties(Path repo, Path out) {
@@ -86,6 +85,8 @@ class WeeklyEvidenceBuilderTest {
         properties.getWeek().setEnd(LocalDate.of(2099, 12, 31));
         properties.getWeek().setLabel("test-week");
         properties.getGit().setExclude(List.of("target/**", "*.lock"));
+        properties.getReview().setMaxRegionsPerBatch(8);
+        properties.getReview().setMaxHunkLines(24);
         return properties;
     }
 

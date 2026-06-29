@@ -1,5 +1,4 @@
-# 周度工程报告链路。不启动 OpenCode worker，也不读取历史审查产物。
-# 周报证据由本链路按周窗口重新统计 Git 生成，不读取 git-report 或 SmartESB 审查历史产物。
+# 周度工程报告链路。只读取本周 Git 代码改动，并由本链路即时生成代码审查和周报产物。
 
 project:
   id: "upfs-production"
@@ -13,3 +12,11 @@ git:
   exclude:
     - "target/**"
     - "*.lock"
+
+review:
+  max-regions-per-batch: 8
+  max-hunk-lines: 24
+  concurrency: 3
+
+opencode:
+  timeout-minutes: 40

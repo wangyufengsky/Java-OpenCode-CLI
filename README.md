@@ -2,12 +2,12 @@
 
 这是一个基于 Spring Boot 的 OpenCode 多链路 Runner。主应用只负责选择链路和运行方式，链路自身的业务配置放在独立 YAML 中。
 
-当前支持四条链路，其中 `weekly-engineering-report` 会按周窗口重新统计 Git 代码事实：
+当前支持四条链路，其中 `weekly-engineering-report` 会按周窗口重新统计 Git 代码事实，并对本周 changed regions 启动代码审查批次：
 
 - `git-code-contribution-report`：代码提交量统计和个人/总报告生成。
 - `smartesb-rewrite-code-review`：SmartESB 8583 到 JSON 改造审查。
 - `smartesb-code-reader`：从 serviceIdentify/XML/BIZ/Java 生成 SmartESB 模块和交易阅读索引。
-- `weekly-engineering-report`：重新生成本周 Git 证据，生成项目经理周会报告、研发负责人团队风险报告和个人证据包。
+- `weekly-engineering-report`：重新生成本周 Git 证据和代码审查结果，生成项目经理周会报告、研发负责人团队风险报告、代码维度审查报告和个人证据包。
 
 ## 快速开始
 
@@ -221,14 +221,19 @@ opencode-runner:
   run-date: "2026-06-26"
 ```
 
-周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物，也不启动 OpenCode worker。它会按周窗口重新统计 Git，先生成本周代码事实证据层，再从证据层投影 Markdown 报告。输出包括：
+周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按周窗口重新统计 Git，生成本周 changed regions 和审查批次，然后启动 weekly code-review worker 审查这些批次，最后从 Git 证据和代码审查结果投影 Markdown 报告。输出包括：
 
-- `sources/weekly-git/summary.json`、`sources/weekly-git/index_inputs.json`、`sources/weekly-git/details.json`：周报链路本次重新生成的 Git 证据。
-- `weekly-evidence.json`：统一证据层。
+- `weekly-git-evidence.json`：周报链路本次重新生成的 Git 证据。
+- `review-batches.json`：本周代码审查批次清单。
+- `review-batches/<batch_id>/input.json`：单个审查批次输入，只包含该批次 changed regions。
+- `review-batches/<batch_id>/code-review-summary.json`、`review-batches/<batch_id>/code-review.md`：OpenCode worker 写入的批次审查结果。
+- `weekly-evidence.json`：统一证据层，引用 Git 证据和审查批次。
+- `code-review/overview.md`、`code-review/p0-p1-p2-issues.md`、`code-review/code-standards.md`、`code-review/hotspots.md`、`code-review/index.json`：代码维度审查报告。
+- `quality-scores.json`、`people-ranking.md`：基于工作量和 P0/P1/P2 审查结果生成的人员周度代码报告排名。
 - `weekly-report.md`：项目经理周会版。
 - `team-risk-assessment.md`：研发负责人团队贡献与风险辅助评估。
 - `people/<author_key>/weekly-person-report.md`：个人证据包。
-- `action-items.md`、`risk-register.md`、`data-quality.md`：行动项、风险登记和数据质量说明。
+- `data-quality.md`：数据质量说明。
 
 报告口径固定隔离：
 
@@ -236,7 +241,32 @@ opencode-runner:
 - `team-risk-assessment.md` 面向研发负责人，展示团队贡献分布、风险集中和 review 建议。
 - `people/<author_key>/weekly-person-report.md` 面向 1:1、辅导和绩效校准证据包，不输出绩效定级。
 
-v1 不接 Jira/禅道/CI/PR review，不做最终绩效判断，也不复用历史代码审查结论作为本周证据。
+v1 不接 Jira/禅道/CI/PR review，不做最终绩效判断，也不复用历史代码审查结论作为本周证据。代码审查 finding 只能归因到本周 `changed_regions` 中的 `region_id`、`author_key`、`commit`、`file` 和行号范围。
+
+### weekly-engineering-report 补跑审查批次
+
+```yaml
+opencode-runner:
+  active-chain: "weekly-engineering-report"
+  mode: "rerun"
+  rerun:
+    type: "review-batch"
+    id: "review-batch-001-src-main-java-foo-java, review-batch-002-src-main-java-bar-java"
+```
+
+`id` 必须存在于 `weekly-evidence.json` 的 `review_batches[].batch_id`。多个批次会并发补跑，然后重建周报和团队风险报告。
+
+### weekly-engineering-report 只重建报告
+
+```yaml
+opencode-runner:
+  active-chain: "weekly-engineering-report"
+  mode: "rerun"
+  rerun:
+    type: "synthesis"
+```
+
+要求已有完整的 `weekly-evidence.json` 和所有批次的 `code-review-summary.json`、`code-review.md`。
 
 ## git-report 链路配置
 
@@ -352,6 +382,14 @@ git:
   exclude:
     - "target/**"
     - "*.lock"
+
+review:
+  max-regions-per-batch: 8
+  max-hunk-lines: 24
+  concurrency: 3
+
+opencode:
+  timeout-minutes: 40
 ```
 
 说明：
@@ -359,14 +397,18 @@ git:
 - `project.revision` 不配时默认 `HEAD`。
 - `week` 不配时，使用 `opencode-runner.run-date` 所在自然周的周一到周日。
 - `git.exclude` 建议保留，用于排除构建产物、锁文件、生成物等噪声。
-- `git.include`、`git.include-merges`、`git.author-map` 和 `detail-input` 都是可选高级配置；不配时使用默认统计口径。
-- 周报链路不会触发其他链路，不会读取历史审查产物，也不会自动给出代码质量结论。
+- `git.include`、`git.include-merges` 和 `git.author-map` 都是可选高级配置；不配时使用默认统计口径。
+- `review.max-regions-per-batch` 控制每个 OpenCode 审查批次最多包含多少个 changed regions。
+- `review.max-hunk-lines` 控制每个 changed region 带入审查输入的最大 hunk 行数。
+- `review.concurrency` 控制 weekly code-review worker 并发数，实际并发还会受共享 `opencode.max-concurrency` 限制。
+- `opencode.*` 可覆盖周报链路自己的 OpenCode 参数；未覆盖的模型和 server 配置继续使用主配置。
+- 周报链路不会触发其他链路，不会读取历史审查产物；代码质量结论只来自本链路本次生成的 weekly code-review 输出。
 
 `weekly-evidence.json` 使用固定 schema：
 
 ```text
 schema_version = weekly-engineering-report/v1
-top-level keys = schema_version, generated_at, week, project, source_runs, project_weekly, team_risk, people, risks, action_items, data_quality
+top-level keys = schema_version, generated_at, week, project, source_runs, weekly_git, review_batches, data_quality
 ```
 
 证据引用格式：
@@ -553,17 +595,25 @@ index.md
 weekly-engineering-report 常见产物：
 
 ```text
-sources/weekly-git/summary.json
-sources/weekly-git/index_inputs.json
-sources/weekly-git/details.json
-sources/weekly-git/details/<author_key>.json
 weekly-evidence.json
+weekly-git-evidence.json
+review-batches.json
+review-batches/<batch_id>/input.json
+review-batches/<batch_id>/code-review-summary.json
+review-batches/<batch_id>/code-review.md
+code-review/overview.md
+code-review/p0-p1-p2-issues.md
+code-review/code-standards.md
+code-review/hotspots.md
+code-review/index.json
+quality-scores.json
+people-ranking.md
 weekly-report.md
 team-risk-assessment.md
-action-items.md
-risk-register.md
 data-quality.md
 people/<author_key>/weekly-person-report.md
+runs/<batch_id>/worker-prompt.md
+runs/<batch_id>/session-status.json
 ```
 
 ## 常用命令

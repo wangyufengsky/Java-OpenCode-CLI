@@ -29,7 +29,9 @@ class WeeklyEngineeringReportPropertiesTest {
         assertThat(properties.getPaths().getOut()).hasToString("/home/wangyufeng/reports/weekly-engineering/2026-W26");
         assertThat(properties.getGit().isIncludeMerges()).isFalse();
         assertThat(properties.getGit().getExclude()).contains("target/**", "*.lock");
-        assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(10);
-        assertThat(properties.getDetailInput().getChangedRegionLines()).isEqualTo(24);
+        assertThat(properties.getReview().getMaxRegionsPerBatch()).isEqualTo(8);
+        assertThat(properties.getReview().getMaxHunkLines()).isEqualTo(24);
+        assertThat(properties.getReview().getConcurrency()).isEqualTo(3);
+        assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
     }
 }

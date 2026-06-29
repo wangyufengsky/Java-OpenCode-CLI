@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.workflow.weekly;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.sonnet.wyf.gitreport.GitReportProperties;
 
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -14,7 +15,8 @@ public class WeeklyEngineeringReportProperties {
     private final Paths paths = new Paths();
     private final Week week = new Week();
     private final Git git = new Git();
-    private final DetailInput detailInput = new DetailInput();
+    private final Review review = new Review();
+    private final GitReportProperties.OpenCode opencode = new GitReportProperties.OpenCode();
 
     public Project getProject() {
         return project;
@@ -32,9 +34,12 @@ public class WeeklyEngineeringReportProperties {
         return git;
     }
 
-    @JsonProperty("detail-input")
-    public DetailInput getDetailInput() {
-        return detailInput;
+    public Review getReview() {
+        return review;
+    }
+
+    public GitReportProperties.OpenCode getOpencode() {
+        return opencode;
     }
 
     public LocalDate effectiveWeekStart(LocalDate runDate) {
@@ -183,45 +188,35 @@ public class WeeklyEngineeringReportProperties {
         }
     }
 
-    public static class DetailInput {
-        private int topFiles = 10;
-        private int commits = 20;
-        private int changedRegions = 40;
-        private int changedRegionLines = 24;
+    public static class Review {
+        private int maxRegionsPerBatch = 8;
+        private int maxHunkLines = 24;
+        private int concurrency = 3;
 
-        @JsonProperty("top-files")
-        public int getTopFiles() {
-            return topFiles;
+        @JsonProperty("max-regions-per-batch")
+        public int getMaxRegionsPerBatch() {
+            return maxRegionsPerBatch;
         }
 
-        public void setTopFiles(int topFiles) {
-            this.topFiles = topFiles;
+        public void setMaxRegionsPerBatch(int maxRegionsPerBatch) {
+            this.maxRegionsPerBatch = maxRegionsPerBatch;
         }
 
-        public int getCommits() {
-            return commits;
+        @JsonProperty("max-hunk-lines")
+        public int getMaxHunkLines() {
+            return maxHunkLines;
         }
 
-        public void setCommits(int commits) {
-            this.commits = commits;
+        public void setMaxHunkLines(int maxHunkLines) {
+            this.maxHunkLines = maxHunkLines;
         }
 
-        @JsonProperty("changed-regions")
-        public int getChangedRegions() {
-            return changedRegions;
+        public int getConcurrency() {
+            return concurrency;
         }
 
-        public void setChangedRegions(int changedRegions) {
-            this.changedRegions = changedRegions;
-        }
-
-        @JsonProperty("changed-region-lines")
-        public int getChangedRegionLines() {
-            return changedRegionLines;
-        }
-
-        public void setChangedRegionLines(int changedRegionLines) {
-            this.changedRegionLines = changedRegionLines;
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
         }
     }
 }
