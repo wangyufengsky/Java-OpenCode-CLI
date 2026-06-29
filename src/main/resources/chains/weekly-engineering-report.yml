@@ -1,0 +1,22 @@
+# 周度工程报告链路。只读取本周 Git 代码改动，并由本链路即时生成代码审查和周报产物。
+
+project:
+  id: "upfs-production"
+  name: "UPFS Production"
+  repo: "/home/wangyufeng/workspace/upfs-production"
+
+paths:
+  out: "/home/wangyufeng/reports/weekly-engineering/2026-W26"
+
+git:
+  exclude:
+    - "target/**"
+    - "*.lock"
+
+review:
+  max-regions-per-batch: 8
+  max-hunk-lines: 24
+  concurrency: 3
+
+opencode:
+  timeout-minutes: 40

@@ -41,7 +41,7 @@ public class GitStatsCollector {
         this.objectMapper = objectMapper;
     }
 
-    Map<String, Object> collect(GitReportProperties properties) throws Exception {
+    public Map<String, Object> collect(GitReportProperties properties) throws Exception {
         Path repo = properties.getPaths().getRepo().toAbsolutePath().normalize();
         commandExecutor.run(repo, "git", "rev-parse", "--is-inside-work-tree");
         FileScopeFilter filter = FileScopeFilter.withUserPatterns(properties.getGit().getInclude(), properties.getGit().getExclude());

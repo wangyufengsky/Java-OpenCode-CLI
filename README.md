@@ -2,10 +2,12 @@
 
 这是一个基于 Spring Boot 的 OpenCode 多链路 Runner。主应用只负责选择链路和运行方式，链路自身的业务配置放在独立 YAML 中。
 
-当前支持两条链路：
+当前支持四条链路，其中 `weekly-engineering-report` 会按周窗口重新统计 Git 代码事实，并对本周 changed regions 启动代码审查批次：
 
 - `git-code-contribution-report`：代码提交量统计和个人/总报告生成。
 - `smartesb-rewrite-code-review`：SmartESB 8583 到 JSON 改造审查。
+- `smartesb-code-reader`：从 serviceIdentify/XML/BIZ/Java 生成 SmartESB 模块和交易阅读索引。
+- `weekly-engineering-report`：重新生成本周 Git 证据和代码审查结果，生成项目经理周会报告、研发负责人团队风险报告、代码维度审查报告和个人证据包。
 
 ## 快速开始
 
@@ -29,7 +31,9 @@ opencode-runner:
 2. 修改对应链路配置：
 
 - git-report：`src/main/resources/chains/git-code-contribution-report.yml`
-- SmartESB：`src/main/resources/chains/smartesb-rewrite-code-review.yml`
+- SmartESB rewrite review：`src/main/resources/chains/smartesb-rewrite-code-review.yml`
+- SmartESB code-reader：`src/main/resources/chains/smartesb-code-reader.yml`
+- weekly engineering report：`src/main/resources/chains/weekly-engineering-report.yml`
 
 3. 运行：
 
@@ -79,7 +83,7 @@ opencode-runner:
 - `enabled`：是否启动 Runner。
 - `active-chain`：要运行的链路 ID。
 - `mode`：`full` 或 `rerun`。
-- `run-date`：SmartESB 使用，格式 `yyyy-MM-dd`；为空时使用应用运行当天日期。
+- `run-date`：SmartESB 和周报链路使用，格式 `yyyy-MM-dd`；为空时使用应用运行当天日期。
 - `config-dir`：链路配置目录，默认 `classpath:chains`。
 - `rerun.type`：补跑类型。
 - `rerun.id`：补跑目标 ID，例如 authorKey 或 transaction name；多个目标用英文逗号放在同一个字符串中。
@@ -185,6 +189,85 @@ opencode-runner:
 
 只基于当前日期输出目录中已有的交易摘要重新生成 `index.md` 和 `summary.md`。
 
+### SmartESB code-reader 全量
+
+```yaml
+opencode-runner:
+  active-chain: "smartesb-code-reader"
+  mode: "full"
+```
+
+从 `serviceIdentify.xml`、交易 XML、BIZ 和 Java 源码生成模块/交易阅读任务，运行 OpenCode 后生成 `summary.json`、`index_inputs.json`、`index.md` 以及模块/交易分析产物。
+
+### SmartESB code-reader 补跑
+
+```yaml
+opencode-runner:
+  active-chain: "smartesb-code-reader"
+  mode: "rerun"
+  rerun:
+    type: "transaction"
+    id: "CaConsume, CaTransferOuter"
+```
+
+`rerun.type` 支持 `module`、`transaction`、`index`。补跑模块或交易时，`id` 必须存在于 `index_inputs.json`；多个目标用英文逗号分隔。`index` 只基于已有模块/交易摘要重建 `index.md`。
+
+### weekly-engineering-report 全量
+
+```yaml
+opencode-runner:
+  active-chain: "weekly-engineering-report"
+  mode: "full"
+  run-date: "2026-06-26"
+```
+
+周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按周窗口重新统计 Git，生成本周 changed regions 和审查批次，然后启动 weekly code-review worker 审查这些批次，最后从 Git 证据和代码审查结果投影 Markdown 报告。输出包括：
+
+- `weekly-git-evidence.json`：周报链路本次重新生成的 Git 证据。
+- `review-batches.json`：本周代码审查批次清单。
+- `review-batches/<batch_id>/input.json`：单个审查批次输入，只包含该批次 changed regions。
+- `review-batches/<batch_id>/code-review-summary.json`、`review-batches/<batch_id>/code-review.md`：OpenCode worker 写入的批次审查结果。
+- `weekly-evidence.json`：统一证据层，引用 Git 证据和审查批次。
+- `code-review/overview.md`、`code-review/p0-p1-p2-issues.md`、`code-review/code-standards.md`、`code-review/hotspots.md`、`code-review/index.json`：代码维度审查报告。
+- `quality-scores.json`、`people-ranking.md`：基于工作量和 P0/P1/P2 审查结果生成的人员周度代码报告排名。
+- `weekly-report.md`：项目经理周会版。
+- `team-risk-assessment.md`：研发负责人团队贡献与风险辅助评估。
+- `people/<author_key>/weekly-person-report.md`：个人证据包。
+- `data-quality.md`：数据质量说明。
+
+报告口径固定隔离：
+
+- `weekly-report.md` 面向项目经理周会，不展示个人排名或绩效结论。
+- `team-risk-assessment.md` 面向研发负责人，展示团队贡献分布、风险集中和 review 建议。
+- `people/<author_key>/weekly-person-report.md` 面向 1:1、辅导和绩效校准证据包，不输出绩效定级。
+
+v1 不接 Jira/禅道/CI/PR review，不做最终绩效判断，也不复用历史代码审查结论作为本周证据。代码审查 finding 只能归因到本周 `changed_regions` 中的 `region_id`、`author_key`、`commit`、`file` 和行号范围。
+
+### weekly-engineering-report 补跑审查批次
+
+```yaml
+opencode-runner:
+  active-chain: "weekly-engineering-report"
+  mode: "rerun"
+  rerun:
+    type: "review-batch"
+    id: "review-batch-001-src-main-java-foo-java, review-batch-002-src-main-java-bar-java"
+```
+
+`id` 必须存在于 `weekly-evidence.json` 的 `review_batches[].batch_id`。多个批次会并发补跑，然后重建周报和团队风险报告。
+
+### weekly-engineering-report 只重建报告
+
+```yaml
+opencode-runner:
+  active-chain: "weekly-engineering-report"
+  mode: "rerun"
+  rerun:
+    type: "synthesis"
+```
+
+要求已有完整的 `weekly-evidence.json` 和所有批次的 `code-review-summary.json`、`code-review.md`。
+
 ## git-report 链路配置
 
 配置文件：`src/main/resources/chains/git-code-contribution-report.yml`
@@ -229,7 +312,7 @@ synthesis-input:
 - `snippets-total`：总报告最多带入多少个代码片段。
 - `snippet-lines`：每个代码片段最多带入多少行。
 
-## SmartESB 链路配置
+## SmartESB rewrite review 链路配置
 
 配置文件：`src/main/resources/chains/smartesb-rewrite-code-review.yml`
 
@@ -252,6 +335,88 @@ synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇�
 
 - 如果 `local-out` 为空，使用 `out/<run-date>`。
 - 如果 `local-out` 不为空，使用 `local-out/<run-date>`。
+
+## SmartESB code-reader 链路配置
+
+配置文件：`src/main/resources/chains/smartesb-code-reader.yml`
+
+核心字段：
+
+```yaml
+out: "/home/wangyufeng/review-output/smartesb-code-reader"
+local-out:
+service-identify:
+  - "/home/wangyufeng/upfs-production/serviceIdentify.xml"
+xml-root: "/home/wangyufeng/upfs-production"
+biz-root:
+java-root: "/home/wangyufeng/upfs-production"
+mode: "8583"
+worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，只输出 DONE 或 BLOCKED。"
+synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md。"
+```
+
+说明：
+
+- `service-identify` 支持一个或多个 `serviceIdentify.xml`。
+- `xml-root` 用于定位交易 XML 和 base XML。
+- `biz-root` 为空时等于 `xml-root`。
+- `java-root` 是 Java 源码根目录，也是 OpenCode session directory。
+- `mode` 对应 `serviceIdentify.xml` 中要读取的 switch mode。
+
+## weekly-engineering-report 链路配置
+
+配置文件：`src/main/resources/chains/weekly-engineering-report.yml`
+
+核心字段：
+
+```yaml
+project:
+  id: "upfs-production"
+  name: "UPFS Production"
+  repo: "/home/wangyufeng/workspace/upfs-production"
+
+paths:
+  out: "/home/wangyufeng/reports/weekly-engineering/2026-W26"
+
+git:
+  exclude:
+    - "target/**"
+    - "*.lock"
+
+review:
+  max-regions-per-batch: 8
+  max-hunk-lines: 24
+  concurrency: 3
+
+opencode:
+  timeout-minutes: 40
+```
+
+说明：
+
+- `project.revision` 不配时默认 `HEAD`。
+- `week` 不配时，使用 `opencode-runner.run-date` 所在自然周的周一到周日。
+- `git.exclude` 建议保留，用于排除构建产物、锁文件、生成物等噪声。
+- `git.include`、`git.include-merges` 和 `git.author-map` 都是可选高级配置；不配时使用默认统计口径。
+- `review.max-regions-per-batch` 控制每个 OpenCode 审查批次最多包含多少个 changed regions。
+- `review.max-hunk-lines` 控制每个 changed region 带入审查输入的最大 hunk 行数。
+- `review.concurrency` 控制 weekly code-review worker 并发数，实际并发还会受共享 `opencode.max-concurrency` 限制。
+- `opencode.*` 可覆盖周报链路自己的 OpenCode 参数；未覆盖的模型和 server 配置继续使用主配置。
+- 周报链路不会触发其他链路，不会读取历史审查产物；代码质量结论只来自本链路本次生成的 weekly code-review 输出。
+
+`weekly-evidence.json` 使用固定 schema：
+
+```text
+schema_version = weekly-engineering-report/v1
+top-level keys = schema_version, generated_at, week, project, source_runs, weekly_git, review_batches, data_quality
+```
+
+证据引用格式：
+
+```text
+git:<author_key>:<commit_hash>
+file:<path>
+```
 
 ## SmartESB 每日审查清单
 
@@ -393,7 +558,7 @@ runs/synthesis/session-status.json
 code-contribution-report.md
 ```
 
-SmartESB 常见产物：
+SmartESB rewrite review 常见产物：
 
 ```text
 summary.json
@@ -408,6 +573,47 @@ runs/index/synthesis-prompt.md
 runs/index/session-status.json
 index.md
 summary.md
+```
+
+SmartESB code-reader 常见产物：
+
+```text
+summary.json
+index_inputs.json
+tasks/module-*.json
+tasks/transaction-*.json
+modules/<module>/analysis.md
+modules/<module>/summary.json
+transactions/<transaction>/analysis.md
+transactions/<transaction>/summary.json
+runs/module-*/worker-prompt.md
+runs/transaction-*/worker-prompt.md
+runs/index/synthesis-prompt.md
+index.md
+```
+
+weekly-engineering-report 常见产物：
+
+```text
+weekly-evidence.json
+weekly-git-evidence.json
+review-batches.json
+review-batches/<batch_id>/input.json
+review-batches/<batch_id>/code-review-summary.json
+review-batches/<batch_id>/code-review.md
+code-review/overview.md
+code-review/p0-p1-p2-issues.md
+code-review/code-standards.md
+code-review/hotspots.md
+code-review/index.json
+quality-scores.json
+people-ranking.md
+weekly-report.md
+team-risk-assessment.md
+data-quality.md
+people/<author_key>/weekly-person-report.md
+runs/<batch_id>/worker-prompt.md
+runs/<batch_id>/session-status.json
 ```
 
 ## 常用命令
