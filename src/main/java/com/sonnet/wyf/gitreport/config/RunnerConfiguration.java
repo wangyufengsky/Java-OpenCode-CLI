@@ -12,7 +12,6 @@ import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
-import com.sonnet.wyf.gitreport.runner.WorkflowRunner;
 import com.sonnet.wyf.gitreport.workflow.gitreport.GitReportWorkflowChain;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbDailyTransactionPlanLoader;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbPromptBuilder;
@@ -191,8 +190,4 @@ public class RunnerConfiguration {
         );
     }
 
-    @Bean
-    WorkflowRunner workflowRunner(OpenCodeRunnerProperties properties, List<WorkflowChain> chains) {
-        return new WorkflowRunner(properties, chains);
-    }
 }

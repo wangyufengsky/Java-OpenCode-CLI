@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('OpenCode 任务控制台')}"></head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <h1>OpenCode 任务控制台</h1>
+      <p>单个工作流运行，后续提交排队，运行历史持久保存。</p>
+    </div>
+    <nav class="actions">
+      <a class="button" href="/history">运行历史</a>
+      <a class="button primary" href="/runs/new">新建运行</a>
+    </nav>
+  </header>
+
+  <section class="metrics">
+    <article><span>运行中</span><strong th:text="${runs.?[state.name() == 'RUNNING'].size()}">0</strong></article>
+    <article><span>排队中</span><strong th:text="${runs.?[state.name() == 'QUEUED'].size()}">0</strong></article>
+    <article><span>已成功</span><strong th:text="${runs.?[state.name() == 'SUCCEEDED'].size()}">0</strong></article>
+    <article><span>已失败</span><strong th:text="${runs.?[state.name() == 'FAILED'].size()}">0</strong></article>
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="panel">
+      <div class="panel-title">
+        <h2>最近运行</h2>
+        <a href="/history">查看全部</a>
+      </div>
+      <table>
+        <thead>
+        <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="run,iter : ${runs}" th:if="${iter.index < 8}">
+          <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
+          <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
+          <td th:text="${@consoleText.mode(run.mode)}">全量</td>
+          <td><span class="status" th:classappend="${run.state.name().toLowerCase()}" th:text="${@consoleText.state(run.state)}">排队中</span></td>
+          <td th:text="${run.createdAt}">时间</td>
+        </tr>
+        <tr th:if="${runs.isEmpty()}"><td colspan="5" class="empty">暂无运行记录。</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <aside class="panel">
+      <div class="panel-title">
+        <h2>链路</h2>
+      </div>
+      <div class="chain-list">
+        <a th:each="chain : ${chains}" th:href="@{/runs/new(chainId=${chain})}">
+          <strong th:text="${@consoleText.chain(chain)}">链路</strong>
+          <span>配置并加入队列</span>
+        </a>
+      </div>
+    </aside>
+  </section>
+</main>
+</body>
+</html>

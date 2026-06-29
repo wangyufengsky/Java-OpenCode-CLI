@@ -44,7 +44,7 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
     public void run(WorkflowRunRequest request) throws Exception {
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         WeeklyEngineeringReportProperties properties = configLoader.load(
-                runnerProperties.getConfigDir(),
+                configDir(request),
                 id(),
                 WeeklyEngineeringReportProperties.class
         );
@@ -71,5 +71,11 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
         } else {
             throw new IllegalArgumentException("weekly-engineering-report rerun.type must be one of: review-batch, synthesis");
         }
+    }
+
+    private String configDir(WorkflowRunRequest request) {
+        return request.configDir() == null || request.configDir().isBlank()
+                ? runnerProperties.getConfigDir()
+                : request.configDir();
     }
 }

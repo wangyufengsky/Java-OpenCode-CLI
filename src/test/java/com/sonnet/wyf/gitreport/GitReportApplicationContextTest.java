@@ -6,6 +6,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
+import com.sonnet.wyf.gitreport.runner.WorkflowRunner;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -29,6 +30,7 @@ class GitReportApplicationContextTest {
             assertThat(context).hasSingleBean(OpenCodeServerTaskRunner.class);
             assertThat(context).hasSingleBean(GitReportOrchestrator.class);
             assertThat(context).hasSingleBean(ScheduledProbeWaiter.class);
+            assertThat(context).doesNotHaveBean(WorkflowRunner.class);
             assertThat(context).hasBean("authorTaskExecutor");
             assertThat(context).hasBean("openCodeTaskScheduler");
             assertThat(context.getBean("authorTaskExecutor")).isInstanceOf(AsyncTaskExecutor.class);

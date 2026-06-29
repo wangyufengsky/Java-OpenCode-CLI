@@ -75,7 +75,7 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
 
     @Override
     public void run(WorkflowRunRequest request) throws Exception {
-        SmartEsbCodeReaderProperties properties = configLoader.load(runnerProperties.getConfigDir(), id(), SmartEsbCodeReaderProperties.class);
+        SmartEsbCodeReaderProperties properties = configLoader.load(configDir(request), id(), SmartEsbCodeReaderProperties.class);
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
         if ("full".equals(mode)) {
             Path out = preparation.prepare(properties, true);
@@ -106,6 +106,12 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
         } else {
             throw new IllegalArgumentException("smartesb-code-reader rerun.type must be one of: module, transaction, index");
         }
+    }
+
+    private String configDir(WorkflowRunRequest request) {
+        return request.configDir() == null || request.configDir().isBlank()
+                ? runnerProperties.getConfigDir()
+                : request.configDir();
     }
 
     private void runTasks(

@@ -1,5 +1,5 @@
 opencode-runner:
-  enabled: true
+  enabled: false
   active-chain: "git-code-contribution-report"
   mode: "full"
   run-date:
@@ -23,3 +23,7 @@ opencode-runner:
     max-concurrency: 6
     environment:
       OPENCODE_DISABLE_MODELS_FETCH: "true"
+
+task-console:
+  database-path: "data/opencode-task-console.sqlite"
+  run-config-dir: "data/run-configs"

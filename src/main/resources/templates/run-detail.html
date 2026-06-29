@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('运行详情')}"></head>
+<body data-run-id="0" th:attr="data-run-id=${run.id}">
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <h1 th:text="${'运行 ' + run.id + ' / ' + @consoleText.chain(run.chainId)}">运行</h1>
+      <p th:text="${@consoleText.mode(run.mode) + ' / ' + @consoleText.phase(run.phase)}">阶段</p>
+    </div>
+    <nav class="actions">
+      <a class="button" href="/">控制台</a>
+      <a class="button" href="/history">运行历史</a>
+    </nav>
+  </header>
+
+  <section class="metrics">
+    <article><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>
+    <article><span>模式</span><strong th:text="${@consoleText.mode(run.mode)}">全量</strong></article>
+    <article><span>重跑</span><strong th:text="${@consoleText.rerunType(run.rerunType)}">-</strong></article>
+    <article><span>运行日期</span><strong th:text="${run.runDate ?: '-'}">-</strong></article>
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="panel">
+      <div class="panel-title"><h2>事件流</h2><span id="stream-state">连接中</span></div>
+      <ol id="events" class="event-list">
+        <li th:each="event : ${events}" th:attr="data-event-id=${event.id}">
+          <time th:text="${event.createdAt}">时间</time>
+          <strong th:text="${@consoleText.eventType(event.eventType)}">事件</strong>
+          <span th:text="${event.message}">消息</span>
+        </li>
+      </ol>
+    </article>
+
+    <aside class="panel">
+      <h2>任务状态</h2>
+      <table>
+        <thead><tr><th>任务</th><th>状态</th><th>阶段</th></tr></thead>
+        <tbody>
+        <tr th:each="task : ${tasks}">
+          <td th:text="${task.taskName}">任务</td>
+          <td th:text="${@consoleText.state(task.state)}">状态</td>
+          <td th:text="${@consoleText.phase(task.phase)}">阶段</td>
+        </tr>
+        <tr th:if="${tasks.isEmpty()}"><td colspan="3" class="empty">暂无任务事件。</td></tr>
+        </tbody>
+      </table>
+    </aside>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

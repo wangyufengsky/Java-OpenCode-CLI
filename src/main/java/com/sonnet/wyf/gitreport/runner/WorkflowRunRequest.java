@@ -9,8 +9,13 @@ public record WorkflowRunRequest(
         String rerunType,
         String rerunId,
         LocalDate runDate,
-        OpenCodeSettings openCode
+        OpenCodeSettings openCode,
+        String configDir
 ) {
+    public WorkflowRunRequest(String mode, String rerunType, String rerunId, LocalDate runDate, OpenCodeSettings openCode) {
+        this(mode, rerunType, rerunId, runDate, openCode, "");
+    }
+
     public LocalDate effectiveRunDate() {
         return runDate == null ? LocalDate.now() : runDate;
     }

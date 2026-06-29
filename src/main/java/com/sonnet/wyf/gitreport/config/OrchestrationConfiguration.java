@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
@@ -51,8 +52,8 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
-    ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner(AsyncTaskExecutor authorTaskExecutor) {
-        return new ConcurrentWorkflowTaskRunner(authorTaskExecutor);
+    ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner(AsyncTaskExecutor authorTaskExecutor, WorkflowEventSink workflowEventSink) {
+        return new ConcurrentWorkflowTaskRunner(authorTaskExecutor, workflowEventSink);
     }
 
     @Bean

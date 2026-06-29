@@ -1,0 +1,120 @@
+package com.sonnet.wyf.gitreport.console;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest(properties = {
+        "task-console.database-path=target/test-console/console-mvc.sqlite",
+        "task-console.run-config-dir=target/test-console/run-configs"
+})
+class ConsoleMvcTest {
+    MockMvc mockMvc;
+
+    @Autowired
+    WorkflowRunRepository repository;
+
+    @Autowired
+    WebApplicationContext webApplicationContext;
+
+    @BeforeEach
+    void setUpMockMvc() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+    }
+
+    @Test
+    void pagesRenderFromPersistedRuns() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report",
+                "full",
+                null,
+                null,
+                LocalDate.of(2026, 6, 29),
+                Map.of("project.id", "demo"),
+                null
+        ), "run-config.yml");
+        repository.appendEvent(runId, "QUEUED", "运行已进入队列");
+
+        mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("OpenCode 任务控制台")))
+                .andExpect(content().string(containsString("最近运行")))
+                .andExpect(content().string(containsString("代码贡献报告")));
+        mockMvc.perform(get("/history"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("运行历史")))
+                .andExpect(content().string(containsString("排队中")));
+        mockMvc.perform(get("/runs/new").param("chainId", "git-code-contribution-report"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("链路配置")))
+                .andExpect(content().string(not(containsString("配置快照"))))
+                .andExpect(content().string(not(containsString("configYaml"))))
+                .andExpect(content().string(containsString("提交运行")));
+        String appJs = mockMvc.perform(get("/app.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(appJs)
+                .contains("项目标识")
+                .contains("transaction-plan-dir")
+                .contains("src/main/resources/smartesb-transactions");
+        mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("运行 " + runId)))
+                .andExpect(content().string(containsString("事件流")));
+    }
+
+    @Test
+    void postRunsValidatesUnknownChainAndRerunFields() throws Exception {
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"missing","mode":"full","config":{"project.id":"demo"}}
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("未知链路")));
+
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"rerun","config":{"project.id":"demo"}}
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("重跑模式必须填写重跑类型")));
+    }
+
+    @Test
+    void sseEndpointStartsStreamWithExistingEvents() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report",
+                "full",
+                null,
+                null,
+                null,
+                Map.of("project.id", "demo"),
+                null
+        ), "run-config.yml");
+        repository.appendEvent(runId, "QUEUED", "运行已进入队列");
+
+        mockMvc.perform(get("/api/runs/" + runId + "/events"))
+                .andExpect(request().asyncStarted());
+    }
+}
