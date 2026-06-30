@@ -85,6 +85,8 @@ const chainSelect = document.querySelector('#chainId');
 const configFields = document.querySelector('#chain-config-fields');
 const configDescription = document.querySelector('#chain-config-description');
 const runForm = document.querySelector('#run-form');
+const scheduleForm = document.querySelector('#schedule-form');
+const frequencySelect = document.querySelector('#frequency');
 
 if (chainSelect && configFields) {
   renderConfigFields(chainSelect.value);
@@ -229,6 +231,75 @@ if (runForm) {
     }
   });
 }
+
+if (frequencySelect) {
+  renderScheduleFrequencyFields();
+  frequencySelect.addEventListener('change', renderScheduleFrequencyFields);
+}
+
+function renderScheduleFrequencyFields() {
+  const frequency = frequencySelect.value;
+  document.querySelectorAll('.schedule-weekly-field').forEach((field) => {
+    field.style.display = frequency === 'weekly' ? 'grid' : 'none';
+  });
+  document.querySelectorAll('.schedule-time-field').forEach((field) => {
+    field.style.display = frequency === 'once' ? 'none' : 'grid';
+  });
+  document.querySelectorAll('.schedule-once-field').forEach((field) => {
+    field.style.display = frequency === 'once' ? 'grid' : 'none';
+  });
+}
+
+if (scheduleForm) {
+  scheduleForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const result = document.querySelector('#schedule-result');
+    result.textContent = '正在保存...';
+    const frequency = document.querySelector('#frequency').value;
+    const payload = {
+      chainId: document.querySelector('#chainId').value,
+      mode: document.querySelector('#mode').value,
+      rerunType: document.querySelector('#rerunType').value,
+      rerunId: document.querySelector('#rerunId').value,
+      runDate: document.querySelector('#runDate').value || null,
+      config: collectConfig(document.querySelector('#chainId').value),
+      frequency,
+      dayOfWeek: frequency === 'weekly' ? Number(document.querySelector('#dayOfWeek').value) : null,
+      runTime: frequency === 'once' ? null : document.querySelector('#scheduleTime').value,
+      runAt: frequency === 'once' ? document.querySelector('#runAt').value : null,
+      enabled: document.querySelector('#enabled').checked
+    };
+    const response = await fetch('/api/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const body = await response.json();
+    if (response.ok) {
+      window.location.href = '/schedules';
+    } else {
+      result.textContent = body.error || '保存失败';
+    }
+  });
+}
+
+document.querySelectorAll('.schedule-toggle').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const row = button.closest('[data-schedule-id]');
+    if (!row) return;
+    button.disabled = true;
+    const response = await fetch(`/api/schedules/${row.dataset.scheduleId}/enabled`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: button.dataset.enabled === 'true' })
+    });
+    if (response.ok) {
+      window.location.reload();
+    } else {
+      button.disabled = false;
+    }
+  });
+});
 
 const stateLabels = {
   QUEUED: '排队中',

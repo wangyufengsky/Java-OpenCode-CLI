@@ -19,17 +19,20 @@ public class ConsoleApiController {
     private final WorkflowRunRepository repository;
     private final WorkflowExecutionService executionService;
     private final EventStreamService eventStreamService;
+    private final WorkflowScheduleService scheduleService;
 
     public ConsoleApiController(
             ChainCatalog chainCatalog,
             WorkflowRunRepository repository,
             WorkflowExecutionService executionService,
-            EventStreamService eventStreamService
+            EventStreamService eventStreamService,
+            WorkflowScheduleService scheduleService
     ) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
         this.executionService = executionService;
         this.eventStreamService = eventStreamService;
+        this.scheduleService = scheduleService;
     }
 
     @GetMapping("/chains")
@@ -51,6 +54,21 @@ public class ConsoleApiController {
     @GetMapping("/runs")
     public List<WorkflowRunRecord> runs() {
         return repository.listRuns();
+    }
+
+    @GetMapping("/schedules")
+    public List<WorkflowScheduleRecord> schedules() {
+        return scheduleService.list();
+    }
+
+    @PostMapping("/schedules")
+    public Map<String, Long> createSchedule(@RequestBody WorkflowScheduleRequest request) {
+        return Map.of("id", scheduleService.create(request));
+    }
+
+    @PostMapping("/schedules/{id}/enabled")
+    public WorkflowScheduleRecord setScheduleEnabled(@PathVariable long id, @RequestBody Map<String, Boolean> body) {
+        return scheduleService.setEnabled(id, Boolean.TRUE.equals(body.get("enabled")));
     }
 
     @GetMapping("/runs/{id}")

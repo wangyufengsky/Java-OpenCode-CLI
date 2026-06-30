@@ -51,6 +51,26 @@ public class WorkflowRunSchema {
                   primary key (run_id, task_key)
                 )
                 """);
+        jdbcTemplate.execute("""
+                create table if not exists workflow_schedules (
+                  id integer primary key autoincrement,
+                  chain_id text not null,
+                  mode text not null,
+                  rerun_type text,
+                  rerun_id text,
+                  run_date text,
+                  config_json text not null,
+                  frequency text not null,
+                  day_of_week integer,
+                  run_time text,
+                  run_at text,
+                  enabled integer not null,
+                  last_triggered_at text,
+                  next_trigger_at text,
+                  created_at text not null,
+                  updated_at text not null
+                )
+                """);
     }
 
     private void ensureColumn(String tableName, String columnName, String type) {

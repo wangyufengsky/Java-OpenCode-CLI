@@ -45,6 +45,12 @@ public class ConsoleText {
             "TASK_FAILED", "任务已失败"
     );
 
+    private static final Map<String, String> FREQUENCIES = Map.of(
+            "DAILY", "每天",
+            "WEEKLY", "每周",
+            "ONCE", "一次性"
+    );
+
     private static final Map<String, String> PHASES = Map.of(
             "started", "已开始",
             "submitted", "已提交",
@@ -82,6 +88,10 @@ public class ConsoleText {
 
     public String eventType(String value) {
         return EVENT_TYPES.getOrDefault(value, value);
+    }
+
+    public String frequency(String value) {
+        return FREQUENCIES.getOrDefault(value, value);
     }
 
     public String phase(String value) {

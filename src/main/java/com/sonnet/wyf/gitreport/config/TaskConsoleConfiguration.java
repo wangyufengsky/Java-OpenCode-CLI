@@ -6,6 +6,8 @@ import com.sonnet.wyf.gitreport.console.RunConfigWriter;
 import com.sonnet.wyf.gitreport.console.TaskConsoleProperties;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.console.WorkflowExecutionService;
+import com.sonnet.wyf.gitreport.console.WorkflowScheduleRepository;
+import com.sonnet.wyf.gitreport.console.WorkflowScheduleService;
 import com.sonnet.wyf.gitreport.console.WorkflowRunRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowRunSchema;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
@@ -18,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
 import java.nio.file.Files;
+import java.time.Clock;
 import java.util.List;
 
 @Configuration
@@ -50,6 +53,11 @@ public class TaskConsoleConfiguration {
     }
 
     @Bean
+    WorkflowScheduleRepository workflowScheduleRepository(JdbcTemplate taskConsoleJdbcTemplate, WorkflowRunSchema workflowRunSchema) {
+        return new WorkflowScheduleRepository(taskConsoleJdbcTemplate);
+    }
+
+    @Bean
     ChainCatalog chainCatalog(ResourceLoader resourceLoader, OpenCodeRunnerProperties properties, List<WorkflowChain> chains) {
         return new ChainCatalog(resourceLoader, properties, chains);
     }
@@ -78,5 +86,14 @@ public class TaskConsoleConfiguration {
             OpenCodeRunnerProperties runnerProperties
     ) {
         return new WorkflowExecutionService(chainCatalog, repository, eventSink, configWriter, runnerProperties);
+    }
+
+    @Bean(destroyMethod = "close")
+    WorkflowScheduleService workflowScheduleService(
+            WorkflowScheduleRepository repository,
+            WorkflowExecutionService executionService,
+            ChainCatalog chainCatalog
+    ) {
+        return new WorkflowScheduleService(repository, executionService, chainCatalog, Clock.systemDefaultZone());
     }
 }

@@ -68,6 +68,7 @@ th { color: var(--muted); font-size: 12px; }
 .chain-list span { color: var(--muted); margin-top: 4px; }
 
 .run-form { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.schedule-list-panel { margin-bottom: 20px; }
 label { display: grid; gap: 6px; font-weight: 800; color: var(--muted); font-size: 12px; }
 select, input, textarea {
   width: 100%;
@@ -93,6 +94,8 @@ textarea { min-height: 108px; resize: vertical; font-family: ui-monospace, SFMon
 .config-field-checkbox small { grid-column: span 2; }
 .submit-panel { display: grid; gap: 14px; }
 .submit-panel ul { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.8; }
+.checkbox-row { grid-template-columns: auto minmax(0, 1fr); align-items: center; color: var(--ink); }
+.checkbox-row input { width: 18px; height: 18px; }
 .form-message { color: var(--red); min-height: 20px; }
 .event-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .event-list li { display: grid; grid-template-columns: 220px 130px minmax(0, 1fr); gap: 10px; border-bottom: 1px solid var(--border); padding: 9px 0; }

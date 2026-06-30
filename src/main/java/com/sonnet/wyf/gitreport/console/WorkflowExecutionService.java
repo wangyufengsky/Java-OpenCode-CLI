@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class WorkflowExecutionService implements AutoCloseable {
+public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoCloseable {
     private final ChainCatalog chainCatalog;
     private final WorkflowRunRepository repository;
     private final WorkflowEventSink eventSink;
@@ -47,6 +47,7 @@ public class WorkflowExecutionService implements AutoCloseable {
         this.executorService = executorService;
     }
 
+    @Override
     public long submit(WorkflowRunSubmission submission) throws Exception {
         WorkflowRunSubmission normalized = normalize(submission);
         chainCatalog.chain(normalized.chainId());

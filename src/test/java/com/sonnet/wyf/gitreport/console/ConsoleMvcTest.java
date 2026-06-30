@@ -62,6 +62,13 @@ class ConsoleMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("运行历史")))
                 .andExpect(content().string(containsString("排队中")));
+        mockMvc.perform(get("/schedules"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("定时任务")))
+                .andExpect(content().string(containsString("每天")))
+                .andExpect(content().string(containsString("每周")))
+                .andExpect(content().string(containsString("一次性")))
+                .andExpect(content().string(containsString("代码贡献报告")));
         mockMvc.perform(get("/runs/new").param("chainId", "git-code-contribution-report"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("链路配置")))
@@ -119,6 +126,43 @@ class ConsoleMvcTest {
                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(containsString("重跑模式必须填写重跑类型")));
+    }
+
+    @Test
+    void scheduleApiCreatesAndTogglesSchedules() throws Exception {
+        String createResponse = mockMvc.perform(post("/api/schedules")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "chainId":"git-code-contribution-report",
+                                  "mode":"full",
+                                  "runDate":"2026-06-30",
+                                  "config":{"project.id":"demo"},
+                                  "frequency":"weekly",
+                                  "dayOfWeek":5,
+                                  "runTime":"06:00",
+                                  "enabled":true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").isNumber())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(createResponse).contains("id");
+
+        mockMvc.perform(get("/api/schedules"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("git-code-contribution-report")))
+                .andExpect(content().string(containsString("WEEKLY")));
+
+        mockMvc.perform(post("/api/schedules/1/enabled")
+                        .contentType("application/json")
+                        .content("""
+                                {"enabled":false}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false));
     }
 
     @Test

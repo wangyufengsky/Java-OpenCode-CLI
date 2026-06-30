@@ -10,10 +10,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 public class ConsolePageController {
     private final ChainCatalog chainCatalog;
     private final WorkflowRunRepository repository;
+    private final WorkflowScheduleService scheduleService;
 
-    public ConsolePageController(ChainCatalog chainCatalog, WorkflowRunRepository repository) {
+    public ConsolePageController(ChainCatalog chainCatalog, WorkflowRunRepository repository, WorkflowScheduleService scheduleService) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
+        this.scheduleService = scheduleService;
     }
 
     @GetMapping("/")
@@ -42,5 +44,13 @@ public class ConsolePageController {
     public String history(Model model) {
         model.addAttribute("runs", repository.listRuns());
         return "history";
+    }
+
+    @GetMapping("/schedules")
+    public String schedules(@RequestParam(required = false, defaultValue = "git-code-contribution-report") String chainId, Model model) {
+        model.addAttribute("chains", chainCatalog.chainIds());
+        model.addAttribute("chainId", chainId);
+        model.addAttribute("schedules", scheduleService.list());
+        return "schedules";
     }
 }
