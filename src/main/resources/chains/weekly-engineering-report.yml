@@ -17,9 +17,15 @@ git:
     - "*.lock"
 
 review:
-  max-regions-per-batch: 8
   max-hunk-lines: 24
   concurrency: 3
+  grouping:
+    strategy: "module-author-capacity"
+    target-task-count: 80
+    max-regions-per-task: 80
+    max-files-per-task: 25
+    max-hunk-chars-per-task: 80000
+    max-commits-per-task: 40
 
 opencode:
   timeout-minutes: 40

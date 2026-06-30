@@ -6,6 +6,7 @@ import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -98,9 +99,26 @@ public class WorkflowExecutionService implements AutoCloseable {
                 normalizeText(submission.rerunType()),
                 submission.rerunId(),
                 submission.runDate(),
-                submission.config() == null ? Map.of() : Map.copyOf(submission.config()),
+                normalizeConfig(submission.config()),
                 submission.openCode()
         );
+    }
+
+    private static Map<String, Object> normalizeConfig(Map<String, Object> config) {
+        if (config == null || config.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        config.forEach((key, value) -> {
+            if (key == null || key.isBlank() || value == null) {
+                return;
+            }
+            if (value instanceof String text && text.isBlank()) {
+                return;
+            }
+            normalized.put(key, value);
+        });
+        return Map.copyOf(normalized);
     }
 
     private static String normalizeText(String value) {

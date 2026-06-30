@@ -154,22 +154,30 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
         return """
                 你是 weekly-engineering-report 的代码审查 worker。
 
+                本任务是一个 review unit，不是单文件小批次。review unit 可能按模块/作者聚合了多文件、多 commit 的 changed regions。
+
                 严格边界：
-                - 只读取本批次 input_json。
+                - 只读取本 review unit 的 input_json。
                 - 只审查 input_json.changed_regions 内的 hunk，不得把完整文件或其他历史链路产物作为归因依据。
-                - finding 必须写入 region_id、author_key、commit、file、line_start、line_end。
+                - reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id。
+                - 不得只挑重点审查，不得因为文件多而跳过低风险 region；没有问题的 region 也必须计入 reviewed_region_ids。
+                - finding 必须绑定 region_id、author_key、commit、file、line_start、line_end。
                 - severity 只能是 P0、P1、P2。
-                - 输出必须写入 summary_json 和 review_md。
+                - summary 可以写模块级结论，但每条 finding 必须落回具体 region。
+                - code-review.md 必须按模块/文件分节，保留完整审查说明，便于最终分卷报告用相对链接跳转。
+                - 输出必须写入 summary_json 和 review_md，最终只输出 DONE 或 BLOCKED。
 
                 input_json: %s
                 summary_json: %s
                 review_md: %s
                 batch_id: %s
+                unit_id: %s
                 """.formatted(
                 batch.get("input_json"),
                 batch.get("summary_json"),
                 batch.get("review_md"),
-                batch.get("batch_id")
+                batch.get("batch_id"),
+                firstNonBlank(string(batch.get("unit_id")), string(batch.get("batch_id")))
         );
     }
 

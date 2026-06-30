@@ -14,6 +14,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -46,6 +48,7 @@ class WeeklyEvidenceBuilderTest {
         assertThat(sourceRuns).doesNotContainKeys("git_report", "smartesb_rewrite_review", "smartesb_code_reader");
         assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("weekly_git_evidence_json").toString())).exists();
         assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("review_batches_json").toString())).exists();
+        assertThat(Path.of(((Map<String, Object>) sourceRuns.get("weekly_git")).get("review_units_json").toString())).exists();
         assertThat(properties.getPaths().getOut().resolve("sources/weekly-git/index_inputs.json")).doesNotExist();
         assertThat(properties.getPaths().getOut().resolve("sources/weekly-git/reports")).doesNotExist();
 
@@ -56,7 +59,12 @@ class WeeklyEvidenceBuilderTest {
 
         List<Map<String, Object>> batches = (List<Map<String, Object>>) evidence.get("review_batches");
         assertThat(batches).hasSize(1);
-        assertThat(batches.get(0)).containsEntry("batch_id", "review-batch-001-src-main-java-foo-java");
+        assertThat(batches.get(0))
+                .containsEntry("batch_id", "review-unit-001-src-main-java-author-001-alice-alice-example-com")
+                .containsEntry("unit_id", "review-unit-001-src-main-java-author-001-alice-alice-example-com");
+        assertThat((Map<String, Object>) batches.get(0).get("group"))
+                .containsEntry("module", "src/main/java")
+                .containsEntry("author_key", "author-001-alice-alice-example-com");
         assertThat((List<Map<String, Object>>) batches.get(0).get("changed_regions"))
                 .singleElement()
                 .satisfies(region -> {
@@ -70,8 +78,83 @@ class WeeklyEvidenceBuilderTest {
         assertThat((Map<String, Object>) evidence.get("data_quality")).containsEntry("status", "clean");
     }
 
+    @Test
+    void contractsReviewTasksByModuleAuthorAndCapacityInsteadOfSingleFileBatches() throws Exception {
+        WeeklyEngineeringReportProperties properties = properties(tempDir.resolve("repo"), tempDir.resolve("weekly"));
+        properties.getReview().getGrouping().setMaxRegionsPerTask(4);
+        properties.getReview().getGrouping().setMaxFilesPerTask(10);
+        properties.getReview().getGrouping().setMaxHunkCharsPerTask(10_000);
+        properties.getReview().getGrouping().setMaxCommitsPerTask(10);
+
+        Path evidencePath = new WeeklyEvidenceBuilder(objectMapper, fakeCollector(syntheticWeeklyGit())).build(properties, LocalDate.of(2026, 6, 26));
+
+        Map<String, Object> evidence = readMap(evidencePath);
+        List<Map<String, Object>> batches = (List<Map<String, Object>>) evidence.get("review_batches");
+        assertThat(batches).hasSize(2);
+        assertThat(batches).extracting(row -> row.get("batch_id"))
+                .containsExactly(
+                        "review-unit-001-upfs-cup-src-main-java-com-spdb-upfs-cup-service-esf-author-001-alice-alice-example-com",
+                        "review-unit-002-upfs-cup-src-main-resources-mapper-author-001-alice-alice-example-com"
+                );
+        assertThat((List<Map<String, Object>>) batches.get(0).get("changed_regions"))
+                .extracting(row -> row.get("file"))
+                .containsExactly(
+                        "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsA.java",
+                        "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsB.java",
+                        "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsC.java"
+                );
+        assertThat((Map<String, Object>) batches.get(0).get("group"))
+                .containsEntry("module", "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf")
+                .containsEntry("author_key", "author-001-alice-alice-example-com")
+                .containsEntry("region_count", 3)
+                .containsEntry("file_count", 3);
+        assertThat(Path.of((String) batches.get(0).get("input_json")).toString()).contains("review-units");
+        assertThat(properties.getPaths().getOut().resolve("review-units.json")).exists();
+    }
+
     private WeeklyEvidenceBuilder newBuilder() {
         return new WeeklyEvidenceBuilder(objectMapper, new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper));
+    }
+
+    private GitStatsCollector fakeCollector(Map<String, Object> weeklyGit) {
+        return new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper) {
+            @Override
+            public Map<String, Object> collect(com.sonnet.wyf.gitreport.GitReportProperties properties) {
+                return weeklyGit;
+            }
+        };
+    }
+
+    private Map<String, Object> syntheticWeeklyGit() {
+        List<Map<String, Object>> regions = new ArrayList<>();
+        regions.add(region("a1", "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsA.java", 10));
+        regions.add(region("a2", "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsB.java", 20));
+        regions.add(region("a3", "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf/CnsC.java", 30));
+        regions.add(region("a4", "upfs-cup/src/main/resources/mapper/CnsMapper.xml", 40));
+        Map<String, Object> author = new LinkedHashMap<>();
+        author.put("rank", 1);
+        author.put("author", "Alice <alice@example.com>");
+        author.put("commit_count", 4);
+        author.put("non_comment_churn", 80);
+        author.put("workload_score", 100.0);
+        author.put("top_files", List.of());
+        author.put("commits", List.of());
+        author.put("changed_regions", regions);
+        return new LinkedHashMap<>(Map.of(
+                "totals", Map.of("commit_count", 4),
+                "authors", List.of(author)
+        ));
+    }
+
+    private Map<String, Object> region(String commit, String file, int line) {
+        return new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("commit", commit),
+                Map.entry("short_hash", commit),
+                Map.entry("file", file),
+                Map.entry("line_start", line),
+                Map.entry("line_end", line + 1),
+                Map.entry("hunk", "@@ -" + line + " +" + line + " @@\n+changed();")
+        ));
     }
 
     private WeeklyEngineeringReportProperties properties(Path repo, Path out) {

@@ -232,6 +232,7 @@ public class WeeklyEngineeringReportProperties {
         private int maxRegionsPerBatch = 8;
         private int maxHunkLines = 24;
         private int concurrency = 3;
+        private final Grouping grouping = new Grouping();
 
         @JsonProperty("max-regions-per-batch")
         public int getMaxRegionsPerBatch() {
@@ -257,6 +258,72 @@ public class WeeklyEngineeringReportProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public Grouping getGrouping() {
+            return grouping;
+        }
+    }
+
+    public static class Grouping {
+        private String strategy = "module-author-capacity";
+        private int targetTaskCount = 80;
+        private int maxRegionsPerTask = 80;
+        private int maxFilesPerTask = 25;
+        private int maxHunkCharsPerTask = 80_000;
+        private int maxCommitsPerTask = 40;
+
+        public String getStrategy() {
+            return strategy;
+        }
+
+        public void setStrategy(String strategy) {
+            this.strategy = strategy;
+        }
+
+        @JsonProperty("target-task-count")
+        public int getTargetTaskCount() {
+            return targetTaskCount;
+        }
+
+        public void setTargetTaskCount(int targetTaskCount) {
+            this.targetTaskCount = targetTaskCount;
+        }
+
+        @JsonProperty("max-regions-per-task")
+        public int getMaxRegionsPerTask() {
+            return maxRegionsPerTask;
+        }
+
+        public void setMaxRegionsPerTask(int maxRegionsPerTask) {
+            this.maxRegionsPerTask = maxRegionsPerTask;
+        }
+
+        @JsonProperty("max-files-per-task")
+        public int getMaxFilesPerTask() {
+            return maxFilesPerTask;
+        }
+
+        public void setMaxFilesPerTask(int maxFilesPerTask) {
+            this.maxFilesPerTask = maxFilesPerTask;
+        }
+
+        @JsonProperty("max-hunk-chars-per-task")
+        public int getMaxHunkCharsPerTask() {
+            return maxHunkCharsPerTask;
+        }
+
+        public void setMaxHunkCharsPerTask(int maxHunkCharsPerTask) {
+            this.maxHunkCharsPerTask = maxHunkCharsPerTask;
+        }
+
+        @JsonProperty("max-commits-per-task")
+        public int getMaxCommitsPerTask() {
+            return maxCommitsPerTask;
+        }
+
+        public void setMaxCommitsPerTask(int maxCommitsPerTask) {
+            this.maxCommitsPerTask = maxCommitsPerTask;
         }
     }
 }

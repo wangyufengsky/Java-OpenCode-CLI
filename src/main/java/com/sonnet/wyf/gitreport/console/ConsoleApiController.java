@@ -37,6 +37,11 @@ public class ConsoleApiController {
         return Map.of("chains", chainCatalog.chainIds());
     }
 
+    @GetMapping("/chains/{chainId}/defaults")
+    public Map<String, Map<String, Object>> chainDefaults(@PathVariable String chainId) throws Exception {
+        return Map.of("defaults", chainCatalog.defaultValues(chainId));
+    }
+
     @PostMapping("/runs")
     public Map<String, Long> submit(@RequestBody WorkflowRunSubmission submission) throws Exception {
         validate(submission);

@@ -221,19 +221,23 @@ opencode-runner:
   run-date: "2026-06-26"
 ```
 
-周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按 `startday`/`endday` 指定的任意统计窗口重新统计 Git，生成窗口内 changed regions 和审查批次，然后启动 weekly code-review worker 审查这些批次，最后从 Git 证据和代码审查结果投影 Markdown 报告。输出包括：
+周报链路不读取 git-report、SmartESB rewrite review 或 code-reader 的历史产物。它会按 `startday`/`endday` 指定的任意统计窗口重新统计 Git，生成窗口内 changed regions，再按模块、作者和容量限制收缩成 review units，最后从 Git 证据和代码审查结果投影完整分卷 Markdown 报告。输出包括：
 
 - `weekly-git-evidence.json`：周报链路本次重新生成的 Git 证据。
-- `review-batches.json`：统计窗口内代码审查批次清单。
-- `review-batches/<batch_id>/input.json`：单个审查批次输入，只包含该批次 changed regions。
-- `review-batches/<batch_id>/code-review-summary.json`、`review-batches/<batch_id>/code-review.md`：OpenCode worker 写入的批次审查结果。
+- `review-units.json`：按模块、作者和容量限制收缩后的代码审查任务清单。
+- `review-batches.json`：兼容旧补跑入口的同内容清单，实际任务 ID 以 `review-unit-*` 命名。
+- `review-units/<unit_id>/input.json`：单个审查任务输入，只包含该任务覆盖的 changed regions。
+- `review-units/<unit_id>/code-review-summary.json`、`review-units/<unit_id>/code-review.md`：OpenCode worker 写入的任务审查结果。
 - `weekly-evidence.json`：统一证据层，引用 Git 证据和审查批次。
-- `code-review/overview.md`、`code-review/p0-p1-p2-issues.md`、`code-review/code-standards.md`、`code-review/hotspots.md`、`code-review/index.json`：代码维度审查报告。
+- `code-review/overview.md`、`code-review/p0-p1-p2-issues.md`、`code-review/code-standards.md`、`code-review/hotspots.md`、`code-review/full-findings.md`、`code-review/modules/*.md`、`code-review/index.json`：完整代码维度审查报告。
 - `quality-scores.json`、`people-ranking.md`：基于工作量和 P0/P1/P2 审查结果生成的人员周度代码报告排名。
 - `weekly-report.md`：项目经理周会版。
 - `team-risk-assessment.md`：研发负责人团队贡献与风险辅助评估。
 - `people/<author_key>/weekly-person-report.md`：个人证据包。
+- `traceability.json`：`region_id -> review unit -> finding -> report` 的追溯索引。
 - `data-quality.md`：数据质量说明。
+
+所有 Markdown 报告之间使用相对路径链接，便于在本地目录、IDE 或归档包内直接点击跳转。
 
 报告口径固定隔离：
 
@@ -251,10 +255,10 @@ opencode-runner:
   mode: "rerun"
   rerun:
     type: "review-batch"
-    id: "review-batch-001-src-main-java-foo-java, review-batch-002-src-main-java-bar-java"
+    id: "review-unit-001-upfs-cup-src-main-java-com-spdb-upfs-cup-service-esf-author-001-alice"
 ```
 
-`id` 必须存在于 `weekly-evidence.json` 的 `review_batches[].batch_id`。多个批次会并发补跑，然后重建周报和团队风险报告。
+`id` 必须存在于 `weekly-evidence.json` 的 `review_batches[].batch_id`。多个 review units 会并发补跑，然后重建周报、团队风险报告和分卷代码审查报告。
 
 ### weekly-engineering-report 只重建报告
 
@@ -403,9 +407,11 @@ opencode:
 - `startday`/`endday` 都不配时，才使用 `opencode-runner.run-date` 所在自然周的周一到周日作为兜底。
 - `git.exclude` 建议保留，用于排除构建产物、锁文件、生成物等噪声。
 - `git.include`、`git.include-merges` 和 `git.author-map` 都是可选高级配置；不配时使用默认统计口径。
-- `review.max-regions-per-batch` 控制每个 OpenCode 审查批次最多包含多少个 changed regions。
 - `review.max-hunk-lines` 控制每个 changed region 带入审查输入的最大 hunk 行数。
 - `review.concurrency` 控制 weekly code-review worker 并发数，实际并发还会受共享 `opencode.max-concurrency` 限制。
+- `review.grouping.strategy` 当前支持 `module-author-capacity`，先按模块/路径域和作者收缩任务，再按容量切分。
+- `review.grouping.target-task-count` 是期望任务数量，用于配置阅读和后续调优；实际数量仍由模块、作者和容量边界决定。
+- `review.grouping.max-regions-per-task`、`max-files-per-task`、`max-hunk-chars-per-task`、`max-commits-per-task` 控制单个 review unit 的容量上限，避免上下文过大。
 - `opencode.*` 可覆盖周报链路自己的 OpenCode 参数；未覆盖的模型和 server 配置继续使用主配置。
 - 周报链路不会触发其他链路，不会读取历史审查产物；代码质量结论只来自本链路本次生成的 weekly code-review 输出。
 
@@ -602,17 +608,21 @@ weekly-engineering-report 常见产物：
 ```text
 weekly-evidence.json
 weekly-git-evidence.json
+review-units.json
 review-batches.json
-review-batches/<batch_id>/input.json
-review-batches/<batch_id>/code-review-summary.json
-review-batches/<batch_id>/code-review.md
+review-units/<unit_id>/input.json
+review-units/<unit_id>/code-review-summary.json
+review-units/<unit_id>/code-review.md
 code-review/overview.md
 code-review/p0-p1-p2-issues.md
 code-review/code-standards.md
 code-review/hotspots.md
+code-review/full-findings.md
+code-review/modules/<module>.md
 code-review/index.json
 quality-scores.json
 people-ranking.md
+traceability.json
 weekly-report.md
 team-risk-assessment.md
 data-quality.md
@@ -633,6 +643,12 @@ mvn test
 
 ```bash
 mvn spring-boot:run
+```
+
+项目使用 SQLite JDBC 保存任务控制台历史。`mvn spring-boot:run` 已在 Maven 插件中配置 SQLite native library 所需的 JVM 参数；如果直接运行打包后的 jar 或在 IDE 中启动，需要在 VM options 中加入：
+
+```bash
+--enable-native-access=ALL-UNNAMED
 ```
 
 临时覆盖主配置：

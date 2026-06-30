@@ -55,6 +55,29 @@ class WeeklyOpenCodeReviewRunnerTest {
     }
 
     @Test
+    void writesReviewUnitPromptThatRequiresFullRegionCoverageAndTraceableFindings() throws Exception {
+        CapturingTaskRunner taskRunner = new CapturingTaskRunner();
+        WeeklyOpenCodeReviewRunner runner = new WeeklyOpenCodeReviewRunner(
+                objectMapper,
+                fakeServerManager(),
+                taskRunner,
+                directTaskRunner(),
+                new WeeklyCodeReviewOutputValidator(objectMapper)
+        );
+
+        runner.run(properties(), request(), writeEvidence(), List.of());
+
+        String prompt = Files.readString(taskRunner.spec.promptFile());
+        assertThat(prompt)
+                .contains("review unit", "模块/作者", "多文件", "多 commit")
+                .contains("reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id")
+                .contains("不得只挑重点审查，不得因为文件多而跳过低风险 region")
+                .contains("finding 必须绑定 region_id、author_key、commit、file、line_start、line_end")
+                .contains("code-review.md 必须按模块/文件分节")
+                .contains("unit_id: review-unit-001");
+    }
+
+    @Test
     void rejectsUnknownReviewBatchRerunId() throws Exception {
         WeeklyOpenCodeReviewRunner runner = new WeeklyOpenCodeReviewRunner(
                 objectMapper,
@@ -84,14 +107,23 @@ class WeeklyOpenCodeReviewRunnerTest {
     }
 
     private Path writeEvidence() throws Exception {
-        Path summary = tempDir.resolve("review-batches/review-batch-001/code-review-summary.json");
-        Path review = tempDir.resolve("review-batches/review-batch-001/code-review.md");
-        Path input = tempDir.resolve("review-batches/review-batch-001/input.json");
+        Path summary = tempDir.resolve("review-units/review-unit-001/code-review-summary.json");
+        Path review = tempDir.resolve("review-units/review-unit-001/code-review.md");
+        Path input = tempDir.resolve("review-units/review-unit-001/input.json");
         Files.createDirectories(summary.getParent());
         Path evidence = tempDir.resolve("weekly-evidence.json");
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(evidence.toFile(), Map.of(
                 "review_batches", List.of(Map.of(
-                        "batch_id", "review-batch-001",
+                        "batch_id", "review-unit-001",
+                        "unit_id", "review-unit-001",
+                        "group", Map.of(
+                                "strategy", "module-author-capacity",
+                                "module", "upfs-cup/src/main/java/com/spdb/upfs/cup/service/esf",
+                                "author_key", "author-001-alice",
+                                "region_count", 1,
+                                "file_count", 1,
+                                "commit_count", 1
+                        ),
                         "input_json", input.toString(),
                         "summary_json", summary.toString(),
                         "review_md", review.toString(),
@@ -141,11 +173,11 @@ class WeeklyOpenCodeReviewRunnerTest {
         @Override
         public com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
             this.spec = spec;
-            Files.writeString(Path.of(spec.runDir().getParent().getParent().toString(), "review-batches", "review-batch-001", "code-review.md"), "# 批次代码审查\n");
+            Files.writeString(Path.of(spec.runDir().getParent().getParent().toString(), "review-units", "review-unit-001", "code-review.md"), "# 批次代码审查\n");
             ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
-            mapper.writerWithDefaultPrettyPrinter().writeValue(Path.of(spec.runDir().getParent().getParent().toString(), "review-batches", "review-batch-001", "code-review-summary.json").toFile(), Map.ofEntries(
+            mapper.writerWithDefaultPrettyPrinter().writeValue(Path.of(spec.runDir().getParent().getParent().toString(), "review-units", "review-unit-001", "code-review-summary.json").toFile(), Map.ofEntries(
                     Map.entry("schema_version", "weekly-code-review-output/v1"),
-                    Map.entry("batch_id", "review-batch-001"),
+                    Map.entry("batch_id", "review-unit-001"),
                     Map.entry("status", "completed"),
                     Map.entry("summary", "ok"),
                     Map.entry("reviewed_region_ids", List.of("region-00001")),

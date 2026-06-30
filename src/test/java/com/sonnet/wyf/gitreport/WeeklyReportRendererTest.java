@@ -33,17 +33,26 @@ class WeeklyReportRendererTest {
         assertThat(tempDir.resolve("code-review/p0-p1-p2-issues.md")).content().contains("P0/P1/P2", "P1");
         assertThat(tempDir.resolve("code-review/code-standards.md")).content().contains("代码规范");
         assertThat(tempDir.resolve("code-review/hotspots.md")).content().contains("热点");
+        assertThat(tempDir.resolve("code-review/full-findings.md")).content()
+                .contains("全量代码审查问题", "src/Foo.java", "review-batches/review-batch-001-src-foo-java/code-review.md")
+                .doesNotContain(tempDir.toString());
+        assertThat(tempDir.resolve("code-review/modules/src-foo-java.md")).content()
+                .contains("模块代码审查报告", "src/Foo.java", "../full-findings.md");
         assertThat(tempDir.resolve("code-review/index.json")).exists();
+        assertThat(tempDir.resolve("code-review/author-summaries.json")).exists();
+        assertThat(tempDir.resolve("traceability.json")).content()
+                .contains("region-00001", "review-batch-001-src-foo-java", "F-001");
         assertThat(tempDir.resolve("quality-scores.json")).content().contains("author-001-alice");
         assertThat(tempDir.resolve("people-ranking.md")).content().contains("最终排名", "初始排名", "Alice <alice@example.com>");
         assertThat(tempDir.resolve("people/author-001-alice/weekly-person-report.md")).content()
-                .contains("个人周报", "P1", "src/Foo.java")
+                .contains("个人周报", "P1", "src/Foo.java", "../../code-review/full-findings.md")
                 .doesNotContain("优秀", "不合格");
         assertThat(tempDir.resolve("weekly-report.md")).content()
-                .contains("周度工程项目周报", "项目经理周会重点")
+                .contains("周度工程项目周报", "项目经理周会重点", "[全量代码审查问题](code-review/full-findings.md)", "[作者工作排名](people-ranking.md)")
+                .doesNotContain(tempDir.toString())
                 .doesNotContain("Alice <alice@example.com>");
         assertThat(tempDir.resolve("team-risk-assessment.md")).content()
-                .contains("团队贡献与风险辅助评估", "Alice <alice@example.com>");
+                .contains("团队贡献与风险辅助评估", "Alice <alice@example.com>", "[作者工作排名](people-ranking.md)");
     }
 
     @Test

@@ -18,6 +18,7 @@ import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -75,11 +76,30 @@ class ConsoleMvcTest {
         assertThat(appJs)
                 .contains("项目标识")
                 .contains("transaction-plan-dir")
-                .contains("src/main/resources/smartesb-transactions");
+                .contains("review.grouping.max-regions-per-task")
+                .contains("/api/chains/")
+                .doesNotContain("review.max-regions-per-batch")
+                .doesNotContain("src/main/resources/smartesb-transactions");
         mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("运行 " + runId)))
                 .andExpect(content().string(containsString("事件流")));
+    }
+
+    @Test
+    void chainDefaultsComeFromParsedYaml() throws Exception {
+        mockMvc.perform(get("/api/chains/git-code-contribution-report/defaults"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.defaults['project.id']").value("upfs-production"))
+                .andExpect(jsonPath("$.defaults['paths.repo']").value("/home/wangyufeng/workspace/upfs-production"))
+                .andExpect(jsonPath("$.defaults['git.include-merges']").value(false))
+                .andExpect(jsonPath("$.defaults['git.exclude'][0]").value("target/**"))
+                .andExpect(jsonPath("$.defaults['detail-input.top-files']").value(10));
+
+        mockMvc.perform(get("/api/chains/smartesb-rewrite-code-review/defaults"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.defaults['transaction-plan-dir']").value("src/main/resources/smartesb-transactions"))
+                .andExpect(jsonPath("$.defaults['local-out']").doesNotExist());
     }
 
     @Test

@@ -30,6 +30,10 @@ public class WeeklyReportRenderer {
         writeCodeReviewReports(out, evidence, aggregation);
         writePeopleReports(out, evidence, aggregation);
         writeFinalReports(out, evidence, aggregation);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("traceability.json").toFile(), Map.of(
+                "schema_version", "weekly-traceability/v1",
+                "regions", aggregation.traceability
+        ));
         Files.writeString(out.resolve("data-quality.md"), renderDataQuality(evidence));
     }
 
@@ -43,9 +47,31 @@ public class WeeklyReportRenderer {
             }
             Map<String, Object> summary = objectMapper.readValue(summaryPath.toFile(), new TypeReference<>() {});
             aggregation.batchSummaries.add(summary);
-            aggregation.findings.addAll(listOfMaps(summary.get("findings")));
+            String batchId = string(batch.get("batch_id"));
+            String reviewMd = string(batch.get("review_md"));
+            String module = moduleOf(batch);
+            for (Map<String, Object> finding : listOfMaps(summary.get("findings"))) {
+                finding.put("_batch_id", batchId);
+                finding.put("_review_md", reviewMd);
+                finding.put("_module", module);
+                aggregation.findings.add(finding);
+                aggregation.findingsByModule.computeIfAbsent(module, ignored -> new ArrayList<>()).add(finding);
+            }
             for (Map<String, Object> region : listOfMaps(batch.get("changed_regions"))) {
                 aggregation.regionsById.put(string(region.get("region_id")), region);
+                aggregation.traceability.add(Map.of(
+                        "region_id", string(region.get("region_id")),
+                        "batch_id", batchId,
+                        "unit_id", firstNonBlank(string(batch.get("unit_id")), batchId),
+                        "module", module,
+                        "author_key", string(region.get("author_key")),
+                        "commit", string(region.get("commit")),
+                        "file", string(region.get("file")),
+                        "findings", listOfMaps(summary.get("findings")).stream()
+                                .filter(finding -> string(region.get("region_id")).equals(string(finding.get("region_id"))))
+                                .map(finding -> string(finding.get("id")))
+                                .toList()
+                ));
             }
         }
         for (Map<String, Object> author : listOfMaps(mapValue(evidence.get("weekly_git")).get("authors"))) {
@@ -67,6 +93,12 @@ public class WeeklyReportRenderer {
         Files.writeString(dir.resolve("p0-p1-p2-issues.md"), renderP0P1P2Issues(aggregation));
         Files.writeString(dir.resolve("code-standards.md"), renderCodeStandards(aggregation));
         Files.writeString(dir.resolve("hotspots.md"), renderHotspots(aggregation));
+        Files.writeString(dir.resolve("full-findings.md"), renderFullFindings(dir, aggregation));
+        Path modulesDir = dir.resolve("modules");
+        Files.createDirectories(modulesDir);
+        for (Map.Entry<String, List<Map<String, Object>>> entry : aggregation.findingsByModule.entrySet()) {
+            Files.writeString(modulesDir.resolve(slug(entry.getKey()) + ".md"), renderModuleReport(modulesDir, entry.getKey(), entry.getValue()));
+        }
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("index.json").toFile(), Map.of(
                 "schema_version", "weekly-code-review-index/v1",
                 "finding_count", aggregation.findings.size(),
@@ -81,11 +113,15 @@ public class WeeklyReportRenderer {
                 "schema_version", "weekly-quality-scores/v1",
                 "rankings", rankings
         ));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve("code-review/author-summaries.json").toFile(), Map.of(
+                "schema_version", "weekly-author-summaries/v1",
+                "authors", rankings
+        ));
         Files.writeString(out.resolve("people-ranking.md"), renderPeopleRanking(rankings));
         for (PersonAggregate person : aggregation.people.values()) {
             Path personDir = out.resolve("people").resolve(firstNonBlank(person.authorKey(), "unknown"));
             Files.createDirectories(personDir);
-            Files.writeString(personDir.resolve("weekly-person-report.md"), renderPersonReport(person));
+            Files.writeString(personDir.resolve("weekly-person-report.md"), renderPersonReport(person, personDir, out));
         }
     }
 
@@ -157,8 +193,25 @@ public class WeeklyReportRenderer {
         return md.toString();
     }
 
-    private String renderPersonReport(PersonAggregate person) {
+    private String renderFullFindings(Path reportDir, Aggregation aggregation) {
+        StringBuilder md = new StringBuilder("# 全量代码审查问题\n\n");
+        md.append("- [P0/P1/P2 级别问题](p0-p1-p2-issues.md)\n");
+        md.append("- [代码审查热点](hotspots.md)\n\n");
+        appendFindingTable(md, aggregation.findings, reportDir);
+        return md.toString();
+    }
+
+    private String renderModuleReport(Path moduleDir, String module, List<Map<String, Object>> findings) {
+        StringBuilder md = new StringBuilder("# 模块代码审查报告：").append(module).append("\n\n");
+        md.append("- [返回全量代码审查问题](").append(relativeLink(moduleDir, moduleDir.getParent().resolve("full-findings.md"))).append(")\n\n");
+        appendFindingTable(md, findings, moduleDir);
+        return md.toString();
+    }
+
+    private String renderPersonReport(PersonAggregate person, Path personDir, Path out) {
         StringBuilder md = new StringBuilder("# 个人周报：").append(person.author()).append("\n\n");
+        md.append("- [全量代码审查问题](").append(relativeLink(personDir, out.resolve("code-review/full-findings.md"))).append(")\n");
+        md.append("- [团队作者工作排名](").append(relativeLink(personDir, out.resolve("people-ranking.md"))).append(")\n\n");
         md.append("## 统计窗口工作范围\n\n");
         md.append("- 提交数：").append(number(person.authorFacts.get("commit_count"))).append("\n");
         md.append("- 去注释变更量：").append(number(person.authorFacts.get("non_comment_churn"))).append("\n");
@@ -184,6 +237,11 @@ public class WeeklyReportRenderer {
         md.append("- 周期：").append(string(week.get("label"))).append("（").append(string(week.get("start"))).append(" 至 ").append(string(week.get("end"))).append("）\n");
         md.append("- 统计窗口审查批次：").append(listOfMaps(evidence.get("review_batches")).size()).append("\n");
         md.append("- 项目状态：").append(aggregation.hasP0OrP1() ? "at_risk" : "normal").append("\n\n");
+        md.append("## 报告索引\n\n");
+        md.append("- [全量代码审查问题](code-review/full-findings.md)\n");
+        md.append("- [代码审查总览](code-review/overview.md)\n");
+        md.append("- [作者工作排名](people-ranking.md)\n");
+        md.append("- [团队贡献与风险辅助评估](team-risk-assessment.md)\n\n");
         md.append("## 统计窗口完成范围\n\n");
         appendHotFiles(md, evidence);
         md.append("\n## 主要风险\n\n");
@@ -198,6 +256,9 @@ public class WeeklyReportRenderer {
         StringBuilder md = new StringBuilder("# 团队贡献与风险辅助评估\n\n");
         md.append("## 团队概览\n\n");
         md.append("本报告聚合统计窗口内 Git 改动与本链路即时代码审查结果，用于团队风险识别和辅导，不作为绩效定级。\n\n");
+        md.append("- [项目周报](weekly-report.md)\n");
+        md.append("- [作者工作排名](people-ranking.md)\n");
+        md.append("- [全量代码审查问题](code-review/full-findings.md)\n\n");
         md.append("## 人员风险分布\n\n");
         md.append(renderPeopleRanking(aggregation.people.values().stream().map(PersonAggregate::rankingRow).toList()));
         md.append("\n## 高优先级问题\n\n");
@@ -215,13 +276,21 @@ public class WeeklyReportRenderer {
     }
 
     private void appendFindingTable(StringBuilder md, List<Map<String, Object>> findings) {
+        appendFindingTable(md, findings, null);
+    }
+
+    private void appendFindingTable(StringBuilder md, List<Map<String, Object>> findings, Path linkBaseDir) {
         if (findings.isEmpty()) {
             md.append("统计窗口内未发现匹配条件的问题。\n");
             return;
         }
-        md.append("| 级别 | 维度 | 文件 | 行号 | 人员 | 规则 | 建议 |\n");
-        md.append("| --- | --- | --- | --- | --- | --- | --- |\n");
+        md.append("| 级别 | 维度 | 文件 | 行号 | 人员 | 规则 | 建议 | 明细 |\n");
+        md.append("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
         for (Map<String, Object> finding : findings) {
+            String detail = "";
+            if (linkBaseDir != null && !string(finding.get("_review_md")).isBlank()) {
+                detail = "[review](" + relativeLink(linkBaseDir, Path.of(string(finding.get("_review_md")))) + ")";
+            }
             md.append("| ").append(cell(finding.get("severity")))
                     .append(" | ").append(cell(finding.get("dimension")))
                     .append(" | ").append(cell(finding.get("file")))
@@ -229,6 +298,7 @@ public class WeeklyReportRenderer {
                     .append(" | ").append(cell(finding.get("author_key")))
                     .append(" | ").append(cell(finding.get("rule_id")))
                     .append(" | ").append(cell(finding.get("suggestion")))
+                    .append(" | ").append(detail)
                     .append(" |\n");
         }
     }
@@ -274,6 +344,27 @@ public class WeeklyReportRenderer {
         return first == null || first.isBlank() ? second : first;
     }
 
+    private String moduleOf(Map<String, Object> batch) {
+        Map<String, Object> group = mapValue(batch.get("group"));
+        if (!string(group.get("module")).isBlank()) {
+            return string(group.get("module"));
+        }
+        Map<String, Object> scope = mapValue(batch.get("scope"));
+        return firstNonBlank(string(scope.get("path")), "unknown");
+    }
+
+    private String slug(String value) {
+        String normalized = value.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        return normalized.isBlank() ? "unknown" : normalized.substring(0, Math.min(80, normalized.length()));
+    }
+
+    private String relativeLink(Path fromDir, Path target) {
+        return fromDir.toAbsolutePath().normalize()
+                .relativize(target.toAbsolutePath().normalize())
+                .toString()
+                .replace('\\', '/');
+    }
+
     private String string(Object value) {
         return value == null ? "" : value.toString();
     }
@@ -303,7 +394,9 @@ public class WeeklyReportRenderer {
     private static class Aggregation {
         private final List<Map<String, Object>> batchSummaries = new ArrayList<>();
         private final List<Map<String, Object>> findings = new ArrayList<>();
+        private final List<Map<String, Object>> traceability = new ArrayList<>();
         private final Map<String, Map<String, Object>> regionsById = new LinkedHashMap<>();
+        private final Map<String, List<Map<String, Object>>> findingsByModule = new LinkedHashMap<>();
         private final Map<String, PersonAggregate> people = new LinkedHashMap<>();
 
         private void rankPeople() {

@@ -10,10 +10,13 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 public class WeeklyEvidenceBuilder {
     public static final String SCHEMA_VERSION = "weekly-engineering-report/v1";
@@ -34,8 +37,10 @@ public class WeeklyEvidenceBuilder {
 
         Path weeklyGitEvidence = out.resolve("weekly-git-evidence.json");
         Path reviewBatches = out.resolve("review-batches.json");
+        Path reviewUnits = out.resolve("review-units.json");
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(weeklyGitEvidence.toFile(), weeklyGit);
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(reviewBatches.toFile(), Map.of("batches", batches));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(reviewUnits.toFile(), Map.of("units", batches));
         writeBatchInputs(out, batches);
 
         Map<String, Object> evidence = new LinkedHashMap<>();
@@ -46,7 +51,8 @@ public class WeeklyEvidenceBuilder {
         evidence.put("source_runs", Map.of("weekly_git", Map.of(
                 "status", "generated",
                 "weekly_git_evidence_json", weeklyGitEvidence.toString(),
-                "review_batches_json", reviewBatches.toString()
+                "review_batches_json", reviewBatches.toString(),
+                "review_units_json", reviewUnits.toString()
         )));
         evidence.put("weekly_git", weeklyGit);
         evidence.put("review_batches", batches);
@@ -93,40 +99,116 @@ public class WeeklyEvidenceBuilder {
     }
 
     private List<Map<String, Object>> buildReviewBatches(WeeklyEngineeringReportProperties properties, Path out, Map<String, Object> weeklyGit) {
-        Map<String, List<Map<String, Object>>> byFile = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> byGroup = new LinkedHashMap<>();
         for (Map<String, Object> author : listOfMaps(weeklyGit.get("authors"))) {
             for (Map<String, Object> region : listOfMaps(author.get("changed_regions"))) {
                 String file = string(region.get("file"));
                 if (!file.isBlank()) {
-                    byFile.computeIfAbsent(file, ignored -> new ArrayList<>()).add(region);
+                    String module = moduleKey(file);
+                    String authorKey = string(region.get("author_key"));
+                    byGroup.computeIfAbsent(module + "\u0000" + authorKey, ignored -> new ArrayList<>()).add(region);
                 }
             }
         }
 
-        int maxRegions = Math.max(1, properties.getReview().getMaxRegionsPerBatch());
+        WeeklyEngineeringReportProperties.Grouping grouping = properties.getReview().getGrouping();
+        int maxRegions = Math.max(1, grouping.getMaxRegionsPerTask());
+        int maxFiles = Math.max(1, grouping.getMaxFilesPerTask());
+        int maxHunkChars = Math.max(1, grouping.getMaxHunkCharsPerTask());
+        int maxCommits = Math.max(1, grouping.getMaxCommitsPerTask());
         List<Map<String, Object>> batches = new ArrayList<>();
-        for (Map.Entry<String, List<Map<String, Object>>> entry : byFile.entrySet().stream()
+        for (Map.Entry<String, List<Map<String, Object>>> entry : byGroup.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .toList()) {
             List<Map<String, Object>> regions = entry.getValue().stream()
-                    .sorted(Comparator.comparing(row -> string(row.get("commit")) + ":" + number(row.get("line_start"))))
+                    .sorted(Comparator.comparing(row -> string(row.get("commit")) + ":" + string(row.get("file")) + ":" + number(row.get("line_start"))))
                     .toList();
-            for (int start = 0; start < regions.size(); start += maxRegions) {
-                List<Map<String, Object>> slice = regions.subList(start, Math.min(start + maxRegions, regions.size()));
-                String batchId = "review-batch-%03d-%s".formatted(batches.size() + 1, slug(entry.getKey()));
-                Path batchDir = out.resolve("review-batches").resolve(batchId);
-                Map<String, Object> batch = new LinkedHashMap<>();
-                batch.put("batch_id", batchId);
-                batch.put("scope", Map.of("type", "file", "path", entry.getKey()));
-                batch.put("changed_regions", List.copyOf(slice));
-                batch.put("input_json", batchDir.resolve("input.json").toString());
-                batch.put("review_md", batchDir.resolve("code-review.md").toString());
-                batch.put("summary_json", batchDir.resolve("code-review-summary.json").toString());
-                batch.put("status", "pending");
-                batches.add(batch);
+            String[] groupParts = entry.getKey().split("\u0000", 2);
+            String module = groupParts[0];
+            String authorKey = groupParts.length > 1 ? groupParts[1] : "";
+            UnitAccumulator current = new UnitAccumulator(grouping.getStrategy(), module, authorKey, maxRegions, maxFiles, maxHunkChars, maxCommits);
+            for (Map<String, Object> region : regions) {
+                if (!current.isEmpty() && !current.canAccept(region)) {
+                    batches.add(toBatch(out, batches.size() + 1, current));
+                    current = new UnitAccumulator(grouping.getStrategy(), module, authorKey, maxRegions, maxFiles, maxHunkChars, maxCommits);
+                }
+                current.add(region);
+            }
+            if (!current.isEmpty()) {
+                batches.add(toBatch(out, batches.size() + 1, current));
             }
         }
         return batches;
+    }
+
+    private Map<String, Object> toBatch(Path out, int index, UnitAccumulator unit) {
+        String batchId = "review-unit-%03d-%s-%s".formatted(index, slug(unit.module), slug(unit.authorKey));
+        Path batchDir = out.resolve("review-units").resolve(batchId);
+        Map<String, Object> batch = new LinkedHashMap<>();
+        batch.put("batch_id", batchId);
+        batch.put("unit_id", batchId);
+        batch.put("scope", Map.of("type", "module-author", "path", unit.module));
+        batch.put("group", Map.of(
+                "strategy", unit.strategy,
+                "module", unit.module,
+                "author_key", unit.authorKey,
+                "region_count", unit.regions.size(),
+                "file_count", unit.files.size(),
+                "commit_count", unit.commits.size(),
+                "hunk_chars", unit.hunkChars
+        ));
+        batch.put("changed_regions", List.copyOf(unit.regions));
+        batch.put("input_json", batchDir.resolve("input.json").toString());
+        batch.put("review_md", batchDir.resolve("code-review.md").toString());
+        batch.put("summary_json", batchDir.resolve("code-review-summary.json").toString());
+        batch.put("status", "pending");
+        return batch;
+    }
+
+    private String moduleKey(String file) {
+        String normalized = file.replace('\\', '/');
+        if (normalized.contains("/src/main/java/")) {
+            return prefixWithSegments(normalized, "/src/main/java/", 7);
+        }
+        if (normalized.startsWith("src/main/java/")) {
+            return prefixWithSegments(normalized, "src/main/java/", 0);
+        }
+        if (normalized.contains("/src/test/java/")) {
+            return prefixWithSegments(normalized, "/src/test/java/", 3);
+        }
+        if (normalized.startsWith("src/test/java/")) {
+            return prefixWithSegments(normalized, "src/test/java/", 0);
+        }
+        if (normalized.contains("/src/main/resources/mapper/")) {
+            return normalized.substring(0, normalized.indexOf("/src/main/resources/mapper/") + "/src/main/resources/mapper".length());
+        }
+        if (normalized.contains("/src/main/resources/mybatis/mapper/")) {
+            return normalized.substring(0, normalized.indexOf("/src/main/resources/mybatis/mapper/") + "/src/main/resources/mybatis/mapper".length());
+        }
+        if (normalized.contains("/src/main/resources/")) {
+            return normalized.substring(0, normalized.indexOf("/src/main/resources/") + "/src/main/resources".length());
+        }
+        int slash = normalized.indexOf('/');
+        return slash > 0 ? normalized.substring(0, slash) : normalized;
+    }
+
+    private String prefixWithSegments(String file, String marker, int segmentCount) {
+        int markerIndex = file.indexOf(marker);
+        if (markerIndex < 0) {
+            return file;
+        }
+        String prefix = file.substring(0, markerIndex + marker.length()).replaceAll("/$", "");
+        if (segmentCount <= 0) {
+            return prefix;
+        }
+        String rest = file.substring(markerIndex + marker.length());
+        String[] segments = rest.split("/");
+        int count = Math.min(segmentCount, Math.max(0, segments.length - 1));
+        StringBuilder module = new StringBuilder(prefix);
+        for (int index = 0; index < count; index++) {
+            module.append('/').append(segments[index]);
+        }
+        return module.toString();
     }
 
     private void writeBatchInputs(Path out, List<Map<String, Object>> batches) throws Exception {
@@ -186,6 +268,53 @@ public class WeeklyEvidenceBuilder {
 
     private int number(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static class UnitAccumulator {
+        private final String strategy;
+        private final String module;
+        private final String authorKey;
+        private final int maxRegions;
+        private final int maxFiles;
+        private final int maxHunkChars;
+        private final int maxCommits;
+        private final List<Map<String, Object>> regions = new ArrayList<>();
+        private final Set<String> files = new HashSet<>();
+        private final Set<String> commits = new HashSet<>();
+        private int hunkChars;
+
+        private UnitAccumulator(String strategy, String module, String authorKey, int maxRegions, int maxFiles, int maxHunkChars, int maxCommits) {
+            this.strategy = strategy;
+            this.module = module;
+            this.authorKey = authorKey;
+            this.maxRegions = maxRegions;
+            this.maxFiles = maxFiles;
+            this.maxHunkChars = maxHunkChars;
+            this.maxCommits = maxCommits;
+        }
+
+        private boolean isEmpty() {
+            return regions.isEmpty();
+        }
+
+        private boolean canAccept(Map<String, Object> region) {
+            Set<String> nextFiles = new HashSet<>(files);
+            nextFiles.add(Objects.toString(region.get("file"), ""));
+            Set<String> nextCommits = new HashSet<>(commits);
+            nextCommits.add(Objects.toString(region.get("commit"), ""));
+            int nextHunkChars = hunkChars + Objects.toString(region.get("hunk"), "").length();
+            return regions.size() + 1 <= maxRegions
+                    && nextFiles.size() <= maxFiles
+                    && nextCommits.size() <= maxCommits
+                    && nextHunkChars <= maxHunkChars;
+        }
+
+        private void add(Map<String, Object> region) {
+            regions.add(region);
+            files.add(Objects.toString(region.get("file"), ""));
+            commits.add(Objects.toString(region.get("commit"), ""));
+            hunkChars += Objects.toString(region.get("hunk"), "").length();
+        }
     }
 
     @SuppressWarnings("unchecked")

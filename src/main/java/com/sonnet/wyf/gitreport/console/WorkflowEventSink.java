@@ -28,12 +28,21 @@ public class WorkflowEventSink {
         }
         try {
             repository.appendEvent(runId, eventType, message);
+            logEvent(runId, eventType, message);
             List<WorkflowRunEvent> events = repository.listEvents(runId);
             if (!events.isEmpty()) {
                 eventStreamService.publish(events.get(events.size() - 1));
             }
         } catch (RuntimeException exception) {
             log.warn("Unable to emit workflow event: runId={}, eventType={}, reason={}", runId, eventType, exception.getMessage());
+        }
+    }
+
+    private static void logEvent(long runId, String eventType, String message) {
+        if ("FAILED".equals(eventType) || "TASK_FAILED".equals(eventType)) {
+            log.warn("Workflow event: runId={}, eventType={}, message={}", runId, eventType, message);
+        } else {
+            log.info("Workflow event: runId={}, eventType={}, message={}", runId, eventType, message);
         }
     }
 

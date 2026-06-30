@@ -5,12 +5,16 @@ import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -18,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(OutputCaptureExtension.class)
 class WorkflowExecutionServiceTest {
     @TempDir
     Path tempDir;
@@ -58,6 +63,28 @@ class WorkflowExecutionServiceTest {
         assertThat(Files.readString(defaultYaml)).isEqualTo("value: default");
         assertThat(chain.configDir).contains("run-" + runId);
         assertThat(Files.readString(Path.of(chain.configDir).resolve("demo-chain.yml"))).contains("value: \"edited\"");
+    }
+
+    @Test
+    void ignoresNullAndBlankSubmittedConfigValuesBeforeWritingRunConfig() throws Exception {
+        Path configDir = tempDir.resolve("defaults");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("demo-chain.yml"), "value: default");
+        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        runnerProperties.setConfigDir(configDir.toString());
+        CapturingChain chain = new CapturingChain(runnerProperties);
+        Fixture fixture = fixture(List.of(chain), runnerProperties);
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("value", "edited");
+        config.put("optional.number", null);
+        config.put("optional.text", "   ");
+
+        long runId = fixture.service.submit(new WorkflowRunSubmission("demo-chain", "full", null, null, null, config, null));
+
+        awaitState(fixture.repository, runId, RunState.SUCCEEDED);
+        assertThat(Files.readString(Path.of(chain.configDir).resolve("demo-chain.yml")))
+                .contains("value: \"edited\"")
+                .doesNotContain("optional");
     }
 
     @Test
@@ -119,6 +146,25 @@ class WorkflowExecutionServiceTest {
         assertThat(repository.listEvents(repository.listRuns().get(0).id()))
                 .extracting(WorkflowRunEvent::eventType)
                 .contains("FAILED");
+    }
+
+    @Test
+    void workflowEventsAreLoggedToConsole(CapturedOutput output) throws Exception {
+        Fixture fixture = fixture(List.of(blockingChain(new CountDownLatch(0), new CountDownLatch(0))));
+        long runId = fixture.repository.createRun(new WorkflowRunSubmission(
+                "demo-chain",
+                "full",
+                null,
+                null,
+                null,
+                Map.of("value", "demo"),
+                null
+        ), "run-config.yml");
+        WorkflowEventSink eventSink = new WorkflowEventSink(fixture.repository, new EventStreamService());
+
+        eventSink.emit(runId, "QUEUED", "运行已进入队列");
+
+        assertThat(output).contains("Workflow event: runId=" + runId + ", eventType=QUEUED, message=运行已进入队列");
     }
 
     private WorkflowChain blockingChain(CountDownLatch started, CountDownLatch release) {

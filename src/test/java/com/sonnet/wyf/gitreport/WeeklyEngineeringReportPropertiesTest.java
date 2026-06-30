@@ -53,9 +53,14 @@ class WeeklyEngineeringReportPropertiesTest {
         assertThat(properties.getEndday()).isEqualTo(LocalDate.of(2026, 6, 26));
         assertThat(properties.getGit().isIncludeMerges()).isFalse();
         assertThat(properties.getGit().getExclude()).contains("target/**", "*.lock");
-        assertThat(properties.getReview().getMaxRegionsPerBatch()).isEqualTo(8);
         assertThat(properties.getReview().getMaxHunkLines()).isEqualTo(24);
         assertThat(properties.getReview().getConcurrency()).isEqualTo(3);
+        assertThat(properties.getReview().getGrouping().getStrategy()).isEqualTo("module-author-capacity");
+        assertThat(properties.getReview().getGrouping().getTargetTaskCount()).isEqualTo(80);
+        assertThat(properties.getReview().getGrouping().getMaxRegionsPerTask()).isEqualTo(80);
+        assertThat(properties.getReview().getGrouping().getMaxFilesPerTask()).isEqualTo(25);
+        assertThat(properties.getReview().getGrouping().getMaxHunkCharsPerTask()).isEqualTo(80_000);
+        assertThat(properties.getReview().getGrouping().getMaxCommitsPerTask()).isEqualTo(40);
         assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
     }
 }
