@@ -75,6 +75,9 @@ public class OpenCodeServerManager {
         if (opencodeBin == null || opencodeBin.isBlank()) {
             throw new IllegalArgumentException("opencode-bin is required when manage-server=true");
         }
+        if ("undefined".equalsIgnoreCase(opencodeBin.trim()) || "null".equalsIgnoreCase(opencodeBin.trim())) {
+            throw new IllegalArgumentException("opencode-runner.opencode.opencode-bin must point to the OpenCode executable when manage-server=true, actual=" + opencodeBin);
+        }
         int port = serverUrl.getPort();
         if (port <= 0) {
             throw new IllegalArgumentException("git-report.opencode.server-url must include an explicit port when Java manages OpenCode Server: " + serverUrl);
@@ -86,10 +89,15 @@ public class OpenCodeServerManager {
         processBuilder.environment().putAll(settings.getEnvironment());
         log.info("Starting managed OpenCode Server: command={}, logs={}, environmentKeys={}",
                 String.join(" ", command), logDir, settings.getEnvironment().keySet());
-        ownedProcess = processBuilder
-                .redirectOutput(ProcessBuilder.Redirect.appendTo(logDir.resolve("stdout.log").toFile()))
-                .redirectError(ProcessBuilder.Redirect.appendTo(logDir.resolve("stderr.log").toFile()))
-                .start();
+        try {
+            ownedProcess = processBuilder
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(logDir.resolve("stdout.log").toFile()))
+                    .redirectError(ProcessBuilder.Redirect.appendTo(logDir.resolve("stderr.log").toFile()))
+                    .start();
+        } catch (IOException exception) {
+            throw new IOException("Failed to start managed OpenCode Server using opencode-runner.opencode.opencode-bin="
+                    + opencodeBin + ". Configure an executable path or set manage-server=false for an already running server.", exception);
+        }
         ownedServerUrl = serverUrl;
     }
 

@@ -113,6 +113,34 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     @Test
+    void synthesisRerunRejectsMissingRepositoryBeforeOpenCodeSessionCreation() {
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(tempDir.resolve("missing-repo"));
+        properties.getPaths().setOut(tempDir.resolve("out-missing-repo"));
+
+        assertThatThrownBy(() -> orchestrator().runSynthesisOnly(properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("paths.repo must be an existing local directory")
+                .hasMessageContaining(tempDir.resolve("missing-repo").toAbsolutePath().normalize().toString());
+    }
+
+    @Test
+    void synthesisRerunRequiresExistingPreparationOutputsBeforeOpenCodeSessionCreation() throws Exception {
+        Path repo = tempDir.resolve("repo-missing-preparation");
+        Path out = tempDir.resolve("out-missing-preparation");
+        Files.createDirectories(repo);
+        Files.createDirectories(out);
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+
+        assertThatThrownBy(() -> orchestrator().runSynthesisOnly(properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("git-report rerun requires existing preparation output")
+                .hasMessageContaining(out.resolve("summary.json").toString());
+    }
+
+    @Test
     void rerunsIncompleteAuthorOutputsBeforeSynthesis() throws Exception {
         Path repo = tempDir.resolve("repo-no-auto-retry-after-submit");
         Path out = tempDir.resolve("out-no-auto-retry-after-submit");

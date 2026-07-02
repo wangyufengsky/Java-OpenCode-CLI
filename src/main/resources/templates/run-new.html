@@ -30,7 +30,9 @@
           </select>
         </label>
         <label for="rerunType">重跑类型
-          <input id="rerunType" name="rerunType" placeholder="作者 / 交易 / 模块 / 总报告">
+          <select id="rerunType" name="rerunType">
+            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
+          </select>
         </label>
         <label for="rerunId">重跑编号
           <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔">
@@ -56,7 +58,7 @@
       <ul>
         <li>链路必须存在</li>
         <li>模式必须是全量或重跑</li>
-        <li>重跑模式必须填写重跑字段</li>
+        <li>重跑类型按链路选择，明细重跑才需要编号</li>
         <li>链路字段来自当前页面默认值</li>
         <li>OpenCode 设置会复制应用默认值</li>
         <li>提交后生成本次运行配置，不改资源配置</li>

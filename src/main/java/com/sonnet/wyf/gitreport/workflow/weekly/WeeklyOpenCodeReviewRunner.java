@@ -89,6 +89,7 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
         return () -> {
             String batchId = string(batch.get("batch_id"));
             Path runDir = out.resolve("runs").resolve(batchId);
+            Path statusPath = runDir.resolve("session-status.json");
             Path summaryJson = Path.of(string(batch.get("summary_json")));
             try {
                 Files.createDirectories(runDir);
@@ -113,11 +114,11 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
                 ));
                 var validation = outputValidator.validate(batch, summaryJson);
                 if (validation.ok()) {
-                    return TaskRunResult.success(batchId, batchId, runDir.resolve("status.json"));
+                    return TaskRunResult.success(batchId, batchId, statusPath);
                 }
-                return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), validation.error());
+                return TaskRunResult.failed(batchId, batchId, statusPath, validation.error());
             } catch (Exception exception) {
-                return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), exception.getMessage());
+                return TaskRunResult.failed(batchId, batchId, statusPath, exception.getMessage());
             }
         };
     }

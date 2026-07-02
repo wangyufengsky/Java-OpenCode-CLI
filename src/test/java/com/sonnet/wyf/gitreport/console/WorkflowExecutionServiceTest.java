@@ -88,6 +88,29 @@ class WorkflowExecutionServiceTest {
     }
 
     @Test
+    void ignoresBrowserUndefinedSubmittedConfigValuesBeforeWritingRunConfig() throws Exception {
+        Path configDir = tempDir.resolve("defaults");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("demo-chain.yml"), "value: default");
+        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        runnerProperties.setConfigDir(configDir.toString());
+        CapturingChain chain = new CapturingChain(runnerProperties);
+        Fixture fixture = fixture(List.of(chain), runnerProperties);
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("value", "edited");
+        config.put("paths.repo", "undefined");
+        config.put("paths.out", "null");
+
+        long runId = fixture.service.submit(new WorkflowRunSubmission("demo-chain", "full", null, null, null, config, null));
+
+        awaitState(fixture.repository, runId, RunState.SUCCEEDED);
+        assertThat(Files.readString(Path.of(chain.configDir).resolve("demo-chain.yml")))
+                .contains("value: \"edited\"")
+                .doesNotContain("undefined")
+                .doesNotContain("paths");
+    }
+
+    @Test
     void blankConfigSubmissionUsesDefaultStructuredConfigEvenWhileAnotherRunIsActive() throws Exception {
         Path configDir = tempDir.resolve("defaults");
         Files.createDirectories(configDir);

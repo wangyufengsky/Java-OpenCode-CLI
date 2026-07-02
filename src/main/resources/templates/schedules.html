@@ -58,7 +58,9 @@
           </select>
         </label>
         <label for="rerunType">重跑类型
-          <input id="rerunType" name="rerunType" placeholder="作者 / 交易 / 模块 / 总报告">
+          <select id="rerunType" name="rerunType">
+            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
+          </select>
         </label>
         <label for="rerunId">重跑编号
           <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔">

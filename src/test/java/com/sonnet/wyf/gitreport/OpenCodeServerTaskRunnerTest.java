@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -165,6 +166,73 @@ class OpenCodeServerTaskRunnerTest {
                 .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize()));
         assertThat(requests).anySatisfy(request -> assertThat(request)
                 .isEqualTo("POST /session query=null directoryHeader=" + tempDir.toAbsolutePath().normalize()));
+        assertThat(requests).noneMatch(request -> request.contains("/session/manual-session"));
+    }
+
+    @Test
+    void clearsPriorWeeklyReviewSessionsBeforeCreatingFirstWeeklySession() throws Exception {
+        Path output = tempDir.resolve("weekly-cleaned-done.txt");
+        java.util.List<String> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> {
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, """
+                        [
+                          {"id":"old-weekly","title":"weekly-code-review-review-unit-001-20260701000000000"},
+                          {"id":"manual-session","title":"手工调试会话"}
+                        ]
+                        """);
+                return;
+            }
+            respond(exchange, 200, "{\"id\":\"new-weekly\"}");
+        });
+        server.createContext("/session/", exchange -> {
+            requests.add(exchange.getRequestMethod()
+                    + " " + exchange.getRequestURI().getPath()
+                    + " query=" + exchange.getRequestURI().getRawQuery()
+                    + " directoryHeader=" + exchange.getRequestHeaders().getFirst("X-OpenCode-Directory"));
+            if (exchange.getRequestURI().getPath().equals("/session/new-weekly/prompt_async")) {
+                Files.writeString(output, "done");
+                respond(exchange, 204, "");
+                return;
+            }
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("weekly-worker-prompt.md");
+        Files.writeString(promptFile, "persisted prompt");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntil(
+                handle,
+                tempDir,
+                "weekly-code-review-review-unit-001",
+                promptFile,
+                "worker message",
+                tempDir.resolve("weekly-cleaned-run"),
+                () -> Files.exists(output),
+                "",
+                60,
+                60,
+                50,
+                1
+        );
+
+        assertThat(result.sessionId()).isEqualTo("new-weekly");
+        assertThat(requests).anySatisfy(request -> assertThat(request)
+                .startsWith("GET /session query=directory=")
+                .contains("search=weekly-code-review-")
+                .contains("limit=100")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize()));
+        assertThat(requests).anySatisfy(request -> assertThat(request)
+                .startsWith("DELETE /session/old-weekly query=directory=")
+                .contains(" directoryHeader=" + tempDir.toAbsolutePath().normalize()));
         assertThat(requests).noneMatch(request -> request.contains("/session/manual-session"));
     }
 
@@ -484,6 +552,66 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
+    void sendsCorrectionAfterDoneTextAndOutputWaitInsteadOfWaitingForFullTimeout() throws Exception {
+        Path output = tempDir.resolve("done-text-validation-output.txt");
+        AtomicInteger promptRequests = new AtomicInteger();
+        AtomicInteger abortRequests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"done-text-session\"}"));
+        server.createContext("/session/done-text-session/prompt_async", exchange -> {
+            int request = promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (request == 1 && body.contains("initial prompt")) {
+                Files.writeString(output, "bad");
+            } else if (request == 2 && body.contains("Java 产物校验失败")) {
+                Files.writeString(output, "good");
+            }
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/done-text-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[{"type":"text","text":"DONE person_report_md=/tmp/person-report.md quality_summary_json=/tmp/quality-summary.json"}],"time":{"created":2}}
+                ]
+                """));
+        server.createContext("/session/done-text-session/abort", exchange -> {
+            abortRequests.incrementAndGet();
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("done-text-validation-prompt.md");
+        Files.writeString(promptFile, "initial prompt");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntilValidated(
+                handle,
+                tempDir,
+                "done-text-validation-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("done-text-validation-run"),
+                () -> Files.exists(output) && "good".equals(Files.readString(output))
+                        ? ValidationCheck.success()
+                        : ValidationCheck.failed("expected corrected output"),
+                "",
+                60,
+                60,
+                50,
+                1,
+                0,
+                1
+        );
+
+        assertThat(result.timedOut()).isFalse();
+        waitUntil(() -> promptRequests.get() == 2);
+        assertThat(result.correctionRounds()).isEqualTo(1);
+        assertThat(promptRequests).hasValue(2);
+        assertThat(abortRequests).hasValue(0);
+    }
+
+    @Test
     void runUntilValidatedAcceptsTaskSpec() throws Exception {
         Path output = tempDir.resolve("spec-output.txt");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -628,5 +756,16 @@ class OpenCodeServerTaskRunnerTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(exception);
         }
+    }
+
+    private void waitUntil(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(2).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            sleep(20);
+        }
+        throw new AssertionError("condition was not met before timeout");
     }
 }

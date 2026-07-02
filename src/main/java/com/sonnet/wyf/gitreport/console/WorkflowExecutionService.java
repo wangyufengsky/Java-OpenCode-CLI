@@ -6,7 +6,6 @@ import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -94,32 +93,16 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
     }
 
     private static WorkflowRunSubmission normalize(WorkflowRunSubmission submission) {
+        String chainId = normalizeText(submission.chainId());
         return new WorkflowRunSubmission(
-                normalizeText(submission.chainId()),
+                chainId,
                 normalizeText(submission.mode() == null || submission.mode().isBlank() ? "full" : submission.mode()),
-                normalizeText(submission.rerunType()),
+                WorkflowRerunContract.normalizeType(chainId, submission.rerunType()),
                 submission.rerunId(),
                 submission.runDate(),
-                normalizeConfig(submission.config()),
+                ConsoleConfigNormalizer.normalize(submission.config()),
                 submission.openCode()
         );
-    }
-
-    private static Map<String, Object> normalizeConfig(Map<String, Object> config) {
-        if (config == null || config.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Object> normalized = new LinkedHashMap<>();
-        config.forEach((key, value) -> {
-            if (key == null || key.isBlank() || value == null) {
-                return;
-            }
-            if (value instanceof String text && text.isBlank()) {
-                return;
-            }
-            normalized.put(key, value);
-        });
-        return Map.copyOf(normalized);
     }
 
     private static String normalizeText(String value) {

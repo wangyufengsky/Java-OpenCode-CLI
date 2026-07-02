@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeSession;
+import com.sonnet.wyf.gitreport.opencode.OpenCodeSessionState;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -288,6 +289,29 @@ class OpenCodeServerClientTest {
 
         assertThat(client.getSessionStatus(serverUrl, tempDir, "session-1")).isEqualTo("running");
         assertThat(client.getSessionStatus(serverUrl, tempDir, "session-1")).isEqualTo("idle");
+    }
+
+    @Test
+    void treatsDoneAssistantTextAsTerminalSuccessWhenFinishMetadataIsMissing() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session/session-1/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"hello prompt","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test-provider","id":"test-model"},"content":[{"type":"text","text":"DONE person_report_md=/tmp/person-report.md quality_summary_json=/tmp/quality-summary.json"}],"time":{"created":2}}
+                ]
+                """));
+        server.start();
+
+        URI serverUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+
+        OpenCodeSessionState state = client.getSessionState(serverUrl, tempDir, "session-1");
+
+        assertThat(state.state()).isEqualTo("done");
+        assertThat(state.terminal()).isTrue();
+        assertThat(state.success()).isTrue();
+        assertThat(state.source()).isEqualTo("assistant_text");
+        assertThat(client.getSessionStatus(serverUrl, tempDir, "session-1")).isEqualTo("done");
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

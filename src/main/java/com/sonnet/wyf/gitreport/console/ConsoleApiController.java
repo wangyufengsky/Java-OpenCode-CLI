@@ -82,16 +82,22 @@ public class ConsoleApiController {
     }
 
     private void validate(WorkflowRunSubmission submission) {
-        chainCatalog.chain(submission.chainId());
-        String mode = submission.mode() == null || submission.mode().isBlank() ? "full" : submission.mode();
+        String chainId = submission.chainId() == null ? "" : submission.chainId().trim();
+        chainCatalog.chain(chainId);
+        String mode = submission.mode() == null || submission.mode().isBlank() ? "full" : submission.mode().trim().toLowerCase();
         if (!"full".equals(mode) && !"rerun".equals(mode)) {
             throw new IllegalArgumentException("运行模式必须是 full 或 rerun");
         }
         if ("rerun".equals(mode)) {
-            if (submission.rerunType() == null || submission.rerunType().isBlank()) {
+            String rerunType = WorkflowRerunContract.normalizeType(chainId, submission.rerunType());
+            if (rerunType.isBlank()) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑类型");
             }
-            if (submission.rerunId() == null || submission.rerunId().isBlank()) {
+            if (!WorkflowRerunContract.isKnownType(chainId, rerunType)) {
+                throw new IllegalArgumentException("不支持的重跑类型: " + submission.rerunType());
+            }
+            if (WorkflowRerunContract.requiresRerunId(chainId, rerunType)
+                    && (submission.rerunId() == null || submission.rerunId().isBlank())) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
         }

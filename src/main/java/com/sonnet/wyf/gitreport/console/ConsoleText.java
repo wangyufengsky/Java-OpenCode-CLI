@@ -29,7 +29,9 @@ public class ConsoleText {
             "author", "作者",
             "transaction", "交易",
             "module", "模块",
-            "index", "总报告"
+            "index", "总报告",
+            "synthesis", "总报告",
+            "review-batch", "审查批次"
     );
 
     private static final Map<String, String> EVENT_TYPES = Map.of(

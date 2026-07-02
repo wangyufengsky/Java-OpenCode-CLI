@@ -29,11 +29,14 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 
 public class OpenCodeServerClient {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerClient.class);
     private static final String DIRECTORY_HEADER = "X-OpenCode-Directory";
     private static final DateTimeFormatter SESSION_TITLE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").withZone(ZoneOffset.UTC);
+    private static final Pattern DONE_TEXT = Pattern.compile("(?im)^\\s*DONE\\b");
+    private static final Pattern BLOCKED_TEXT = Pattern.compile("(?im)^\\s*BLOCKED\\b");
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -404,7 +407,11 @@ public class OpenCodeServerClient {
     }
 
     public String getSessionStatus(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
-        return inferStatusFromMessages(serverUrl, repo, sessionId);
+        return getSessionState(serverUrl, repo, sessionId).state();
+    }
+
+    public OpenCodeSessionState getSessionState(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
+        return inferStateFromMessages(serverUrl, repo, sessionId);
     }
 
     public boolean abortSession(URI serverUrl, Path repo, String sessionId) {
@@ -460,7 +467,7 @@ public class OpenCodeServerClient {
         return Duration.ofSeconds(Math.max(1, requestTimeoutSeconds));
     }
 
-    private String inferStatusFromMessages(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
+    private OpenCodeSessionState inferStateFromMessages(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
         String directory = repo.toAbsolutePath().normalize().toString();
         HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/" + pathEncode(sessionId) + "/message", "limit=100"))
                 .timeout(Duration.ofSeconds(10))
@@ -470,7 +477,7 @@ public class OpenCodeServerClient {
         JsonNode response = sendJson(request);
         JsonNode messages = response.isArray() ? response : response.path("data");
         if (!messages.isArray()) {
-            return "";
+            return new OpenCodeSessionState("", false, false, "messages", "");
         }
         JsonNode lastAssistant = null;
         boolean hasMessage = false;
@@ -481,19 +488,26 @@ public class OpenCodeServerClient {
             }
         }
         if (lastAssistant == null) {
-            return hasMessage ? "submitted" : "";
+            return new OpenCodeSessionState(hasMessage ? "submitted" : "", false, false, "messages", "");
         }
         if (messageHasError(lastAssistant)) {
-            return "error";
+            return new OpenCodeSessionState("error", true, false, "message_error", assistantText(lastAssistant));
         }
         String finish = lastAssistant.path("finish").asText("");
         if (isAbortFinish(finish)) {
-            return "aborted";
+            return new OpenCodeSessionState("aborted", true, false, "finish", assistantText(lastAssistant));
         }
         if (!finish.isBlank() || !lastAssistant.path("time").path("completed").isMissingNode()) {
-            return "idle";
+            return new OpenCodeSessionState("idle", true, true, "finish", assistantText(lastAssistant));
         }
-        return "running";
+        String assistantText = assistantText(lastAssistant);
+        if (DONE_TEXT.matcher(assistantText).find()) {
+            return new OpenCodeSessionState("done", true, true, "assistant_text", assistantText);
+        }
+        if (BLOCKED_TEXT.matcher(assistantText).find()) {
+            return new OpenCodeSessionState("blocked", true, false, "assistant_text", assistantText);
+        }
+        return new OpenCodeSessionState("running", false, false, "messages", assistantText);
     }
 
     private boolean messageHasError(JsonNode message) {
@@ -524,6 +538,29 @@ public class OpenCodeServerClient {
     private boolean isAbortFinish(String finish) {
         String normalized = finish == null ? "" : finish.toLowerCase();
         return normalized.equals("abort") || normalized.equals("aborted") || normalized.equals("cancel") || normalized.equals("canceled") || normalized.equals("cancelled");
+    }
+
+    private String assistantText(JsonNode message) {
+        StringBuilder text = new StringBuilder();
+        appendText(text, message.path("text"));
+        JsonNode content = message.path("content");
+        if (content.isArray()) {
+            for (JsonNode part : content) {
+                appendText(text, part.path("text"));
+                appendText(text, part.path("content"));
+            }
+        }
+        return text.toString().trim();
+    }
+
+    private void appendText(StringBuilder text, JsonNode value) {
+        if (!value.isTextual()) {
+            return;
+        }
+        if (text.length() > 0) {
+            text.append('\n');
+        }
+        text.append(value.asText());
     }
 
     private URI resolve(URI serverUrl, String path) {

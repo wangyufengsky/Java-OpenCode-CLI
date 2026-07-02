@@ -72,9 +72,15 @@ class ConsoleMvcTest {
         mockMvc.perform(get("/runs/new").param("chainId", "git-code-contribution-report"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("链路配置")))
+                .andExpect(content().string(containsString("<option value=\"author\">作者</option>")))
+                .andExpect(content().string(containsString("<option value=\"synthesis\">总报告</option>")))
                 .andExpect(content().string(not(containsString("配置快照"))))
                 .andExpect(content().string(not(containsString("configYaml"))))
                 .andExpect(content().string(containsString("提交运行")));
+        mockMvc.perform(get("/schedules").param("chainId", "weekly-engineering-report"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("<option value=\"review-batch\">审查批次</option>")))
+                .andExpect(content().string(containsString("<option value=\"synthesis\">总报告</option>")));
         String appJs = mockMvc.perform(get("/app.js"))
                 .andExpect(status().isOk())
                 .andReturn()
@@ -84,8 +90,12 @@ class ConsoleMvcTest {
                 .contains("项目标识")
                 .contains("transaction-plan-dir")
                 .contains("review.grouping.max-regions-per-task")
+                .contains("git-code-contribution-report")
+                .contains("synthesis")
+                .contains("总报告重跑不需要编号")
                 .contains("/api/chains/")
                 .doesNotContain("review.max-regions-per-batch")
+                .doesNotContain("rerunTypeSelect.disabled = !rerunMode")
                 .doesNotContain("src/main/resources/smartesb-transactions");
         mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())
@@ -126,6 +136,30 @@ class ConsoleMvcTest {
                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(containsString("重跑模式必须填写重跑类型")));
+
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"rerun","rerunType":"author","config":{"project.id":"demo"}}
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("重跑模式必须填写重跑 ID")));
+
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"rerun","rerunType":"missing","config":{"project.id":"demo"}}
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("不支持的重跑类型")));
+
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"rerun","rerunType":"总报告","config":{"project.id":"demo"}}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").isNumber());
     }
 
     @Test

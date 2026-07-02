@@ -29,6 +29,7 @@ public class ConsolePageController {
     public String newRun(@RequestParam(required = false, defaultValue = "git-code-contribution-report") String chainId, Model model) {
         model.addAttribute("chains", chainCatalog.chainIds());
         model.addAttribute("chainId", chainId);
+        model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(chainId));
         return "run-new";
     }
 
@@ -50,6 +51,7 @@ public class ConsolePageController {
     public String schedules(@RequestParam(required = false, defaultValue = "git-code-contribution-report") String chainId, Model model) {
         model.addAttribute("chains", chainCatalog.chainIds());
         model.addAttribute("chainId", chainId);
+        model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(chainId));
         model.addAttribute("schedules", scheduleService.list());
         return "schedules";
     }

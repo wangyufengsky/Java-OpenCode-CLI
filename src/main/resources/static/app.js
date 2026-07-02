@@ -77,25 +77,61 @@ const chainConfigDefinitions = {
   }
 };
 
+const rerunTypeDefinitions = {
+  'git-code-contribution-report': [
+    { value: 'author', label: '作者', requiresId: true, idPlaceholder: 'author_key，多个用英文逗号分隔' },
+    { value: 'synthesis', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
+  ],
+  'smartesb-rewrite-code-review': [
+    { value: 'transaction', label: '交易', requiresId: true, idPlaceholder: '交易名，多个用英文逗号分隔' },
+    { value: 'module', label: '模块', requiresId: true, idPlaceholder: '模块名，多个用英文逗号分隔' },
+    { value: 'index', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
+  ],
+  'smartesb-code-reader': [
+    { value: 'transaction', label: '交易', requiresId: true, idPlaceholder: '交易名，多个用英文逗号分隔' },
+    { value: 'module', label: '模块', requiresId: true, idPlaceholder: '模块名，多个用英文逗号分隔' },
+    { value: 'index', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
+  ],
+  'weekly-engineering-report': [
+    { value: 'review-batch', label: '审查批次', requiresId: true, idPlaceholder: 'review batch id，多个用英文逗号分隔' },
+    { value: 'synthesis', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
+  ]
+};
+
 function field(key, label, description, type = 'text') {
   return { key, label, description, type };
 }
 
 const chainSelect = document.querySelector('#chainId');
+const modeSelect = document.querySelector('#mode');
+const rerunTypeSelect = document.querySelector('#rerunType');
+const rerunIdInput = document.querySelector('#rerunId');
 const configFields = document.querySelector('#chain-config-fields');
 const configDescription = document.querySelector('#chain-config-description');
 const runForm = document.querySelector('#run-form');
 const scheduleForm = document.querySelector('#schedule-form');
 const frequencySelect = document.querySelector('#frequency');
 
-if (chainSelect && configFields) {
-  renderConfigFields(chainSelect.value);
-  chainSelect.addEventListener('change', () => {
+if (chainSelect) {
+  if (configFields) {
     renderConfigFields(chainSelect.value);
+  }
+  renderRerunTypeOptions(chainSelect.value);
+  chainSelect.addEventListener('change', () => {
+    if (configFields) {
+      renderConfigFields(chainSelect.value);
+    }
+    renderRerunTypeOptions(chainSelect.value);
     const url = new URL(window.location.href);
     url.searchParams.set('chainId', chainSelect.value);
     history.replaceState(null, '', url);
   });
+}
+
+if (modeSelect && rerunTypeSelect && rerunIdInput) {
+  modeSelect.addEventListener('change', updateRerunFields);
+  rerunTypeSelect.addEventListener('change', updateRerunFields);
+  updateRerunFields();
 }
 
 async function renderConfigFields(chainId) {
@@ -121,6 +157,39 @@ async function renderConfigFields(chainId) {
       defaultValue: defaults[definitionField.key]
     }));
   });
+}
+
+function renderRerunTypeOptions(chainId) {
+  if (!rerunTypeSelect) return;
+  const options = rerunTypeDefinitions[chainId] || [];
+  rerunTypeSelect.replaceChildren();
+  options.forEach((option) => {
+    const item = document.createElement('option');
+    item.value = option.value;
+    item.textContent = option.label;
+    rerunTypeSelect.appendChild(item);
+  });
+  updateRerunFields();
+}
+
+function selectedRerunTypeDefinition() {
+  if (!chainSelect || !rerunTypeSelect) return null;
+  return (rerunTypeDefinitions[chainSelect.value] || [])
+    .find((option) => option.value === rerunTypeSelect.value) || null;
+}
+
+function updateRerunFields() {
+  if (!modeSelect || !rerunTypeSelect || !rerunIdInput) return;
+  const rerunMode = modeSelect.value === 'rerun';
+  const typeDefinition = selectedRerunTypeDefinition();
+  rerunTypeSelect.required = rerunMode;
+  const requiresId = rerunMode && typeDefinition && typeDefinition.requiresId;
+  rerunIdInput.disabled = !requiresId;
+  rerunIdInput.required = Boolean(requiresId);
+  rerunIdInput.placeholder = typeDefinition ? typeDefinition.idPlaceholder : '多个编号用英文逗号分隔';
+  if (!requiresId) {
+    rerunIdInput.value = '';
+  }
 }
 
 async function loadDefaults(chainId) {
@@ -213,8 +282,8 @@ if (runForm) {
     const payload = {
       chainId: document.querySelector('#chainId').value,
       mode: document.querySelector('#mode').value,
-      rerunType: document.querySelector('#rerunType').value,
-      rerunId: document.querySelector('#rerunId').value,
+      rerunType: readRerunType(),
+      rerunId: readRerunId(),
       runDate: document.querySelector('#runDate').value || null,
       config: collectConfig(document.querySelector('#chainId').value)
     };
@@ -259,8 +328,8 @@ if (scheduleForm) {
     const payload = {
       chainId: document.querySelector('#chainId').value,
       mode: document.querySelector('#mode').value,
-      rerunType: document.querySelector('#rerunType').value,
-      rerunId: document.querySelector('#rerunId').value,
+      rerunType: readRerunType(),
+      rerunId: readRerunId(),
       runDate: document.querySelector('#runDate').value || null,
       config: collectConfig(document.querySelector('#chainId').value),
       frequency,
@@ -281,6 +350,16 @@ if (scheduleForm) {
       result.textContent = body.error || '保存失败';
     }
   });
+}
+
+function readRerunType() {
+  const mode = document.querySelector('#mode').value;
+  return mode === 'rerun' ? document.querySelector('#rerunType').value : '';
+}
+
+function readRerunId() {
+  const definition = selectedRerunTypeDefinition();
+  return definition && definition.requiresId ? document.querySelector('#rerunId').value : '';
 }
 
 document.querySelectorAll('.schedule-toggle').forEach((button) => {

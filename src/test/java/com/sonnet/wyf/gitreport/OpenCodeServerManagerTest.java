@@ -66,6 +66,19 @@ class OpenCodeServerManagerTest {
     }
 
     @Test
+    void rejectsUndefinedManagedServerExecutableConfiguration() {
+        GitReportProperties properties = properties("http://127.0.0.1:" + freePortUnchecked());
+        properties.getPaths().setOpencodeBin("undefined");
+
+        OpenCodeServerManager manager = manager();
+
+        assertThatThrownBy(() -> manager.ensureReady(properties, tempDir.resolve("out")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("opencode-runner.opencode.opencode-bin")
+                .hasMessageContaining("actual=undefined");
+    }
+
+    @Test
     void startsManagedServerAndWritesServerLogs() throws Exception {
         int port = freePort();
         Path fakeOpencode = tempDir.resolve("fake-opencode.sh");
@@ -177,6 +190,14 @@ class OpenCodeServerManagerTest {
     private int freePort() throws IOException {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
+        }
+    }
+
+    private int freePortUnchecked() {
+        try {
+            return freePort();
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
         }
     }
 

@@ -8,7 +8,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -105,13 +104,16 @@ public class WorkflowScheduleService implements AutoCloseable {
         if (!"full".equals(mode) && !"rerun".equals(mode)) {
             throw new IllegalArgumentException("运行模式必须是 full 或 rerun");
         }
-        String rerunType = normalizeText(request.rerunType());
+        String rerunType = WorkflowRerunContract.normalizeType(chainId, request.rerunType());
         String rerunId = request.rerunId() == null ? null : request.rerunId().trim();
         if ("rerun".equals(mode)) {
-            if (rerunType == null || rerunType.isBlank()) {
+            if (rerunType.isBlank()) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑类型");
             }
-            if (rerunId == null || rerunId.isBlank()) {
+            if (!WorkflowRerunContract.isKnownType(chainId, rerunType)) {
+                throw new IllegalArgumentException("不支持的重跑类型: " + request.rerunType());
+            }
+            if (WorkflowRerunContract.requiresRerunId(chainId, rerunType) && (rerunId == null || rerunId.isBlank())) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
         }
@@ -123,7 +125,7 @@ public class WorkflowScheduleService implements AutoCloseable {
                 rerunType,
                 rerunId,
                 request.runDate(),
-                normalizeConfig(request.config()),
+                ConsoleConfigNormalizer.normalize(request.config()),
                 frequency.name().toLowerCase(Locale.ROOT),
                 request.dayOfWeek(),
                 request.runTime(),
@@ -196,23 +198,6 @@ public class WorkflowScheduleService implements AutoCloseable {
 
     private ZoneId zone() {
         return clock.getZone();
-    }
-
-    private static Map<String, Object> normalizeConfig(Map<String, Object> config) {
-        if (config == null || config.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Object> normalized = new LinkedHashMap<>();
-        config.forEach((key, value) -> {
-            if (key == null || key.isBlank() || value == null) {
-                return;
-            }
-            if (value instanceof String text && text.isBlank()) {
-                return;
-            }
-            normalized.put(key, value);
-        });
-        return Map.copyOf(normalized);
     }
 
     private static String normalizeText(String value) {

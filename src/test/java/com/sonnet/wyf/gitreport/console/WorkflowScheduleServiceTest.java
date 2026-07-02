@@ -84,6 +84,32 @@ class WorkflowScheduleServiceTest {
     }
 
     @Test
+    void ignoresBrowserUndefinedConfigValuesBeforePersistingAndTriggeringSchedules() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+
+        fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain",
+                "full",
+                null,
+                null,
+                null,
+                Map.of("value", "daily", "paths.repo", "undefined", "paths.out", "null"),
+                "daily",
+                null,
+                LocalTime.of(6, 0),
+                null,
+                true
+        ));
+
+        fixture.service.triggerDueSchedules(Instant.parse("2026-06-30T22:00:00Z"));
+
+        assertThat(fixture.submitter.submissions()).hasSize(1);
+        assertThat(fixture.submitter.submissions().get(0).config())
+                .containsEntry("value", "daily")
+                .doesNotContainKeys("paths.repo", "paths.out");
+    }
+
+    @Test
     void ignoresDisabledDueSchedules() {
         Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
         long scheduleId = fixture.service.create(new WorkflowScheduleRequest(

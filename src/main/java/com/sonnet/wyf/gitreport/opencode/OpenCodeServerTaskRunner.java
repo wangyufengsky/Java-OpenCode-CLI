@@ -203,6 +203,9 @@ public class OpenCodeServerTaskRunner {
         if (title.startsWith("git-report-")) {
             return List.of("git-report-");
         }
+        if (title.startsWith("weekly-code-review-")) {
+            return List.of("weekly-code-review-");
+        }
         return List.of();
     }
 
@@ -269,16 +272,17 @@ public class OpenCodeServerTaskRunner {
             return new WaitOutcome(result(server, session, false, true, false, lastState.get(), true, "", correctionRound), false);
         }
 
-        String state = readSessionState(server.serverUrl(), repo, session.id(), lastState.get());
+        OpenCodeSessionState sessionState = readSessionState(server.serverUrl(), repo, session.id(), lastState.get());
+        String state = sessionState.state();
         lastState.set(state);
         int pollCount = monitor.recordPoll(state);
         monitor.write("running", state, false, false, correctionRound, validation.error());
         monitor.logHeartbeat(state, pollCount);
-        if (isTerminalFailure(state)) {
+        if ((sessionState.terminal() && !sessionState.success()) || isTerminalFailure(state)) {
             monitor.write("server_terminal_failure", state, false, false, correctionRound, validation.error());
             return new WaitOutcome(result(server, session, false, false, false, state, false, validation.error(), correctionRound), false);
         }
-        if (isTerminalSuccess(state)) {
+        if ((sessionState.terminal() && sessionState.success()) || isTerminalSuccess(state)) {
             terminalSuccessSince.compareAndSet(null, Instant.now());
             monitor.write("server_terminal_success_waiting_for_output", state, false, false, correctionRound, validation.error());
             if (settleElapsed(terminalSuccessSince.get(), validationSettleMillis)) {
@@ -374,7 +378,7 @@ public class OpenCodeServerTaskRunner {
             monitor.write("completed_by_output", lastState.get(), false, false);
             return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), false, true, false, lastState.get());
         }
-        String state = readSessionState(server.serverUrl(), repo, session.id(), lastState.get());
+        String state = readSessionState(server.serverUrl(), repo, session.id(), lastState.get()).state();
         lastState.set(state);
         int pollCount = monitor.recordPoll(state);
         monitor.write("running", state, false, false);
@@ -395,13 +399,16 @@ public class OpenCodeServerTaskRunner {
         return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), true, false, aborted, lastState);
     }
 
-    private String readSessionState(URI serverUrl, Path repo, String sessionId, String fallback) {
+    private OpenCodeSessionState readSessionState(URI serverUrl, Path repo, String sessionId, String fallback) {
         try {
-            String status = client.getSessionStatus(serverUrl, repo, sessionId);
-            return status == null || status.isBlank() ? fallback : status;
+            OpenCodeSessionState status = client.getSessionState(serverUrl, repo, sessionId);
+            if (status.state().isBlank()) {
+                return new OpenCodeSessionState(fallback, false, false, status.source(), status.finalText());
+            }
+            return status;
         } catch (Exception exception) {
             log.debug("Unable to read OpenCode session status: sessionId={}, reason={}", sessionId, exception.getMessage());
-            return fallback;
+            return new OpenCodeSessionState(fallback, false, false, "fallback", "");
         }
     }
 
@@ -412,7 +419,7 @@ public class OpenCodeServerTaskRunner {
 
     private boolean isTerminalFailure(String state) {
         String normalized = state == null ? "" : state.toLowerCase(Locale.ROOT);
-        return normalized.equals("failed") || normalized.equals("error") || normalized.equals("aborted") || normalized.equals("canceled") || normalized.equals("cancelled");
+        return normalized.equals("failed") || normalized.equals("error") || normalized.equals("aborted") || normalized.equals("blocked") || normalized.equals("canceled") || normalized.equals("cancelled");
     }
 
     private record WaitOutcome(OpenCodeRunResult result, boolean correctable) {

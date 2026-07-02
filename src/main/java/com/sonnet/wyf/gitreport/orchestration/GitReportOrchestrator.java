@@ -83,6 +83,7 @@ public class GitReportOrchestrator {
 
     public void run(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
+        validateRepositoryDirectory(properties);
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}, concurrency={}, timeoutMinutes={}, outputWaitSeconds={}, maxRetries={}",
                 properties.getProject().getId(),
@@ -112,6 +113,8 @@ public class GitReportOrchestrator {
 
     public void runSynthesisOnly(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
+        validateRepositoryDirectory(properties);
+        validatePreparedGitReportOutputs(out);
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}",
                 properties.getProject().getId(),
@@ -136,6 +139,8 @@ public class GitReportOrchestrator {
     public void runAuthors(GitReportProperties properties, List<String> authorKeys) throws Exception {
         List<String> requestedAuthorKeys = normalizeIds(authorKeys, "authorKey is required for git-report author rerun");
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
+        validateRepositoryDirectory(properties);
+        validatePreparedGitReportOutputs(out);
         OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
@@ -168,6 +173,24 @@ public class GitReportOrchestrator {
             throw new IllegalArgumentException(blankMessage);
         }
         return normalized;
+    }
+
+    private void validateRepositoryDirectory(GitReportProperties properties) {
+        Path repo = properties.getPaths().getRepo().toAbsolutePath().normalize();
+        if (!Files.isDirectory(repo)) {
+            throw new IllegalArgumentException("git-report paths.repo must be an existing local directory: " + repo);
+        }
+    }
+
+    private void validatePreparedGitReportOutputs(Path out) {
+        requireFile(out.resolve("summary.json"));
+        requireFile(out.resolve("index_inputs.json"));
+    }
+
+    private void requireFile(Path path) {
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("git-report rerun requires existing preparation output: " + path);
+        }
     }
 
     private void ensureAllAuthorOutputsReady(
