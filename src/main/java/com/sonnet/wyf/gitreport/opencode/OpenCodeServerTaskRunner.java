@@ -32,7 +32,7 @@ public class OpenCodeServerTaskRunner {
     private final ScheduledProbeWaiter scheduledProbeWaiter;
     private final WorkflowEventSink eventSink;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Set<String> cleanedManagedSessionScopes = ConcurrentHashMap.newKeySet();
+    private final ManagedOpenCodeSessionCleaner sessionCleaner;
 
     public OpenCodeServerTaskRunner(OpenCodeServerClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this(client, scheduledProbeWaiter, new WorkflowEventSink());
@@ -42,6 +42,7 @@ public class OpenCodeServerTaskRunner {
         this.client = client;
         this.scheduledProbeWaiter = scheduledProbeWaiter;
         this.eventSink = eventSink;
+        this.sessionCleaner = new ManagedOpenCodeSessionCleaner(client);
     }
 
     public OpenCodeRunResult runUntil(
@@ -61,9 +62,9 @@ public class OpenCodeServerTaskRunner {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
-        clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
+        sessionCleaner.clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
         OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, createSessionTimeoutSeconds);
-        RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
+        OpenCodeRunMonitor monitor = new OpenCodeRunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis), eventSink, objectMapper);
         log.info("Starting OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}", session.id(), title, runDir, timeoutMinutes);
         monitor.write("created", "unknown", false, false);
         client.sendPromptAsync(server.serverUrl(), repo, session.id(), text, sessionModel, requestTimeoutSeconds);
@@ -118,9 +119,9 @@ public class OpenCodeServerTaskRunner {
         Files.createDirectories(runDir);
         String prompt = Files.readString(promptFile);
         String text = composeMessage(message, prompt);
-        clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
+        sessionCleaner.clearPriorManagedSessionsIfNeeded(server, repo, title, createSessionTimeoutSeconds);
         OpenCodeSession session = client.createSession(server.serverUrl(), repo, title, sessionModel, createSessionTimeoutSeconds);
-        RunMonitor monitor = new RunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis));
+        OpenCodeRunMonitor monitor = new OpenCodeRunMonitor(server, title, promptFile, runDir, session.id(), Math.max(50, pollMillis), eventSink, objectMapper);
         log.info("Starting validated OpenCode Server session: sessionId={}, title={}, runDir={}, timeoutMinutes={}, validationSettleSeconds={}, validationMaxCorrections={}",
                 session.id(), title, runDir, timeoutMinutes, validationSettleSeconds, validationMaxCorrections);
         monitor.write("created", "unknown", false, false);
@@ -169,46 +170,6 @@ public class OpenCodeServerTaskRunner {
         return message + "\n\n" + prompt;
     }
 
-    private void clearPriorManagedSessionsIfNeeded(OpenCodeServerHandle server, Path repo, String title, int requestTimeoutSeconds) throws InterruptedException {
-        List<String> prefixes = managedSessionTitlePrefixes(title);
-        if (prefixes.isEmpty()) {
-            return;
-        }
-        String key = server.serverUrl() + "|" + repo.toAbsolutePath().normalize() + "|" + String.join(",", prefixes);
-        if (!cleanedManagedSessionScopes.add(key)) {
-            return;
-        }
-        try {
-            int deleted = client.deleteSessionsByTitlePrefixes(server.serverUrl(), repo, prefixes, requestTimeoutSeconds);
-            log.info("OpenCode managed session cleanup completed before task startup: title={}, deletedCount={}", title, deleted);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw exception;
-        } catch (Exception exception) {
-            log.warn("OpenCode managed session cleanup failed before task startup; continuing: title={}, reason={}",
-                    title, exception.toString());
-        }
-    }
-
-    private List<String> managedSessionTitlePrefixes(String title) {
-        if (title == null || title.isBlank()) {
-            return List.of();
-        }
-        if (title.startsWith("smartesb-review-")) {
-            return List.of("smartesb-review-");
-        }
-        if (title.startsWith("smartesb-reader-")) {
-            return List.of("smartesb-reader-");
-        }
-        if (title.startsWith("git-report-")) {
-            return List.of("git-report-");
-        }
-        if (title.startsWith("weekly-code-review-")) {
-            return List.of("weekly-code-review-");
-        }
-        return List.of();
-    }
-
     private boolean isComplete(CompletionProbe completionProbe, Path runDir) throws IOException {
         try {
             return completionProbe.isComplete();
@@ -237,7 +198,7 @@ public class OpenCodeServerTaskRunner {
             ValidationProbe validationProbe,
             OpenCodeSession session,
             AtomicReference<String> lastState,
-            RunMonitor monitor,
+            OpenCodeRunMonitor monitor,
             int pollMillis,
             int timeoutMinutes,
             int validationSettleSeconds,
@@ -261,7 +222,7 @@ public class OpenCodeServerTaskRunner {
             ValidationProbe validationProbe,
             OpenCodeSession session,
             AtomicReference<String> lastState,
-            RunMonitor monitor,
+            OpenCodeRunMonitor monitor,
             long validationSettleMillis,
             int correctionRound,
             AtomicReference<Instant> terminalSuccessSince
@@ -299,7 +260,7 @@ public class OpenCodeServerTaskRunner {
             ValidationProbe validationProbe,
             OpenCodeSession session,
             String lastState,
-            RunMonitor monitor,
+            OpenCodeRunMonitor monitor,
             int correctionRound
     ) {
         ValidationCheck validation;
@@ -372,7 +333,7 @@ public class OpenCodeServerTaskRunner {
             CompletionProbe completionProbe,
             OpenCodeSession session,
             AtomicReference<String> lastState,
-            RunMonitor monitor
+            OpenCodeRunMonitor monitor
     ) throws IOException {
         if (isComplete(completionProbe, runDir)) {
             monitor.write("completed_by_output", lastState.get(), false, false);
@@ -393,7 +354,7 @@ public class OpenCodeServerTaskRunner {
         return null;
     }
 
-    private OpenCodeRunResult abortTimedOut(OpenCodeServerHandle server, Path repo, OpenCodeSession session, String lastState, RunMonitor monitor) {
+    private OpenCodeRunResult abortTimedOut(OpenCodeServerHandle server, Path repo, OpenCodeSession session, String lastState, OpenCodeRunMonitor monitor) {
         boolean aborted = client.abortSession(server.serverUrl(), repo, session.id());
         monitor.writeQuietly("timeout", lastState, true, aborted);
         return new OpenCodeRunResult(session.id(), server.serverUrl().toString(), server.ownedByJava(), true, false, aborted, lastState);
@@ -425,109 +386,4 @@ public class OpenCodeServerTaskRunner {
     private record WaitOutcome(OpenCodeRunResult result, boolean correctable) {
     }
 
-    private class RunMonitor {
-        private final OpenCodeServerHandle server;
-        private final String title;
-        private final Path promptFile;
-        private final Path runDir;
-        private final String sessionId;
-        private final Instant startedAt = Instant.now();
-        private final AtomicInteger pollCount = new AtomicInteger();
-        private final AtomicReference<String> lastLoggedState = new AtomicReference<>("unknown");
-        private final int logEveryPolls;
-
-        private RunMonitor(OpenCodeServerHandle server, String title, Path promptFile, Path runDir, String sessionId, int pollMillis) {
-            this.server = server;
-            this.title = title;
-            this.promptFile = promptFile;
-            this.runDir = runDir;
-            this.sessionId = sessionId;
-            this.logEveryPolls = Math.max(1, 60_000 / Math.max(50, pollMillis));
-        }
-
-        private int recordPoll(String state) {
-            return pollCount.incrementAndGet();
-        }
-
-        private void logHeartbeat(String state, int currentPollCount) {
-            String previous = lastLoggedState.getAndSet(state);
-            if (!Objects.equals(previous, state) || currentPollCount % logEveryPolls == 0) {
-                log.info("OpenCode session heartbeat: sessionId={}, title={}, serverState={}, pollCount={}, elapsedSeconds={}, runDir={}",
-                        sessionId,
-                        title,
-                        state,
-                        currentPollCount,
-                        elapsedSeconds(),
-                        runDir);
-            }
-        }
-
-        private void write(String phase, String serverState, boolean timedOut, boolean aborted) {
-            write(phase, serverState, timedOut, aborted, 0, "");
-        }
-
-        private void write(String phase, String serverState, boolean timedOut, boolean aborted, int correctionRound, String validationError) {
-            try {
-                Files.createDirectories(runDir);
-                objectMapper.writerWithDefaultPrettyPrinter().writeValue(runDir.resolve("session-status.json").toFile(), status(phase, serverState, timedOut, aborted, correctionRound, validationError));
-            } catch (IOException exception) {
-                log.warn("Unable to write OpenCode session status: sessionId={}, runDir={}, reason={}", sessionId, runDir, exception.getMessage());
-            }
-            WorkflowRunContext.TaskIdentity task = WorkflowRunContext.currentTask();
-            eventSink.taskStatusCurrent(
-                    task == null ? title : task.taskKey(),
-                    task == null ? title : task.taskName(),
-                    terminalState(phase, timedOut, aborted),
-                    phase,
-                    runDir.resolve("session-status.json").toString(),
-                    validationError
-            );
-        }
-
-        private void writeQuietly(String phase, String serverState, boolean timedOut, boolean aborted) {
-            write(phase, serverState, timedOut, aborted);
-        }
-
-        private void writeQuietly(String phase, String serverState, boolean timedOut, boolean aborted, int correctionRound, String validationError) {
-            write(phase, serverState, timedOut, aborted, correctionRound, validationError);
-        }
-
-        private Map<String, Object> status(String phase, String serverState, boolean timedOut, boolean aborted, int correctionRound, String validationError) {
-            Map<String, Object> status = new LinkedHashMap<>();
-            status.put("phase", phase);
-            status.put("sessionId", sessionId);
-            status.put("title", title);
-            status.put("serverUrl", server.serverUrl().toString());
-            status.put("serverOwnedByJava", server.ownedByJava());
-            status.put("serverState", serverState);
-            status.put("pollCount", pollCount.get());
-            status.put("correctionRound", Math.max(0, correctionRound));
-            status.put("validationError", validationError == null ? "" : validationError);
-            status.put("timedOut", timedOut);
-            status.put("aborted", aborted);
-            status.put("runDir", runDir.toString());
-            status.put("promptFile", promptFile.toString());
-            status.put("startedAt", OffsetDateTime.ofInstant(startedAt, ZoneOffset.systemDefault()).toString());
-            status.put("updatedAt", OffsetDateTime.now().toString());
-            status.put("elapsedSeconds", elapsedSeconds());
-            return status;
-        }
-
-        private long elapsedSeconds() {
-            return Duration.between(startedAt, Instant.now()).toSeconds();
-        }
-
-        private String terminalState(String phase, boolean timedOut, boolean aborted) {
-            if (timedOut || aborted || phase.toLowerCase(Locale.ROOT).contains("failed")) {
-                return "FAILED";
-            }
-            if (phase.toLowerCase(Locale.ROOT).contains("completed")) {
-                return "SUCCEEDED";
-            }
-            if ("created".equals(phase)) {
-                return "QUEUED";
-            }
-            return "RUNNING";
-        }
-    }
 }

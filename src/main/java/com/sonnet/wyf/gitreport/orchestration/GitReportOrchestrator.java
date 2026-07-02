@@ -13,6 +13,7 @@ import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOut
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.scoring.QualityScoresWriter;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import com.sonnet.wyf.gitreport.validation.AuthorOutputValidator;
 import com.sonnet.wyf.gitreport.validation.AuthorValidationResult;
 import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
@@ -20,9 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
@@ -35,7 +33,6 @@ import java.util.concurrent.Callable;
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
     private static final int OPENCODE_POLL_MILLIS = 10_000;
-    private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
 
     private final GitReportPreparation preparation;
     private final ObjectMapper objectMapper;
@@ -43,13 +40,12 @@ public class GitReportOrchestrator {
     private final OpenCodeServerManager serverManager;
     private final OpenCodeServerTaskRunner taskRunner;
     private final AuthorOutputValidator outputValidator;
-    private final FinalReportValidator finalReportValidator;
     private final QualityScoresWriter qualityScoresWriter;
-    private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
     private final OutputCompletionGate completionGate;
     private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
     private final ArtifactCompletenessValidator artifactCompletenessValidator;
+    private final GitReportSynthesisWorkflow synthesisWorkflow;
 
     public GitReportOrchestrator(
             GitReportPreparation preparation,
@@ -72,13 +68,19 @@ public class GitReportOrchestrator {
         this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.outputValidator = outputValidator;
-        this.finalReportValidator = finalReportValidator;
         this.qualityScoresWriter = qualityScoresWriter;
-        this.synthesisInputWriter = synthesisInputWriter;
         this.statusRepository = statusRepository;
         this.completionGate = completionGate;
         this.concurrentTaskRunner = concurrentTaskRunner;
         this.artifactCompletenessValidator = artifactCompletenessValidator;
+        this.synthesisWorkflow = new GitReportSynthesisWorkflow(
+                objectMapper,
+                promptBuilder,
+                taskRunner,
+                finalReportValidator,
+                synthesisInputWriter,
+                statusRepository
+        );
     }
 
     public void run(GitReportProperties properties) throws Exception {
@@ -107,7 +109,7 @@ public class GitReportOrchestrator {
         runAuthorTasks(properties, out, indexInputs, server);
         ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        runSynthesis(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores, server);
         log.info("Git report orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
@@ -128,7 +130,7 @@ public class GitReportOrchestrator {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        runSynthesis(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores, server);
         log.info("Git report synthesis-only orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
@@ -156,7 +158,7 @@ public class GitReportOrchestrator {
         runAuthorTasks(properties, out, selectedIndexInputs, server);
         ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        runSynthesis(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores, server);
         log.info("Git report author rerun completed: authorKeys={}, finalReport={}", requestedAuthorKeys, out.resolve("code-contribution-report.md"));
     }
 
@@ -349,93 +351,9 @@ public class GitReportOrchestrator {
         return exception.getClass().getName() + ": " + (exception.getMessage() == null ? "" : exception.getMessage());
     }
 
-    private void runSynthesis(GitReportProperties properties, Path out, Path qualityScores, OpenCodeServerHandle server) throws Exception {
-        Path runDir = out.resolve("runs").resolve("synthesis");
-        Files.createDirectories(runDir);
-        Path finalReport = out.resolve("code-contribution-report.md");
-        Files.writeString(finalReport, readResource(FINAL_REPORT_TEMPLATE));
-        Map<String, Object> summary = readMap(out.resolve("summary.json"));
-        Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
-        Map<String, Object> qualityScoreInputs = readMap(qualityScores);
-        Path synthesisInputs = synthesisInputWriter.write(
-                runDir.resolve("synthesis-inputs.json"),
-                summary,
-                indexInputs,
-                qualityScoreInputs,
-                properties.getSynthesisInput()
-        );
-        Path promptFile = runDir.resolve("synthesis-prompt.md");
-        String prompt = promptBuilder.buildSynthesisPrompt(synthesisInputs);
-        Files.writeString(promptFile, prompt);
-        log.info("Starting synthesis task: prompt={}, synthesisInputs={}, qualityScores={}, finalReport={}",
-                promptFile,
-                synthesisInputs,
-                qualityScores,
-                out.resolve("code-contribution-report.md"));
-        OpenCodeRunResult result = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                server,
-                properties.getPaths().getRepo(),
-                "git-report-synthesis",
-                promptFile,
-                properties.getOpencode().getSynthesisMessage(),
-                runDir,
-                () -> finalReportValidationCheck(finalReport),
-                properties.getOpencode().getSessionModel(),
-                properties.getOpencode().getCreateSessionTimeoutSeconds(),
-                properties.getOpencode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                properties.getOpencode().getTimeoutMinutes(),
-                properties.getOpencode().getOutputWaitSeconds(),
-                properties.getOpencode().getValidationMaxCorrections()
-        ));
-        FinalReportValidator.Validation finalReportValidation = finalReportValidator.validate(finalReport);
-        boolean ok = finalReportValidation.ok();
-        Map<String, Object> status = new LinkedHashMap<>();
-        status.put("state", ok ? "completed" : "failed");
-        status.put("sessionId", result.sessionId());
-        status.put("serverUrl", result.serverUrl());
-        status.put("serverOwnedByJava", result.serverOwnedByJava());
-        status.put("timedOut", result.timedOut());
-        status.put("completedByOutput", result.completedByOutput());
-        status.put("aborted", result.aborted());
-        status.put("serverState", result.serverState());
-        status.put("finalReportOk", ok);
-        status.put("finalReportError", finalReportValidation.error());
-        status.put("synthesisInputs", synthesisInputs.toString());
-        status.put("finishedAt", OffsetDateTime.now().toString());
-        statusRepository.write(runDir.resolve("status.json"), status);
-        if (!ok) {
-            log.error("Synthesis failed: sessionId={}, timedOut={}, finalReportOk={}, error=\"{}\", status={}",
-                    result.sessionId(),
-                    result.timedOut(),
-                    ok,
-                    finalReportValidation.error(),
-                    runDir.resolve("status.json"));
-            throw new IllegalStateException("synthesis failed: " + finalReportValidation.error());
-        }
-        log.info("Synthesis completed: finalReport={}", finalReport);
-    }
-
     private ValidationCheck authorValidationCheck(Path reportMd, Path qualitySummaryJson) {
         AuthorValidationResult validation = outputValidator.validate(reportMd, qualitySummaryJson);
         return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
-    }
-
-    private ValidationCheck finalReportValidationCheck(Path finalReport) {
-        FinalReportValidator.Validation validation = finalReportValidator.validate(finalReport);
-        return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
-    }
-
-    private String readResource(String resourcePath) {
-        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-        try (InputStream inputStream = classLoader.getResourceAsStream(resourcePath)) {
-            if (inputStream == null) {
-                throw new IllegalStateException("resource missing: " + resourcePath);
-            }
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
     }
 
     private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, OpenCodeRunResult runResult, String error) throws IOException {
@@ -462,6 +380,6 @@ public class GitReportOrchestrator {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 }

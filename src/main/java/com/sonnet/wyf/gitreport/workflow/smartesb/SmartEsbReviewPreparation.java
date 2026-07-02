@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.workflow.smartesb;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.LogicalPaths;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -203,43 +204,19 @@ public class SmartEsbReviewPreparation {
     }
 
     static String slugify(String value) {
-        String slug = value.chars()
-                .mapToObj(ch -> Character.isLetterOrDigit(ch) || ch == '-' || ch == '_' ? String.valueOf((char) ch) : "-")
-                .reduce("", String::concat)
-                .replaceAll("-+", "-")
-                .replaceAll("^-|-$", "");
-        return slug.isBlank() ? "transaction" : slug;
+        return LogicalPaths.slug(value, "transaction");
     }
 
     static boolean isAbsoluteLogicalPath(String path) {
-        return path != null && (path.startsWith("/") || path.matches("^[A-Za-z]:[\\\\/].*"));
+        return LogicalPaths.isAbsolute(path);
     }
 
     static String appendLogical(String base, String... segments) {
-        String result = normalizeLogical(base);
-        String separator = usesWindowsSeparators(result) ? "\\" : "/";
-        for (String segment : segments) {
-            String normalized = normalizeLogical(segment);
-            while (normalized.startsWith("/") || normalized.startsWith("\\")) {
-                normalized = normalized.substring(1);
-            }
-            if (!result.endsWith(separator)) {
-                result += separator;
-            }
-            result += normalized;
-        }
-        return result;
+        return LogicalPaths.append(base, segments);
     }
 
     private static String normalizeLogical(String value) {
-        if (value == null) {
-            return "";
-        }
-        return usesWindowsSeparators(value) ? value.replace('/', '\\') : value.replace('\\', '/');
-    }
-
-    private static boolean usesWindowsSeparators(String value) {
-        return value != null && value.matches("^[A-Za-z]:[\\\\/].*");
+        return LogicalPaths.normalize(value);
     }
 
     private static String firstNonBlank(String preferred, String fallback) {

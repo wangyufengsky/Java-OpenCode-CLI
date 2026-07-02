@@ -1,12 +1,12 @@
 package com.sonnet.wyf.gitreport.workflow.smartesbreader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.LogicalPaths;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,18 +20,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class SmartEsbCodeReaderPreparation {
     private static final List<String> REFERENCE_ATTRS = List.of("target", "ref", "route", "service", "serviceId");
     private static final List<String> FALLBACK_REFERENCE_ATTRS = List.of("id", "name", "value");
-    private static final List<String> JAVA_HINT_ATTRS = List.of("class", "clazz", "className", "impl", "implementation", "ref", "service", "bean", "target", "serviceId");
-    private static final Set<String> FLOW_TAGS = Set.of("from", "process", "to", "choice", "when", "otherwise", "pipeline");
     private static final List<String> TRANSACTION_REF_SUFFIXES = List.of("CUPS2ECI");
     private static final Pattern NON_KEY_CHARS = Pattern.compile("[^A-Za-z0-9_.-]+");
     private final ObjectMapper objectMapper;
+    private final SmartEsbCodeReaderXmlSupport xmlSupport = new SmartEsbCodeReaderXmlSupport();
 
     public SmartEsbCodeReaderPreparation(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -50,9 +48,9 @@ public class SmartEsbCodeReaderPreparation {
         Files.createDirectories(out.resolve("modules"));
         Files.createDirectories(out.resolve("transactions"));
 
-        List<Path> xmlFiles = collectFiles(properties.getXmlRoot(), ".xml");
-        List<Path> bizFiles = collectFiles(properties.getBizRoot(), ".biz");
-        List<Path> javaFiles = collectFiles(properties.getJavaRoot(), ".java");
+        List<Path> xmlFiles = xmlSupport.collectFiles(properties.getXmlRoot(), ".xml");
+        List<Path> bizFiles = xmlSupport.collectFiles(properties.getBizRoot(), ".biz");
+        List<Path> javaFiles = xmlSupport.collectFiles(properties.getJavaRoot(), ".java");
         List<CaseRef> caseRefs = collectCaseRefs(properties);
         Map<String, TransactionFact> transactions = dedupeTransactions(caseRefs, xmlFiles, properties.getXmlRoot());
         Map<String, ModuleFact> modules = collectModules(transactions, xmlFiles, bizFiles, javaFiles);
@@ -109,7 +107,7 @@ public class SmartEsbCodeReaderPreparation {
     private List<CaseRef> collectCaseRefs(SmartEsbCodeReaderProperties properties) throws Exception {
         List<CaseRef> refs = new ArrayList<>();
         for (Path serviceIdentify : properties.getServiceIdentify()) {
-            Document document = parseXml(serviceIdentify);
+            Document document = xmlSupport.parseXml(serviceIdentify);
             NodeList switches = document.getElementsByTagName("switch");
             for (int i = 0; i < switches.getLength(); i++) {
                 Element switchNode = (Element) switches.item(i);
@@ -119,7 +117,7 @@ public class SmartEsbCodeReaderPreparation {
                 NodeList children = switchNode.getChildNodes();
                 for (int j = 0; j < children.getLength(); j++) {
                     Node child = children.item(j);
-                    if (child instanceof Element element && "case".equals(localName(element))) {
+                    if (child instanceof Element element && "case".equals(xmlSupport.localName(element))) {
                         String ref = transactionRefFromCase(element);
                         if (!ref.isBlank()) {
                             refs.add(new CaseRef(serviceIdentify, ref));
@@ -145,7 +143,7 @@ public class SmartEsbCodeReaderPreparation {
         }
         for (TransactionFact fact : transactions.values()) {
             if (fact.transactionXml != null) {
-                fact.flowNodes.addAll(flowNodes(fact.transactionXml));
+                fact.flowNodes.addAll(xmlSupport.flowNodes(fact.transactionXml));
             }
         }
         return transactions;
@@ -154,7 +152,7 @@ public class SmartEsbCodeReaderPreparation {
     private Map<String, ModuleFact> collectModules(Map<String, TransactionFact> transactions, List<Path> xmlFiles, List<Path> bizFiles, List<Path> javaFiles) throws Exception {
         Map<String, ModuleFact> modules = new LinkedHashMap<>();
         for (TransactionFact transaction : transactions.values()) {
-            for (FlowNode flowNode : transaction.flowNodes) {
+            for (SmartEsbFlowNode flowNode : transaction.flowNodes) {
                 String serviceId = flowNode.serviceId();
                 if (serviceId.isBlank() || serviceId.equals(transaction.transactionKey)) {
                     continue;
@@ -169,7 +167,7 @@ public class SmartEsbCodeReaderPreparation {
             module.bizCandidates.addAll(findNamedCandidates(module.serviceId, bizFiles));
             module.javaCandidates.addAll(findNamedCandidates(module.serviceId, javaFiles));
             for (Path baseXml : module.baseXmlCandidates) {
-                module.javaHints.addAll(javaHints(baseXml));
+                module.javaHints.addAll(xmlSupport.javaHints(baseXml));
             }
             for (String hint : module.javaHints) {
                 module.javaCandidates.addAll(findNamedCandidates(hint, javaFiles));
@@ -245,7 +243,7 @@ public class SmartEsbCodeReaderPreparation {
     private Map<String, Object> flowSummary(TransactionFact transaction) {
         List<Map<String, Object>> nodes = new ArrayList<>();
         int step = 1;
-        for (FlowNode node : transaction.flowNodes) {
+        for (SmartEsbFlowNode node : transaction.flowNodes) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("step", step++);
             row.put("tag", node.tag());
@@ -374,93 +372,6 @@ public class SmartEsbCodeReaderPreparation {
                 .toList();
     }
 
-    private List<FlowNode> flowNodes(Path transactionXml) throws Exception {
-        List<FlowNode> nodes = new ArrayList<>();
-        Document document = parseXml(transactionXml);
-        walkFlow(document.getDocumentElement(), List.of(localName(document.getDocumentElement())), nodes);
-        return nodes;
-    }
-
-    private void walkFlow(Element element, List<String> stack, List<FlowNode> nodes) {
-        String tag = localName(element);
-        String serviceId = firstAttr(element, JAVA_HINT_ATTRS);
-        if ((FLOW_TAGS.contains(tag) || !serviceId.isBlank()) && !serviceId.isBlank()) {
-            nodes.add(new FlowNode(tag, "/" + String.join("/", stack), serviceId, attributes(element)));
-        }
-        NodeList children = element.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node child = children.item(i);
-            if (child instanceof Element childElement) {
-                List<String> childStack = new ArrayList<>(stack);
-                childStack.add(localName(childElement));
-                walkFlow(childElement, childStack, nodes);
-            }
-        }
-    }
-
-    private List<String> javaHints(Path baseXml) throws Exception {
-        List<String> hints = new ArrayList<>();
-        Document document = parseXml(baseXml);
-        collectHints(document.getDocumentElement(), hints);
-        return hints;
-    }
-
-    private void collectHints(Element element, List<String> hints) {
-        for (String attr : JAVA_HINT_ATTRS) {
-            String value = element.getAttribute(attr);
-            if (!value.isBlank()) {
-                hints.add(value);
-            }
-        }
-        NodeList children = element.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node child = children.item(i);
-            if (child instanceof Element childElement) {
-                collectHints(childElement, hints);
-            }
-        }
-    }
-
-    private String firstAttr(Element element, List<String> attrs) {
-        for (String attr : attrs) {
-            String value = element.getAttribute(attr).trim();
-            if (!value.isBlank()) {
-                return value;
-            }
-        }
-        return "";
-    }
-
-    private Map<String, String> attributes(Element element) {
-        Map<String, String> attrs = new LinkedHashMap<>();
-        for (int i = 0; i < element.getAttributes().getLength(); i++) {
-            Node node = element.getAttributes().item(i);
-            attrs.put(node.getNodeName(), node.getNodeValue());
-        }
-        return attrs;
-    }
-
-    private Document parseXml(Path path) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(false);
-        Document document = factory.newDocumentBuilder().parse(path.toFile());
-        document.getDocumentElement().normalize();
-        return document;
-    }
-
-    private List<Path> collectFiles(Path root, String suffix) throws IOException {
-        if (root == null || !Files.exists(root)) {
-            return List.of();
-        }
-        try (Stream<Path> stream = Files.walk(root)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(suffix))
-                    .sorted()
-                    .toList();
-        }
-    }
-
     private boolean anyChild(Path path) throws IOException {
         try (Stream<Path> stream = Files.list(path)) {
             return stream.findAny().isPresent();
@@ -480,34 +391,15 @@ public class SmartEsbCodeReaderPreparation {
     }
 
     static boolean isAbsoluteLogicalPath(String path) {
-        return path != null && (path.startsWith("/") || path.matches("^[A-Za-z]:[\\\\/].*"));
+        return LogicalPaths.isAbsolute(path);
     }
 
     static String appendLogical(String base, String... segments) {
-        String result = normalizeLogical(base);
-        String separator = usesWindowsSeparators(result) ? "\\" : "/";
-        for (String segment : segments) {
-            String normalized = normalizeLogical(segment);
-            while (normalized.startsWith("/") || normalized.startsWith("\\")) {
-                normalized = normalized.substring(1);
-            }
-            if (!result.endsWith(separator)) {
-                result += separator;
-            }
-            result += normalized;
-        }
-        return result;
+        return LogicalPaths.append(base, segments);
     }
 
     private static String normalizeLogical(String value) {
-        if (value == null) {
-            return "";
-        }
-        return usesWindowsSeparators(value) ? value.replace('/', '\\') : value.replace('\\', '/');
-    }
-
-    private static boolean usesWindowsSeparators(String value) {
-        return value != null && value.matches("^[A-Za-z]:[\\\\/].*");
+        return LogicalPaths.normalize(value);
     }
 
     private static String normalizeKey(String value) {
@@ -521,12 +413,7 @@ public class SmartEsbCodeReaderPreparation {
     }
 
     static String slugify(String value) {
-        String slug = value.chars()
-                .mapToObj(ch -> Character.isLetterOrDigit(ch) || ch == '-' || ch == '_' ? String.valueOf((char) ch) : "-")
-                .reduce("", String::concat)
-                .replaceAll("-+", "-")
-                .replaceAll("^-|-$", "");
-        return slug.isBlank() ? "item" : slug;
+        return LogicalPaths.slug(value, "item");
     }
 
     private String stripExtension(String value) {
@@ -536,11 +423,6 @@ public class SmartEsbCodeReaderPreparation {
 
     private String comparableName(String value) {
         return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
-    }
-
-    private String localName(Element element) {
-        String name = element.getLocalName();
-        return name == null ? element.getTagName() : name;
     }
 
     private <T> List<T> distinct(List<T> items) {
@@ -562,7 +444,7 @@ public class SmartEsbCodeReaderPreparation {
         private final Path transactionXml;
         private final List<Path> transactionXmlCandidates;
         private final List<String> aliases = new ArrayList<>();
-        private final List<FlowNode> flowNodes = new ArrayList<>();
+        private final List<SmartEsbFlowNode> flowNodes = new ArrayList<>();
         private final LinkedHashSet<String> moduleServiceIds = new LinkedHashSet<>();
 
         private TransactionFact(String transactionKey, String transactionRef, String transactionMatchRef, Path transactionXml, List<Path> transactionXmlCandidates) {
@@ -587,6 +469,4 @@ public class SmartEsbCodeReaderPreparation {
         }
     }
 
-    private record FlowNode(String tag, String xmlPath, String serviceId, Map<String, String> attributes) {
-    }
 }

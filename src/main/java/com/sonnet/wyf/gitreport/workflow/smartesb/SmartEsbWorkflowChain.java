@@ -18,6 +18,7 @@ import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -436,7 +437,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
 }

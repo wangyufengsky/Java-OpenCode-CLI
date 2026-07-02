@@ -44,6 +44,7 @@ class ArchitectureConventionsTest {
     @Test
     void openCodeClientUsesOpenCode117ApiContractOnly() throws Exception {
         String client = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerClient.java");
+        String modelMapper = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeModelMapper.java");
         String application = read("src/main/resources/application.yml");
         String example = read("src/main/resources/application-example.yml");
 
@@ -54,9 +55,9 @@ class ArchitectureConventionsTest {
         assertThat(client).doesNotContain("/api/session");
         assertThat(client).doesNotContain("?directory=");
         assertThat(client).contains("body.put(\"model\", sessionModelObject");
-        assertThat(client).contains("result.put(\"providerID\"");
-        assertThat(client).contains("result.put(\"id\"");
-        assertThat(client).contains("result.put(\"modelID\"");
+        assertThat(modelMapper).contains("result.put(\"providerID\"");
+        assertThat(modelMapper).contains("result.put(\"id\"");
+        assertThat(modelMapper).contains("result.put(\"modelID\"");
         assertThat(application).doesNotContain("\n    model:");
         assertThat(example).doesNotContain("\n    model:");
     }

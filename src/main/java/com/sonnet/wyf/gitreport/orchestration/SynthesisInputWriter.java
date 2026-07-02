@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.orchestration;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import com.sonnet.wyf.gitreport.GitReportProperties.SynthesisInput;
 
 import java.io.IOException;
@@ -126,11 +127,11 @@ public class SynthesisInputWriter {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
     private String string(Object value) {
-        return value == null ? "" : value.toString();
+        return JsonMaps.string(value);
     }
 
     private int positive(int value) {

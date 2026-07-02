@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpTimeoutException;
 import java.net.http.HttpRequest;
@@ -29,17 +28,15 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 
 public class OpenCodeServerClient {
     private static final Logger log = LoggerFactory.getLogger(OpenCodeServerClient.class);
     private static final String DIRECTORY_HEADER = "X-OpenCode-Directory";
     private static final DateTimeFormatter SESSION_TITLE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").withZone(ZoneOffset.UTC);
-    private static final Pattern DONE_TEXT = Pattern.compile("(?im)^\\s*DONE\\b");
-    private static final Pattern BLOCKED_TEXT = Pattern.compile("(?im)^\\s*BLOCKED\\b");
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final OpenCodeSessionStateParser sessionStateParser = new OpenCodeSessionStateParser();
 
     public OpenCodeServerClient(ObjectMapper objectMapper) {
         this(objectMapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
@@ -315,32 +312,12 @@ public class OpenCodeServerClient {
         return title + "-" + SESSION_TITLE_TIMESTAMP.format(Instant.now());
     }
 
-    private ModelRef parseModelRef(String model) {
-        String trimmed = model.trim();
-        int slash = trimmed.indexOf('/');
-        if (slash <= 0 || slash == trimmed.length() - 1) {
-            throw new IllegalArgumentException("opencode session-model must use provider/model format when set: " + model);
-        }
-        return new ModelRef(trimmed.substring(0, slash), trimmed.substring(slash + 1));
-    }
-
     private Map<String, Object> sessionModelObject(String model) {
-        ModelRef ref = parseModelRef(model);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("providerID", ref.providerId());
-        result.put("id", ref.modelId());
-        return result;
+        return OpenCodeModelMapper.sessionModelObject(model);
     }
 
     private Map<String, Object> promptModelObject(String model) {
-        ModelRef ref = parseModelRef(model);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("providerID", ref.providerId());
-        result.put("modelID", ref.modelId());
-        return result;
-    }
-
-    private record ModelRef(String providerId, String modelId) {
+        return OpenCodeModelMapper.promptModelObject(model);
     }
 
     public void sendPromptAsync(URI serverUrl, Path repo, String sessionId, String text) throws IOException, InterruptedException {
@@ -475,115 +452,23 @@ public class OpenCodeServerClient {
                 .GET()
                 .build();
         JsonNode response = sendJson(request);
-        JsonNode messages = response.isArray() ? response : response.path("data");
-        if (!messages.isArray()) {
-            return new OpenCodeSessionState("", false, false, "messages", "");
-        }
-        JsonNode lastAssistant = null;
-        boolean hasMessage = false;
-        for (JsonNode message : messages) {
-            hasMessage = true;
-            if ("assistant".equals(message.path("type").asText())) {
-                lastAssistant = message;
-            }
-        }
-        if (lastAssistant == null) {
-            return new OpenCodeSessionState(hasMessage ? "submitted" : "", false, false, "messages", "");
-        }
-        if (messageHasError(lastAssistant)) {
-            return new OpenCodeSessionState("error", true, false, "message_error", assistantText(lastAssistant));
-        }
-        String finish = lastAssistant.path("finish").asText("");
-        if (isAbortFinish(finish)) {
-            return new OpenCodeSessionState("aborted", true, false, "finish", assistantText(lastAssistant));
-        }
-        if (!finish.isBlank() || !lastAssistant.path("time").path("completed").isMissingNode()) {
-            return new OpenCodeSessionState("idle", true, true, "finish", assistantText(lastAssistant));
-        }
-        String assistantText = assistantText(lastAssistant);
-        if (DONE_TEXT.matcher(assistantText).find()) {
-            return new OpenCodeSessionState("done", true, true, "assistant_text", assistantText);
-        }
-        if (BLOCKED_TEXT.matcher(assistantText).find()) {
-            return new OpenCodeSessionState("blocked", true, false, "assistant_text", assistantText);
-        }
-        return new OpenCodeSessionState("running", false, false, "messages", assistantText);
-    }
-
-    private boolean messageHasError(JsonNode message) {
-        String finish = message.path("finish").asText("");
-        if (finish.equalsIgnoreCase("error") || finish.equalsIgnoreCase("failed")) {
-            return true;
-        }
-        if (!message.path("error").isMissingNode()) {
-            return true;
-        }
-        JsonNode content = message.path("content");
-        if (!content.isArray()) {
-            return false;
-        }
-        for (JsonNode part : content) {
-            String type = part.path("type").asText("");
-            if (type.equalsIgnoreCase("error")) {
-                return true;
-            }
-            String status = part.path("state").path("status").asText("");
-            if (status.equalsIgnoreCase("error")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isAbortFinish(String finish) {
-        String normalized = finish == null ? "" : finish.toLowerCase();
-        return normalized.equals("abort") || normalized.equals("aborted") || normalized.equals("cancel") || normalized.equals("canceled") || normalized.equals("cancelled");
-    }
-
-    private String assistantText(JsonNode message) {
-        StringBuilder text = new StringBuilder();
-        appendText(text, message.path("text"));
-        JsonNode content = message.path("content");
-        if (content.isArray()) {
-            for (JsonNode part : content) {
-                appendText(text, part.path("text"));
-                appendText(text, part.path("content"));
-            }
-        }
-        return text.toString().trim();
-    }
-
-    private void appendText(StringBuilder text, JsonNode value) {
-        if (!value.isTextual()) {
-            return;
-        }
-        if (text.length() > 0) {
-            text.append('\n');
-        }
-        text.append(value.asText());
+        return sessionStateParser.infer(response);
     }
 
     private URI resolve(URI serverUrl, String path) {
-        String base = serverUrl.toString();
-        if (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        return URI.create(base + path);
+        return OpenCodeUris.resolve(serverUrl, path);
     }
 
     private URI resolveWithQuery(URI serverUrl, String path, String query) {
-        if (query != null && !query.isBlank()) {
-            return resolve(serverUrl, path + "?" + query);
-        }
-        return resolve(serverUrl, path);
+        return OpenCodeUris.resolveWithQuery(serverUrl, path, query);
     }
 
     private String queryEncode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        return OpenCodeUris.queryEncode(value);
     }
 
     private String pathEncode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        return OpenCodeUris.pathEncode(value);
     }
 
     private String firstText(JsonNode json, String... names) {

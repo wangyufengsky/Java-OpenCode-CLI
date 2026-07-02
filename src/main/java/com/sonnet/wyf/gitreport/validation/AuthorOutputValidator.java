@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.validation;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import com.sonnet.wyf.gitreport.core.GitReportConstants;
 
 import java.nio.file.Files;
@@ -179,7 +180,7 @@ public class AuthorOutputValidator {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
     private boolean blankString(Object value) {
@@ -187,6 +188,6 @@ public class AuthorOutputValidator {
     }
 
     private String string(Object value) {
-        return value == null ? "" : value.toString();
+        return JsonMaps.string(value);
     }
 }

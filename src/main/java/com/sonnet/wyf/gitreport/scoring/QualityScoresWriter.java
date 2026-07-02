@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.scoring;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,10 +72,10 @@ public class QualityScoresWriter {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
     private double number(Object value) {
-        return value instanceof Number number ? number.doubleValue() : 0.0;
+        return JsonMaps.decimal(value);
     }
 }

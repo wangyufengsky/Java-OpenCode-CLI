@@ -11,6 +11,7 @@ import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
 import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -184,10 +185,10 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
     private String string(Object value) {
-        return value == null ? "" : value.toString();
+        return JsonMaps.string(value);
     }
 }

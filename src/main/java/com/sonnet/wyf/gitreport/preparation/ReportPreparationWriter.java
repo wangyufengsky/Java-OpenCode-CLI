@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.preparation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -267,11 +268,11 @@ public class ReportPreparationWriter {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(Object value) {
-        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+        return JsonMaps.mapValue(value);
     }
 
     private String string(Object value) {
-        return value == null ? "" : value.toString();
+        return JsonMaps.string(value);
     }
 
     private List<?> limitedList(Object value, int limit) {
@@ -299,13 +300,7 @@ public class ReportPreparationWriter {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return List.of();
-        }
-        return list.stream()
-                .filter(Map.class::isInstance)
-                .map(item -> (Map<String, Object>) item)
-                .toList();
+        return JsonMaps.listOfMaps(value);
     }
 
     private int changedLineCount(Map<String, Object> region) {

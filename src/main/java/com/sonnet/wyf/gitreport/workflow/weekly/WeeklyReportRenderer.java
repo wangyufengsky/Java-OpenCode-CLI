@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.workflow.weekly;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.util.JsonMaps;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -366,29 +367,29 @@ public class WeeklyReportRenderer {
     }
 
     private String string(Object value) {
-        return value == null ? "" : value.toString();
+        return JsonMaps.string(value);
     }
 
     private int number(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
+        return JsonMaps.number(value);
     }
 
     private double decimal(Object value) {
-        return value instanceof Number number ? Math.round(number.doubleValue() * 10.0) / 10.0 : 0.0;
+        return Math.round(JsonMaps.decimal(value) * 10.0) / 10.0;
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapValue(Object value) {
-        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+        return JsonMaps.mapValue(value);
     }
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
+        return JsonMaps.listOfMaps(value);
     }
 
     private List<?> listValue(Object value) {
-        return value instanceof List<?> list ? list : List.of();
+        return JsonMaps.listValue(value);
     }
 
     private static class Aggregation {
