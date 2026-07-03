@@ -81,6 +81,11 @@ class ConsoleMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("<option value=\"review-batch\">审查批次</option>")))
                 .andExpect(content().string(containsString("<option value=\"synthesis\">总报告</option>")));
+        mockMvc.perform(get("/runs/new").param("chainId", "project-unit-test-generation"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("单元测试生成")))
+                .andExpect(content().string(containsString("<option value=\"test-batch\">测试批次</option>")))
+                .andExpect(content().string(containsString("<option value=\"verification\">验证</option>")));
         String appJs = mockMvc.perform(get("/app.js"))
                 .andExpect(status().isOk())
                 .andReturn()
@@ -90,6 +95,9 @@ class ConsoleMvcTest {
                 .contains("项目标识")
                 .contains("transaction-plan-dir")
                 .contains("review.grouping.max-regions-per-task")
+                .contains("project-unit-test-generation")
+                .contains("source.package-paths")
+                .contains("test.verify-command")
                 .contains("git-code-contribution-report")
                 .contains("synthesis")
                 .contains("总报告重跑不需要编号")
@@ -117,6 +125,12 @@ class ConsoleMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.defaults['transaction-plan-dir']").value("src/main/resources/smartesb-transactions"))
                 .andExpect(jsonPath("$.defaults['local-out']").doesNotExist());
+
+        mockMvc.perform(get("/api/chains/project-unit-test-generation/defaults"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.defaults['project.id']").value("upfs-production"))
+                .andExpect(jsonPath("$.defaults['source.package-paths']").isArray())
+                .andExpect(jsonPath("$.defaults['test.verify-command'][0]").value("./mvnw"));
     }
 
     @Test

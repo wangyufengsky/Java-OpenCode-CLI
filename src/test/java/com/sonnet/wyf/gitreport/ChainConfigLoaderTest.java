@@ -3,6 +3,7 @@ package com.sonnet.wyf.gitreport;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbRewriteProperties;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderProperties;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
@@ -41,5 +42,15 @@ class ChainConfigLoaderTest {
         assertThat(properties.getServiceIdentify()).isNotEmpty();
         assertThat(properties.getXmlRoot()).hasToString("/home/wangyufeng/upfs-production");
         assertThat(properties.getWorkerMessage()).contains("SmartESB code-reader");
+    }
+
+    @Test
+    void loadsProjectUnitTestGenerationYamlFromClasspath() throws Exception {
+        ProjectUnitTestGenerationProperties properties = new ChainConfigLoader(new DefaultResourceLoader())
+                .load("classpath:chains", "project-unit-test-generation", ProjectUnitTestGenerationProperties.class);
+
+        assertThat(properties.getProject().getId()).isEqualTo("upfs-production");
+        assertThat(properties.getSource().getPackagePaths()).isEmpty();
+        assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
     }
 }

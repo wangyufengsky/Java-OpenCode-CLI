@@ -29,6 +29,12 @@ import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewOutputValidator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyOpenCodeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyReportRenderer;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationReportRenderer;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationVerifier;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationWorkflowChain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
@@ -106,6 +112,31 @@ public class RunnerConfiguration {
     @Bean
     WeeklyReportRenderer weeklyReportRenderer(ObjectMapper objectMapper) {
         return new WeeklyReportRenderer(objectMapper);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationPreparation projectUnitTestGenerationPreparation(ObjectMapper objectMapper) {
+        return new ProjectUnitTestGenerationPreparation(objectMapper);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationPromptBuilder projectUnitTestGenerationPromptBuilder(ResourceLoader resourceLoader) {
+        return new ProjectUnitTestGenerationPromptBuilder(resourceLoader);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationOutputValidator projectUnitTestGenerationOutputValidator(ObjectMapper objectMapper) {
+        return new ProjectUnitTestGenerationOutputValidator(objectMapper);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationVerifier projectUnitTestGenerationVerifier(ObjectMapper objectMapper) {
+        return new ProjectUnitTestGenerationVerifier(objectMapper);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationReportRenderer projectUnitTestGenerationReportRenderer(ObjectMapper objectMapper) {
+        return new ProjectUnitTestGenerationReportRenderer(objectMapper);
     }
 
     @Bean
@@ -187,6 +218,37 @@ public class RunnerConfiguration {
                 evidenceValidator,
                 codeReviewRunner,
                 reportRenderer
+        );
+    }
+
+    @Bean
+    WorkflowChain projectUnitTestGenerationWorkflowChain(
+            ChainConfigLoader chainConfigLoader,
+            OpenCodeRunnerProperties runnerProperties,
+            ProjectUnitTestGenerationPreparation preparation,
+            ProjectUnitTestGenerationPromptBuilder promptBuilder,
+            ProjectUnitTestGenerationOutputValidator outputValidator,
+            ProjectUnitTestGenerationVerifier verifier,
+            ProjectUnitTestGenerationReportRenderer reportRenderer,
+            OpenCodeServerManager serverManager,
+            OpenCodeServerTaskRunner taskRunner,
+            ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner,
+            OutputCompletionGate outputCompletionGate,
+            ObjectMapper objectMapper
+    ) {
+        return new ProjectUnitTestGenerationWorkflowChain(
+                chainConfigLoader,
+                runnerProperties,
+                preparation,
+                promptBuilder,
+                outputValidator,
+                verifier,
+                reportRenderer,
+                serverManager,
+                taskRunner,
+                concurrentWorkflowTaskRunner,
+                outputCompletionGate,
+                objectMapper
         );
     }
 

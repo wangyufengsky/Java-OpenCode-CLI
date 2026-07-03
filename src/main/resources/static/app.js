@@ -74,6 +74,27 @@ const chainConfigDefinitions = {
       field('review.grouping.max-commits-per-task', '每任务最大提交数', '单个 review unit 最多覆盖的 commit 数量。', 'number'),
       field('opencode.timeout-minutes', 'OpenCode 超时分钟数', '单个 OpenCode session 的超时时间。', 'number')
     ]
+  },
+  'project-unit-test-generation': {
+    description: '默认全量扫描项目源码，也可按包路径生成 src/test 下的单元测试。',
+    fields: [
+      field('project.id', '项目标识', '写入任务和报告元信息的项目 ID。'),
+      field('project.name', '项目名称', '写入任务和报告标题的项目名称。'),
+      field('project.repo', '项目仓库路径', '要生成单元测试的本地项目仓库。'),
+      field('paths.out', '输出目录', '测试任务包、运行状态和验收报告输出目录。'),
+      field('docs.agents', 'AGENTS.md', '可选；相对项目仓库的 AGENTS.md 路径。'),
+      field('docs.project-map', 'project-map.md', '可选；相对项目仓库的项目地图文档路径。'),
+      field('docs.reconstructed-design', '重构设计文档', '可选；相对项目仓库的重构项目详细设计文档路径。'),
+      field('source.package-paths', '包路径', '每行一个包名或源码路径，留空表示全量。', 'list'),
+      field('source.include', '包含路径', '可选；每行一个 include glob。', 'list'),
+      field('source.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建产物或生成代码。', 'list'),
+      field('test.concurrency', '测试生成并发数', '单元测试生成批次并发数。', 'number'),
+      field('test.max-types-per-task', '每批最大类型数', '单个测试批次最多包含的 Java 类型数量。', 'number'),
+      field('test.max-methods-per-task', '每批最大方法数', '单个测试批次最多包含的公开方法数量。', 'number'),
+      field('test.max-source-chars-per-task', '每批源码字符数', '单个测试批次包含源码的字符上限。', 'number'),
+      field('test.verify-command', '验证命令', '每行一个命令参数，例如 ./mvnw 和 test。', 'list'),
+      field('opencode.timeout-minutes', 'OpenCode 超时分钟数', '单个测试生成 session 的超时时间。', 'number')
+    ]
   }
 };
 
@@ -95,6 +116,10 @@ const rerunTypeDefinitions = {
   'weekly-engineering-report': [
     { value: 'review-batch', label: '审查批次', requiresId: true, idPlaceholder: 'review batch id，多个用英文逗号分隔' },
     { value: 'synthesis', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
+  ],
+  'project-unit-test-generation': [
+    { value: 'test-batch', label: '测试批次', requiresId: true, idPlaceholder: 'test batch id，多个用英文逗号分隔' },
+    { value: 'verification', label: '验证', requiresId: false, idPlaceholder: '验证重跑不需要编号' }
   ]
 };
 

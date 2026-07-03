@@ -1,0 +1,37 @@
+# 项目单元测试生成链路。默认全量扫描 src/main/java；source.package-paths 非空时仅处理指定包路径下所有类。
+
+project:
+  id: "upfs-production"
+  name: "UPFS Production"
+  repo: "/Users/wangyufeng/IdeaProjects/upfs-production"
+
+paths:
+  out: "/Users/wangyufeng/reports/project-unit-tests/upfs-production"
+
+docs:
+  agents: "AGENTS.md"
+  project-map: "project-map.md"
+  reconstructed-design: "重构项目详细设计文档.md"
+
+source:
+  package-paths: []
+  include: []
+  exclude:
+    - "target/**"
+    - "build/**"
+    - "generated/**"
+    - "**/target/**"
+    - "**/build/**"
+    - "**/generated/**"
+
+test:
+  concurrency: 3
+  max-types-per-task: 6
+  max-methods-per-task: 40
+  max-source-chars-per-task: 80000
+  verify-command:
+    - "./mvnw"
+    - "test"
+
+opencode:
+  timeout-minutes: 40

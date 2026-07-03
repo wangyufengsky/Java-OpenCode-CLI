@@ -55,6 +55,9 @@ final class ManagedOpenCodeSessionCleaner {
         if (title.startsWith("weekly-code-review-")) {
             return List.of("weekly-code-review-");
         }
+        if (title.startsWith("project-unit-test-generation-")) {
+            return List.of("project-unit-test-generation-");
+        }
         return List.of();
     }
 }

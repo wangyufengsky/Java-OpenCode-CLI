@@ -27,6 +27,10 @@ final class WorkflowRerunContract {
             "weekly-engineering-report", List.of(
                     new RerunTypeOption("review-batch", "审查批次", true, "review batch id，多个用英文逗号分隔"),
                     new RerunTypeOption("synthesis", "总报告", false, "总报告重跑不需要编号")
+            ),
+            "project-unit-test-generation", List.of(
+                    new RerunTypeOption("test-batch", "测试批次", true, "test batch id，多个用英文逗号分隔"),
+                    new RerunTypeOption("verification", "验证", false, "验证重跑不需要编号")
             )
     );
 
@@ -63,6 +67,13 @@ final class WorkflowRerunContract {
                     "总报告", "synthesis",
                     "汇总", "synthesis",
                     "synthesis", "synthesis"
+            ),
+            "project-unit-test-generation", Map.of(
+                    "批次", "test-batch",
+                    "测试批次", "test-batch",
+                    "test-batch", "test-batch",
+                    "验证", "verification",
+                    "verification", "verification"
             )
     );
 
@@ -70,7 +81,8 @@ final class WorkflowRerunContract {
             "git-code-contribution-report", Set.of("author"),
             "smartesb-rewrite-code-review", Set.of("transaction", "module"),
             "smartesb-code-reader", Set.of("transaction", "module"),
-            "weekly-engineering-report", Set.of("review-batch")
+            "weekly-engineering-report", Set.of("review-batch"),
+            "project-unit-test-generation", Set.of("test-batch")
     );
 
     private WorkflowRerunContract() {

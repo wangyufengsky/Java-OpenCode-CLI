@@ -10,7 +10,8 @@ public class ConsoleText {
             "git-code-contribution-report", "代码贡献报告",
             "smartesb-rewrite-code-review", "SmartESB 改造评审",
             "smartesb-code-reader", "SmartESB 代码阅读",
-            "weekly-engineering-report", "研发周报"
+            "weekly-engineering-report", "研发周报",
+            "project-unit-test-generation", "单元测试生成"
     );
 
     private static final Map<String, String> MODES = Map.of(
@@ -31,7 +32,9 @@ public class ConsoleText {
             "module", "模块",
             "index", "总报告",
             "synthesis", "总报告",
-            "review-batch", "审查批次"
+            "review-batch", "审查批次",
+            "test-batch", "测试批次",
+            "verification", "验证"
     );
 
     private static final Map<String, String> EVENT_TYPES = Map.of(

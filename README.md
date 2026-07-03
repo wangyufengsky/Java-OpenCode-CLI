@@ -2,12 +2,13 @@
 
 这是一个基于 Spring Boot 的 OpenCode 多链路 Runner。主应用只负责选择链路和运行方式，链路自身的业务配置放在独立 YAML 中。
 
-当前支持四条链路，其中 `weekly-engineering-report` 会按配置的 `startday`/`endday` 统计窗口重新统计 Git 代码事实，并对窗口内 changed regions 启动代码审查批次：
+当前支持五条链路，其中 `weekly-engineering-report` 会按配置的 `startday`/`endday` 统计窗口重新统计 Git 代码事实，并对窗口内 changed regions 启动代码审查批次：
 
 - `git-code-contribution-report`：代码提交量统计和个人/总报告生成。
 - `smartesb-rewrite-code-review`：SmartESB 8583 到 JSON 改造审查。
 - `smartesb-code-reader`：从 serviceIdentify/XML/BIZ/Java 生成 SmartESB 模块和交易阅读索引。
 - `weekly-engineering-report`：重新生成统计窗口内 Git 证据和代码审查结果，生成项目经理周会报告、研发负责人团队风险报告、代码维度审查报告和个人证据包。
+- `project-unit-test-generation`：默认全量扫描项目 `src/main/java`，也可按包路径生成 `src/test/**` 单元测试并执行验证命令。
 
 ## 快速开始
 
@@ -34,6 +35,7 @@ opencode-runner:
 - SmartESB rewrite review：`src/main/resources/chains/smartesb-rewrite-code-review.yml`
 - SmartESB code-reader：`src/main/resources/chains/smartesb-code-reader.yml`
 - weekly engineering report：`src/main/resources/chains/weekly-engineering-report.yml`
+- project unit test generation：`src/main/resources/chains/project-unit-test-generation.yml`
 
 3. 运行：
 
@@ -271,6 +273,60 @@ opencode-runner:
 ```
 
 要求已有完整的 `weekly-evidence.json` 和所有批次的 `code-review-summary.json`、`code-review.md`。
+
+### project-unit-test-generation 全量
+
+```yaml
+opencode-runner:
+  active-chain: "project-unit-test-generation"
+  mode: "full"
+```
+
+单元测试生成链路默认扫描目标项目 `src/main/java/**/*.java`，使用 JavaParser 生成测试任务包，再让 OpenCode 按批次创建或更新目标项目 `src/test/**` 下的测试文件。链路不会自动修改生产代码、`pom.xml`、构建脚本或配置文件。输出包括：
+
+- `unit-test-plan.json`：JavaParser 生成的源码类型、角色、目标测试文件和文档 warning。
+- `test-batches.json`：测试生成批次清单。
+- `test-batches/<batch_id>/input.json`：单个测试生成批次输入。
+- `test-batches/<batch_id>/summary.json`：OpenCode worker 写入的批次结果。
+- `verification.json`：验证命令退出码和 stdout/stderr 摘要。
+- `unit-test-generation-report.md`：批次状态和验证结果总览。
+
+### project-unit-test-generation 按包路径生成
+
+链路配置中的 `source.package-paths` 为空表示全量；非空时只处理指定包路径下所有类。每行支持三种写法：
+
+```yaml
+source:
+  package-paths:
+    - "com.acme.order"
+    - "src/main/java/com/acme/payment"
+    - "com/acme/user"
+```
+
+### project-unit-test-generation 补跑测试批次
+
+```yaml
+opencode-runner:
+  active-chain: "project-unit-test-generation"
+  mode: "rerun"
+  rerun:
+    type: "test-batch"
+    id: "test-batch-001-com-acme-order"
+```
+
+`id` 必须存在于 `test-batches.json` 的 `batches[].batch_id`。多个批次用英文逗号分隔。
+
+### project-unit-test-generation 只重跑验证
+
+```yaml
+opencode-runner:
+  active-chain: "project-unit-test-generation"
+  mode: "rerun"
+  rerun:
+    type: "verification"
+```
+
+只执行 `test.verify-command` 并重建 `unit-test-generation-report.md`。
 
 ## git-report 链路配置
 
