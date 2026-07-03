@@ -314,6 +314,34 @@ class OpenCodeServerClientTest {
         assertThat(client.getSessionStatus(serverUrl, tempDir, "session-1")).isEqualTo("done");
     }
 
+    @Test
+    void usesSessionStatusWhenMessageMetadataDoesNotExposeTerminalState() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session/session-1/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"hello prompt","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test-provider","id":"test-model"},"content":[{"type":"text","text":"1111111010101010 malformed but stopped"}],"time":{"created":2}}
+                ]
+                """));
+        server.createContext("/session/status", exchange -> respond(exchange, 200, """
+                {
+                  "session-1": {"type": "idle"}
+                }
+                """));
+        server.start();
+
+        URI serverUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+
+        OpenCodeSessionState state = client.getSessionState(serverUrl, tempDir, "session-1");
+
+        assertThat(state.state()).isEqualTo("idle");
+        assertThat(state.terminal()).isTrue();
+        assertThat(state.success()).isTrue();
+        assertThat(state.source()).isEqualTo("session_status");
+        assertThat(state.finalText()).contains("malformed but stopped");
+    }
+
     private void respond(HttpExchange exchange, int status, String body) throws IOException {
         if (status == 204) {
             exchange.sendResponseHeaders(status, -1);

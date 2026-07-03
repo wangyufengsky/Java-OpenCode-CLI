@@ -612,6 +612,71 @@ class OpenCodeServerTaskRunnerTest {
     }
 
     @Test
+    void sendsCorrectionAfterSessionStatusIdleWhenMessageMetadataIsStillRunning() throws Exception {
+        Path output = tempDir.resolve("status-idle-validation-output.txt");
+        AtomicInteger promptRequests = new AtomicInteger();
+        AtomicInteger abortRequests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/session", exchange -> respond(exchange, 200, "{\"id\":\"status-idle-session\"}"));
+        server.createContext("/session/status", exchange -> respond(exchange, 200, """
+                {
+                  "status-idle-session": {"type": "idle"}
+                }
+                """));
+        server.createContext("/session/status-idle-session/prompt_async", exchange -> {
+            int request = promptRequests.incrementAndGet();
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (request == 1 && body.contains("initial prompt")) {
+                Files.writeString(output, "bad");
+            } else if (request == 2 && body.contains("Java 产物校验失败")) {
+                Files.writeString(output, "good");
+            }
+            respond(exchange, 204, "");
+        });
+        server.createContext("/session/status-idle-session/message", exchange -> respond(exchange, 200, """
+                [
+                    {"id":"msg_1","type":"user","text":"ok","time":{"created":1}},
+                    {"id":"msg_2","type":"assistant","agent":"build","model":{"providerID":"test","id":"model"},"content":[{"type":"text","text":"1111111010101010 malformed but stopped"}],"time":{"created":2}}
+                ]
+                """));
+        server.createContext("/session/status-idle-session/abort", exchange -> {
+            abortRequests.incrementAndGet();
+            respond(exchange, 204, "");
+        });
+        server.start();
+
+        Path promptFile = tempDir.resolve("status-idle-validation-prompt.md");
+        Files.writeString(promptFile, "initial prompt");
+        OpenCodeServerTaskRunner runner = new OpenCodeServerTaskRunner(new OpenCodeServerClient(new ObjectMapper()), scheduledProbeWaiter());
+        OpenCodeServerHandle handle = new OpenCodeServerHandle(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), false);
+
+        OpenCodeRunResult result = runner.runUntilValidated(
+                handle,
+                tempDir,
+                "status-idle-validation-title",
+                promptFile,
+                "worker message",
+                tempDir.resolve("status-idle-validation-run"),
+                () -> Files.exists(output) && "good".equals(Files.readString(output))
+                        ? ValidationCheck.success()
+                        : ValidationCheck.failed("expected corrected output"),
+                "",
+                60,
+                60,
+                50,
+                1,
+                0,
+                1
+        );
+
+        assertThat(result.timedOut()).isFalse();
+        waitUntil(() -> promptRequests.get() == 2);
+        assertThat(result.correctionRounds()).isEqualTo(1);
+        assertThat(promptRequests).hasValue(2);
+        assertThat(abortRequests).hasValue(0);
+    }
+
+    @Test
     void runUntilValidatedAcceptsTaskSpec() throws Exception {
         Path output = tempDir.resolve("spec-output.txt");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

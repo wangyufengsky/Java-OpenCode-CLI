@@ -388,7 +388,15 @@ public class OpenCodeServerClient {
     }
 
     public OpenCodeSessionState getSessionState(URI serverUrl, Path repo, String sessionId) throws IOException, InterruptedException {
-        return inferStateFromMessages(serverUrl, repo, sessionId);
+        OpenCodeSessionState messageState = inferStateFromMessages(serverUrl, repo, sessionId);
+        if (messageState.terminal()) {
+            return messageState;
+        }
+        OpenCodeSessionState statusState = inferStateFromSessionStatus(serverUrl, repo, sessionId, messageState.finalText());
+        if (!statusState.state().isBlank()) {
+            return statusState;
+        }
+        return messageState;
     }
 
     public boolean abortSession(URI serverUrl, Path repo, String sessionId) {
@@ -453,6 +461,42 @@ public class OpenCodeServerClient {
                 .build();
         JsonNode response = sendJson(request);
         return sessionStateParser.infer(response);
+    }
+
+    private OpenCodeSessionState inferStateFromSessionStatus(URI serverUrl, Path repo, String sessionId, String finalText) throws InterruptedException {
+        String directory = repo.toAbsolutePath().normalize().toString();
+        HttpRequest request = HttpRequest.newBuilder(resolveWithQuery(serverUrl, "/session/status", "directory=" + queryEncode(directory)))
+                .timeout(Duration.ofSeconds(10))
+                .header(DIRECTORY_HEADER, directory)
+                .GET()
+                .build();
+        try {
+            JsonNode response = sendJson(request);
+            JsonNode statuses = response.path("data").isObject() ? response.path("data") : response;
+            JsonNode status = statuses.path(sessionId);
+            if (status.isMissingNode() || status.isNull()) {
+                return new OpenCodeSessionState("", false, false, "session_status", finalText);
+            }
+            return sessionStatusState(status, finalText);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw exception;
+        } catch (Exception exception) {
+            log.debug("Unable to read OpenCode /session/status: sessionId={}, reason={}", sessionId, exception.toString());
+            return new OpenCodeSessionState("", false, false, "session_status", finalText);
+        }
+    }
+
+    private OpenCodeSessionState sessionStatusState(JsonNode status, String finalText) {
+        String value = status.isTextual() ? status.asText("") : firstText(status, "type", "status", "state");
+        String normalized = value == null ? "" : value.toLowerCase();
+        return switch (normalized) {
+            case "idle" -> new OpenCodeSessionState("idle", true, true, "session_status", finalText);
+            case "error", "failed", "retry" -> new OpenCodeSessionState(normalized, true, false, "session_status", finalText);
+            case "busy", "active", "running", "streaming" -> new OpenCodeSessionState(normalized, false, false, "session_status", finalText);
+            case "unknown", "" -> new OpenCodeSessionState("", false, false, "session_status", finalText);
+            default -> new OpenCodeSessionState(normalized, false, false, "session_status", finalText);
+        };
     }
 
     private URI resolve(URI serverUrl, String path) {
