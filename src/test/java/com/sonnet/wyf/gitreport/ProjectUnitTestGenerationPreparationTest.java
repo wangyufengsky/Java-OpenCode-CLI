@@ -67,6 +67,42 @@ class ProjectUnitTestGenerationPreparationTest {
     }
 
     @Test
+    void fullScanDiscoversMavenModulesAndKeepsModuleTestPaths() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeMultiModuleProject(properties.getProject().getRepo());
+
+        Path planPath = new ProjectUnitTestGenerationPreparation(objectMapper).prepare(properties, true);
+
+        JsonNode plan = objectMapper.readTree(planPath.toFile());
+        assertThat(plan.path("source_files")).extracting(JsonNode::asText)
+                .containsExactlyInAnyOrder(
+                        "upfs-common/src/main/java/com/spdb/upfs/common/CommonService.java",
+                        "upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"
+                );
+        assertThat(firstType(plan, "com.spdb.upfs.cup.CupService").path("target_test_file").asText())
+                .isEqualTo("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java");
+        assertThat(firstType(plan, "com.spdb.upfs.common.CommonService").path("target_test_file").asText())
+                .isEqualTo("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
+
+        JsonNode batches = objectMapper.readTree(properties.getPaths().getOut().resolve("test-batches.json").toFile());
+        assertThat(batches.path("batches").get(0).path("allowed_write_globs")).extracting(JsonNode::asText)
+                .containsExactly("upfs-common/src/test/**", "upfs-cup/src/test/**");
+    }
+
+    @Test
+    void packagePathsCanLimitSpecificMavenModule() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("upfs-cup/src/main/java/com/spdb/upfs/cup"));
+        writeMultiModuleProject(properties.getProject().getRepo());
+
+        Path planPath = new ProjectUnitTestGenerationPreparation(objectMapper).prepare(properties, true);
+
+        JsonNode plan = objectMapper.readTree(planPath.toFile());
+        assertThat(plan.path("source_files")).extracting(JsonNode::asText)
+                .containsExactly("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java");
+    }
+
+    @Test
     void parseFailureStillCreatesFallbackTask() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         Path broken = properties.getProject().getRepo().resolve("src/main/java/com/acme/Broken.java");
@@ -146,6 +182,41 @@ class ProjectUnitTestGenerationPreparationTest {
 
                     public static String normalize(String value) {
                         return value == null ? "" : value.trim();
+                    }
+                }
+                """);
+    }
+
+    private void writeMultiModuleProject(Path repo) throws Exception {
+        Files.createDirectories(repo);
+        Files.writeString(repo.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.spdb</groupId>
+                  <artifactId>upfs-nl-json</artifactId>
+                  <version>1.0.0</version>
+                  <packaging>pom</packaging>
+                  <modules>
+                    <module>upfs-common</module>
+                    <module>upfs-cup</module>
+                  </modules>
+                </project>
+                """);
+        Files.createDirectories(repo.resolve("upfs-common/src/main/java/com/spdb/upfs/common"));
+        Files.createDirectories(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup"));
+        Files.writeString(repo.resolve("upfs-common/src/main/java/com/spdb/upfs/common/CommonService.java"), """
+                package com.spdb.upfs.common;
+                public class CommonService {
+                    public String normalize(String value) {
+                        return value == null ? "" : value.trim();
+                    }
+                }
+                """);
+        Files.writeString(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"), """
+                package com.spdb.upfs.cup;
+                public class CupService {
+                    public String handle(String value) {
+                        return value;
                     }
                 }
                 """);

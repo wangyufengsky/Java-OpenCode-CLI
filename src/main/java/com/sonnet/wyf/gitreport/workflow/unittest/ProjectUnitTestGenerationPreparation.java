@@ -16,6 +16,8 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.type.ReferenceType;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -34,6 +36,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 public class ProjectUnitTestGenerationPreparation {
     public static final String SCHEMA_VERSION = "project-unit-test-generation/v1";
@@ -93,42 +96,91 @@ public class ProjectUnitTestGenerationPreparation {
     }
 
     private List<Path> collectSourceFiles(ProjectUnitTestGenerationProperties properties, Path repo) throws Exception {
-        Path sourceRoot = repo.resolve("src/main/java");
-        if (!Files.exists(sourceRoot)) {
-            return List.of();
-        }
         List<PathMatcher> includeMatchers = matchers(properties.getSource().getInclude());
         List<PathMatcher> excludeMatchers = matchers(properties.getSource().getExclude());
-        List<String> packagePrefixes = packagePrefixes(properties.getSource().getPackagePaths());
-        try (Stream<Path> stream = Files.walk(sourceRoot)) {
-            return stream.filter(Files::isRegularFile)
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> matchesPackagePath(repo, path, packagePrefixes))
-                    .filter(path -> includeMatchers.isEmpty() || matches(repo, path, includeMatchers))
-                    .filter(path -> !matches(repo, path, excludeMatchers))
-                    .sorted()
-                    .toList();
+        List<String> packagePaths = properties.getSource().getPackagePaths();
+        List<Path> sourceFiles = new ArrayList<>();
+        for (Path sourceRoot : sourceRoots(repo)) {
+            try (Stream<Path> stream = Files.walk(sourceRoot)) {
+                sourceFiles.addAll(stream.filter(Files::isRegularFile)
+                        .filter(path -> path.toString().endsWith(".java"))
+                        .filter(path -> matchesPackagePath(repo, path, packagePaths))
+                        .filter(path -> includeMatchers.isEmpty() || matches(repo, path, includeMatchers))
+                        .filter(path -> !matches(repo, path, excludeMatchers))
+                        .toList());
+            }
         }
+        return sourceFiles.stream().sorted().toList();
     }
 
-    private boolean matchesPackagePath(Path repo, Path sourceFile, List<String> packagePrefixes) {
-        if (packagePrefixes.isEmpty()) {
+    private List<Path> sourceRoots(Path repo) throws Exception {
+        List<Path> roots = new ArrayList<>();
+        Path rootSource = repo.resolve("src/main/java");
+        if (Files.exists(rootSource)) {
+            roots.add(rootSource);
+        }
+        for (String module : mavenModules(repo)) {
+            Path moduleSource = repo.resolve(module).resolve("src/main/java").normalize();
+            if (Files.exists(moduleSource) && !roots.contains(moduleSource)) {
+                roots.add(moduleSource);
+            }
+        }
+        return roots;
+    }
+
+    private List<String> mavenModules(Path repo) throws Exception {
+        Path pom = repo.resolve("pom.xml");
+        if (!Files.exists(pom)) {
+            return List.of();
+        }
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setExpandEntityReferences(false);
+        Document document = factory.newDocumentBuilder().parse(pom.toFile());
+        NodeList modules = document.getElementsByTagName("module");
+        List<String> result = new ArrayList<>();
+        for (int index = 0; index < modules.getLength(); index++) {
+            String module = modules.item(index).getTextContent().trim();
+            if (!module.isBlank()) {
+                result.add(module.replace('\\', '/'));
+            }
+        }
+        return result;
+    }
+
+    private boolean matchesPackagePath(Path repo, Path sourceFile, List<String> packagePaths) {
+        if (packagePaths.isEmpty()) {
             return true;
         }
         String relative = relative(repo, sourceFile);
-        return packagePrefixes.stream().anyMatch(relative::startsWith);
+        String sourceRelative = javaSourceRelative(relative);
+        for (String packagePath : packagePaths) {
+            String value = packagePath.trim().replace('\\', '/');
+            if (value.isBlank()) {
+                continue;
+            }
+            String normalizedPath = value.endsWith("/") ? value : value + "/";
+            if (value.contains("src/main/java/") && relative.startsWith(normalizedPath)) {
+                return true;
+            }
+            String packagePrefix = value.replace('.', '/');
+            packagePrefix = packagePrefix.endsWith("/") ? packagePrefix : packagePrefix + "/";
+            if (sourceRelative.startsWith(packagePrefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private List<String> packagePrefixes(List<String> packagePaths) {
-        return packagePaths.stream()
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .map(value -> value.replace('\\', '/'))
-                .map(value -> value.startsWith("src/main/java/")
-                        ? value
-                        : "src/main/java/" + value.replace('.', '/'))
-                .map(value -> value.endsWith("/") ? value : value + "/")
-                .toList();
+    private String javaSourceRelative(String relativePath) {
+        String marker = "src/main/java/";
+        int index = relativePath.indexOf(marker);
+        if (index < 0) {
+            return relativePath;
+        }
+        return relativePath.substring(index + marker.length());
     }
 
     private List<PathMatcher> matchers(List<String> patterns) {
@@ -195,8 +247,8 @@ public class ProjectUnitTestGenerationPreparation {
         row.put("type", typeKind(declaration));
         row.put("role", role(declaration));
         row.put("source_file", relative(repo, sourceFile));
-        row.put("target_test_file", targetTestFile(packageName, typeName));
-        row.put("existing_test_files", existingTests(repo, packageName, typeName));
+        row.put("target_test_file", targetTestFile(repo, sourceFile, packageName, typeName));
+        row.put("existing_test_files", existingTests(repo, sourceFile, packageName, typeName));
         row.put("annotations", declaration.getAnnotations().stream().map(annotation -> annotation.getNameAsString()).toList());
         row.put("fields", declaration.getMembers().stream()
                 .filter(FieldDeclaration.class::isInstance)
@@ -307,21 +359,32 @@ public class ProjectUnitTestGenerationPreparation {
     private String packageFromPath(Path repo, Path sourceFile) {
         String relative = relative(repo, sourceFile);
         String prefix = "src/main/java/";
-        if (!relative.startsWith(prefix) || !relative.endsWith(".java")) {
+        int index = relative.indexOf(prefix);
+        if (index < 0 || !relative.endsWith(".java")) {
             return "";
         }
-        String parent = relative.substring(prefix.length(), relative.lastIndexOf('/'));
+        String parent = relative.substring(index + prefix.length(), relative.lastIndexOf('/'));
         return parent.replace('/', '.');
     }
 
-    private List<String> existingTests(Path repo, String packageName, String typeName) {
-        Path testFile = repo.resolve(targetTestFile(packageName, typeName));
+    private List<String> existingTests(Path repo, Path sourceFile, String packageName, String typeName) {
+        Path testFile = repo.resolve(targetTestFile(repo, sourceFile, packageName, typeName));
         return Files.exists(testFile) ? List.of(normalize(repo.relativize(testFile).toString())) : List.of();
     }
 
-    private String targetTestFile(String packageName, String typeName) {
+    private String targetTestFile(Path repo, Path sourceFile, String packageName, String typeName) {
         String packagePath = packageName == null || packageName.isBlank() ? "" : packageName.replace('.', '/') + "/";
-        return "src/test/java/" + packagePath + typeName + "Test.java";
+        return modulePrefix(repo, sourceFile) + "src/test/java/" + packagePath + typeName + "Test.java";
+    }
+
+    private String modulePrefix(Path repo, Path sourceFile) {
+        String relative = relative(repo, sourceFile);
+        String marker = "src/main/java/";
+        int index = relative.indexOf(marker);
+        if (index <= 0) {
+            return "";
+        }
+        return relative.substring(0, index);
     }
 
     private List<Map<String, Object>> buildBatches(ProjectUnitTestGenerationProperties properties, Path out, List<Map<String, Object>> types, Map<String, Object> docs) {
@@ -357,9 +420,26 @@ public class ProjectUnitTestGenerationPreparation {
         batch.put("docs", docs);
         batch.put("input_json", batchDir.resolve("input.json").toString());
         batch.put("summary_json", batchDir.resolve("summary.json").toString());
-        batch.put("allowed_write_globs", List.of("src/test/**"));
+        batch.put("allowed_write_globs", allowedWriteGlobs(listOfStrings(batch.get("target_test_files"))));
         batch.put("status", "pending");
         return batch;
+    }
+
+    private List<String> allowedWriteGlobs(List<String> targetTestFiles) {
+        return targetTestFiles.stream()
+                .map(this::testRootGlob)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private String testRootGlob(String targetTestFile) {
+        String marker = "src/test/";
+        int index = targetTestFile.indexOf(marker);
+        if (index <= 0) {
+            return "src/test/**";
+        }
+        return targetTestFile.substring(0, index) + "src/test/**";
     }
 
     private void writeBatchInputs(Path out, List<Map<String, Object>> batches) throws Exception {
