@@ -20,7 +20,7 @@
 - `skill.summary_schema`
 - `skill.preferred_reader`
 - `skill.preferred_writer`
-- `skill.fallback_file_tools`
+- `skill.file_tools`
 - `rules.precreated_outputs`
 
 ## 严格边界
@@ -32,7 +32,7 @@
 - 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
-- 优先使用 OpenCode `explore` 或 `intellij-index` 分析文档和代码；如果 `explore` 不可用，继续用 `intellij-index` 定位和读取代码，不得因此 `BLOCKED`。
+- 代码和文档定位、读取、取证必须使用 `intellij-index` 和 `intellij-idea` MCP；不得使用其他读取方式。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -45,15 +45,13 @@
 
 ## 受控读写与取证规则
 
-读取 task JSON 和准备脚本输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+读取 task JSON 和准备脚本输出时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 
-分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，优先使用 OpenCode `explore` 或 `intellij-index`，只保留当前交易相关的短证据摘要、文件路径、标题或行号；不要直接读取完整文档、完整源码文件或大段摘录。
+分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，必须使用 `intellij-index` 和 `intellij-idea` MCP：用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file`、`intellij-index_ide_search_text` 定位候选，再用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取当前交易相关片段；不要读取完整文档、完整源码文件或大段摘录。
 
-写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
 
-如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
-
-两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 
 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、映射文档或详细设计。
 
@@ -62,10 +60,10 @@
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
 | 定位 new_project 新代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 同步索引后重试；仍失败再记录到 `unverified`。 |
-| 分析 new_project 新代码 | OpenCode `explore` | 只返回当前交易相关的短证据摘要；不要把完整源码拉入主上下文。 |
-| 分析映射文档、old-8583-doc 和重构详细设计 | OpenCode `explore` | 只返回当前交易相关片段摘要；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
+| 分析 new_project 新代码 | `intellij-index_*` 定位，`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 只读取当前交易相关片段；不要把完整源码拉入主上下文。 |
+| 分析映射文档、old-8583-doc 和重构详细设计 | `intellij-index_*` 定位，`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 只读取当前交易相关片段；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
 | 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到新增文件或明显索引过期时先同步，再重试一次。 |
-| 写 Markdown/JSON 报告 | OpenCode 原生文件编辑工具，fallback 为 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
+| 写 Markdown/JSON 报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
 
 禁止把源码读取、报告写入、索引同步、数据库证据获取交给 shell。
@@ -76,7 +74,7 @@
 
 - 每次写入不超过 `rules.markdown_max_chars_per_write` 字符，默认 6000。
 - 每次写入不超过 `rules.markdown_max_lines_per_write` 行，默认 120。
-- 优先使用 OpenCode 原生文件编辑工具写入已存在文件；如需 fallback，只使用 `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file`，不要调用 shell。
+- 必须使用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file` 写入已存在文件，不要调用 shell。
 
 ### 受控文件写入方式
 
@@ -99,7 +97,7 @@
 {{FINDINGS_DETAIL}}
 ```
 
-4. 写入内容时，用 OpenCode 原生文件编辑工具替换对应文件的 exact placeholder；如果原生编辑工具不可用，再用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file`：
+4. 写入内容时，用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file` 替换对应文件的 exact placeholder：
 
 ```text
 oldText: "<output_placeholders 中该文件的 placeholder>"
@@ -107,12 +105,12 @@ newText: "<小块中文内容>"
 ```
 
 5. `summary_json` 初始内容为 `{}`，用受控文件编辑工具将整个 `{}` 替换为合法 JSON。
-6. 使用 IntelliJ MCP fallback 时，`projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
+6. 使用 `intellij-idea` MCP 写入时，`projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
 7. 写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符；发现残留必须立即继续替换或返回 `BLOCKED`。
 
 ### 写入失败处理
 
-OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标路径不可写或工具返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
+`intellij-idea` MCP 读写工具不可用、目标路径不可写或工具返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
 
 如果一个章节超过限制，按 finding、表格行分组、调用链阶段或协议域分组拆分。不要把完整报告、完整矩阵或大段代码一次性写入一个 heredoc。
 
@@ -127,14 +125,14 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 1. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `new_project` 中定位重构交易代码。
    - 优先 `intellij-index_ide_find_class` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
    - 用 `intellij-index_ide_find_file` 按文件名、通配符、XML、Mapper、配置文件定位候选。
-   - 对候选文件内容分析优先交给 OpenCode `explore`，只取当前交易相关的短证据摘要。
+   - 对候选文件内容用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取当前交易相关片段。
    - 需要一次查找多类关键文件时，用 `intellij-index_ide_find_key_file`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
 2. 只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段：
    - `documents.mapping_8583_to_json`
    - `documents.old_8583_doc`
    - `documents.reconstructed_design`
-   - 文档分析优先交给 OpenCode `explore`，只取当前交易、8583 域、JSON path、类名相关的短证据摘要。
+   - 文档分析用 `intellij-index` 和 `intellij-idea` MCP 读取当前交易、8583 域、JSON path、类名相关片段。
 3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码源码。
 4. 从映射文档、old-8583-doc、重构详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
 5. 根据 new_project 新代码、映射文档、old-8583-doc、重构详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取 old_project 源码补齐。
@@ -250,4 +248,4 @@ OpenCode 原生文件编辑工具和 IntelliJ MCP fallback 都不可用、目标
 `old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码源码。
 `documents_checked` 只能填写实际读取过的 `mapping_8583_to_json`、`old_8583_doc` 和 `reconstructed_design` 路径。
 
-如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 IDEA MCP 覆盖修正，不要把不完整摘要留给汇总阶段。
+如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 `intellij-idea` MCP 覆盖修正，不要把不完整摘要留给汇总阶段。

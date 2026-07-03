@@ -6,16 +6,14 @@
 
 - 只读取路径载荷中的 `summary_json` 和 `index_inputs_json`。
 - 按 `index_inputs_json` 中的模块和交易 summary 路径逐条读取摘要。
+- 读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 - 不重新扫描 XML、.biz 或 Java 源码。
 - 不读取或执行任何外部 skill、SKILL.md、旧脚本或批处理任务。
 
 ## 写入契约
 
-- 写入 `index.md` 时，优先使用 OpenCode 原生文件编辑工具。
-- 路径字段只能使用 `filePath`。
-- 禁止使用 `pathInProject`、`file_path`、`path`。
-- 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具。
-- 两类受控编辑工具都不可用时必须返回 `BLOCKED`。
+- 写入 `index.md` 时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`。
 - 只替换预创建 `index.md` 中的 `{{INDEX_BODY}}`。
 

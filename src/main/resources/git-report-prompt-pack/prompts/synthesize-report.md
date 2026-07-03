@@ -42,11 +42,9 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 
 ## 受控读写规则
 
-- 读取 `synthesis_inputs_json` 时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 写入最终报告时，优先使用 OpenCode 原生文件编辑工具。
-- 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
-- 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `synthesis_inputs_json` 时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入最终报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入最终报告、输入 JSON 或个人报告。
 
 ## Markdown 表格安全

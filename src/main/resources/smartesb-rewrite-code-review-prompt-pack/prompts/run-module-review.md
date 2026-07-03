@@ -35,13 +35,13 @@
 只有以下情况才能返回 `BLOCKED`：
 
 - task JSON、目标输出文件或必要的 `new_project` 路径不存在。
-- OpenCode 原生文件编辑工具和 IntelliJ MCP 文件编辑工具都不可用，导致无法写入报告。
+- `intellij-idea` MCP 文件编辑工具不可用，导致无法写入报告。
 - 目标路径不可写，或预创建输出文件缺失。
 
 以下情况不得返回 `BLOCKED`：
 
 - 任务复杂、搜索结果少、需要更多分析时间。
-- 想使用额外任务 session、explore 或其他派发能力。
+- 想使用额外任务 session 或其他派发能力。
 - 模块不是交易，或者在映射文档、old-8583-doc、重构设计中找不到同名交易。
 - 只找到基础类、公共类、抽象类或工具类。
 
@@ -49,12 +49,12 @@
 
 ## 受控读写与取证规则
 
-- 读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 读取 task JSON 和准备器输出时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
 - 定位模块代码时优先使用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file`。
 - 搜索不到刚生成或刚修改的文件时，先尝试 `intellij-index_ide_sync_files`，再重试一次。
-- 可以使用 OpenCode `explore` 分析当前模块相关代码；如果 `explore` 不可用，继续用 `intellij-index` 定位和读取代码，不得因此 `BLOCKED`。
-- 写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具。如 OpenCode 原生文件编辑工具不可用，可使用 `intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
+- 代码和文档定位、读取、取证必须使用 `intellij-index` 和 `intellij-idea` MCP；不得使用其他读取方式。
+- 写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件或详细设计。
 
 ## 审查重点

@@ -29,14 +29,11 @@ detail_json: <path>
 
 ## 受控读写与取证规则
 
-- 读取 `detail_json` 时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 写入个人报告和质量摘要时，优先使用 OpenCode 原生文件编辑工具。
-- 如果调用 OpenCode 原生 `write` 工具，参数必须是合法 JSON object：路径字段只能使用 `filePath`，内容字段只能使用 `content`；禁止使用 `pathInProject`、`file_path`、`path` 或其他猜测字段。
-- 如 OpenCode 原生文件编辑工具不可用，可使用 IntelliJ MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- 两类受控编辑工具都不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `detail_json` 时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 写入个人报告和质量摘要时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入报告、质量摘要或代码文件。
-- 优先使用 OpenCode `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。
-- 公共代码取证优先使用 `intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
+- 代码取证必须使用 `intellij-index` MCP：`intellij-index_ide_find_references`、`intellij-index_ide_call_hierarchy`、`intellij-index_ide_type_hierarchy`、`intellij-index_ide_find_implementations` 及可用定位工具。
 - 公共代码取证只能用于理解调用关系；不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
 - 代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`，不要写无证据 finding。
 

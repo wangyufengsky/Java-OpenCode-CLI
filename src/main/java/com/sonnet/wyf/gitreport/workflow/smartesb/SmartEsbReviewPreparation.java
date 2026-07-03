@@ -183,9 +183,9 @@ public class SmartEsbReviewPreparation {
                         ? "classpath:smartesb-rewrite-code-review-prompt-pack/templates/module-review.md"
                         : "classpath:smartesb-rewrite-code-review-prompt-pack/templates/transaction-review.md",
                 "summary_schema", schemaLogicalPath,
-                "preferred_reader", "opencode_native",
-                "preferred_writer", "opencode_native",
-                "fallback_file_tools", List.of(
+                "preferred_reader", "intellij-idea",
+                "preferred_writer", "intellij-idea",
+                "file_tools", List.of(
                         "intellij-idea_read_file",
                         "intellij-idea_get_file_text_by_path",
                         "intellij-idea_replace_text_undoable",
@@ -281,12 +281,12 @@ public class SmartEsbReviewPreparation {
         rules.put("precreated_outputs", "准备器已预创建包含完整模板和占位符的 review.md、mapping-matrix.md、sections/*.md，以及初始 summary.json；只能替换这些已存在文件中的 output_placeholders，占位符之外的标题结构不得删除、重命名或重排。");
         rules.put("template_contract", "只能替换 output_placeholders 中列出的占位符；写入完成后所有 Markdown 报告不得残留 {{...}} 占位符。");
         rules.put("external_skill_policy", "本任务 prompt 已包含完整执行规则；不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md、超能力规则或通用规划能力，包括 brainstorming、superpowers、context-engineering、gitnexus。task JSON 中的 skill 只是本链路配置字段，不表示可以加载外部技能。");
-        rules.put("reader_preference", "读取 task JSON 和准备器输出时，优先使用 OpenCode 原生文件读取工具；如需 IntelliJ 文件能力，可使用 fallback_file_tools 中的读取工具。");
+        rules.put("reader_preference", "读取 task JSON、准备器输出、代码、文档和摘要时，必须使用 `intellij-idea` MCP 文件读取工具：intellij-idea_read_file 或 intellij-idea_get_file_text_by_path。");
         rules.put("explore_preference", item.isModule()
-                ? "优先使用 OpenCode explore 或 intellij-index 分析当前模块相关代码；如果 explore 不可用，继续用 intellij-index 定位和读取代码，不得因此 BLOCKED。"
-                : "优先使用 OpenCode explore 或 intellij-index 分析文档和代码；如果 explore 不可用，继续用 intellij-index 定位和读取代码，不得因此 BLOCKED。");
-        rules.put("writer_preference", "写入 Markdown 和 JSON 报告时，优先使用 OpenCode 原生文件编辑工具；如调用 OpenCode 原生 write 工具，路径字段只能使用 filePath，内容字段只能使用 content，禁止使用 pathInProject、file_path、path 或其他猜测字段；如 OpenCode 原生文件编辑工具不可用，可使用 fallback_file_tools 中的 IntelliJ MCP 编辑工具；两类受控编辑工具都不可用时返回 BLOCKED，禁止调用 shell、PowerShell、Python、cat、type、Get-Content、重定向、cat > 或 sed -i。");
-        rules.put("blocked_policy", "只有受控读写工具不可用、目标路径不可写、预创建输出文件缺失或必需输入文件不存在时才返回 BLOCKED；任务复杂、搜索结果少、需要更多分析时间、希望使用 subagent/explore 都不是 BLOCKED 理由。证据不足时写 partial summary_json 和 unverified，然后输出 DONE。");
+                ? "必须使用 `intellij-index` 和 `intellij-idea` MCP 定位、读取和取证：intellij-index 定位代码，intellij-idea 读取候选文件；不得使用其他读取方式。"
+                : "必须使用 `intellij-index` 和 `intellij-idea` MCP 定位、读取和取证：intellij-index 定位代码和文档，intellij-idea 读取候选文件；不得使用其他读取方式。");
+        rules.put("writer_preference", "写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：intellij-idea_replace_text_undoable 或 intellij-idea_replace_text_in_file。`intellij-idea` MCP 读写工具不可用时返回 BLOCKED，禁止调用 shell、PowerShell、Python、cat、type、Get-Content、重定向、cat > 或 sed -i。");
+        rules.put("blocked_policy", "只有 `intellij-idea` MCP 受控读写工具不可用、目标路径不可写、预创建输出文件缺失或必需输入文件不存在时才返回 BLOCKED；任务复杂、搜索结果少、需要更多分析时间、希望使用 subagent 都不是 BLOCKED 理由。证据不足时写 partial summary_json 和 unverified，然后输出 DONE。");
         rules.put("markdown_max_chars_per_write", 6000);
         rules.put("markdown_max_lines_per_write", 120);
         return rules;
