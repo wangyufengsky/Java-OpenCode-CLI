@@ -105,6 +105,22 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .hasMessageContaining("protected file");
     }
 
+    @Test
+    void blockedBatchDoesNotRerunButFailsFinalRunWithReport() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeSource(properties.getProject().getRepo());
+        BlockingTaskRunner taskRunner = new BlockingTaskRunner(properties);
+
+        assertThatThrownBy(() -> chain(properties, taskRunner).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("blocked or partial unit-test batches")
+                .hasMessageContaining("test-batch-001-com-acme-order");
+
+        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-com-acme-order");
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("blocked", "missing dependencies");
+    }
+
     private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, OpenCodeServerTaskRunner taskRunner) {
         return new ProjectUnitTestGenerationWorkflowChain(
                 new FixedChainConfigLoader(properties),
@@ -177,8 +193,8 @@ class ProjectUnitTestGenerationWorkflowChainTest {
 
     private class CapturingTaskRunner extends OpenCodeServerTaskRunner {
         protected final ProjectUnitTestGenerationProperties properties;
-        private final CopyOnWriteArrayList<String> titles = new CopyOnWriteArrayList<>();
-        private final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> titles = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
 
         CapturingTaskRunner(ProjectUnitTestGenerationProperties properties) {
             super(null, null);
@@ -223,6 +239,26 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
             Files.writeString(properties.getProject().getRepo().resolve("pom.xml"), "<project/>\n");
             return super.runUntilValidated(spec);
+        }
+    }
+
+    private class BlockingTaskRunner extends CapturingTaskRunner {
+        BlockingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            titles.add(spec.title());
+            prompts.add(Files.readString(spec.promptFile()));
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(
+                    "batch_id", "test-batch-001-com-acme-order",
+                    "status", "blocked",
+                    "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
+                    "test_files", List.of(),
+                    "notes", List.of("missing dependencies")
+            ));
+            return null;
         }
     }
 

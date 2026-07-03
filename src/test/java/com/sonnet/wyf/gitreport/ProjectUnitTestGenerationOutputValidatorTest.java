@@ -78,7 +78,7 @@ class ProjectUnitTestGenerationOutputValidatorTest {
     }
 
     @Test
-    void treatsBlockedBatchAsIncomplete() throws Exception {
+    void acceptsBlockedBatchAsTerminalWithoutRerun() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
         objectMapper.writeValue(summary.toFile(), Map.of(
@@ -89,8 +89,38 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 "notes", List.of("missing dependencies")
         ));
 
-        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
-                .validateBatchOutput(repo, "test-batch-001-com-acme", summary).error())
-                .contains("not completed");
+        ProjectUnitTestGenerationOutputValidator.BatchValidation validation =
+                new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                        .validateBatchResult(repo, "test-batch-001-com-acme", summary);
+
+        assertThat(validation.check().ok()).isTrue();
+        assertThat(validation.retriable()).isFalse();
+        assertThat(validation.completed()).isFalse();
+        assertThat(validation.status()).isEqualTo("blocked");
+    }
+
+    @Test
+    void acceptsPartialBatchWhenGeneratedFilesAreValidAndNotesExplainGap() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("src/test/java/com/acme/FooTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class FooTest {}\n");
+        objectMapper.writeValue(summary.toFile(), Map.of(
+                "batch_id", "test-batch-001-com-acme",
+                "status", "partial",
+                "source_files", List.of("src/main/java/com/acme/Foo.java"),
+                "test_files", List.of("src/test/java/com/acme/FooTest.java"),
+                "notes", List.of("FooService needs external dependency wiring")
+        ));
+
+        ProjectUnitTestGenerationOutputValidator.BatchValidation validation =
+                new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                        .validateBatchResult(repo, "test-batch-001-com-acme", summary);
+
+        assertThat(validation.check().ok()).isTrue();
+        assertThat(validation.retriable()).isFalse();
+        assertThat(validation.completed()).isFalse();
+        assertThat(validation.status()).isEqualTo("partial");
     }
 }

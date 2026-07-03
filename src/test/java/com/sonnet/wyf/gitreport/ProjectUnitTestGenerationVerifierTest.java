@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,6 +62,21 @@ class ProjectUnitTestGenerationVerifierTest {
         assertThat(success).isTrue();
         assertThat(verification.path("exit_code").asInt()).isEqualTo(0);
         assertThat(verification.path("stdout").asText()).contains("x");
+    }
+
+    @Test
+    void timesOutHungVerificationCommand() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path out = tempDir.resolve("out");
+        Files.createDirectories(repo);
+
+        boolean success = new ProjectUnitTestGenerationVerifier(objectMapper, Duration.ofMillis(200))
+                .verify(repo, out, shell("sleep 5"));
+
+        JsonNode verification = objectMapper.readTree(out.resolve("verification.json").toFile());
+        assertThat(success).isFalse();
+        assertThat(verification.path("exit_code").asInt()).isEqualTo(-1);
+        assertThat(verification.path("stderr").asText()).contains("timed out");
     }
 
     private List<String> shell(String command) {

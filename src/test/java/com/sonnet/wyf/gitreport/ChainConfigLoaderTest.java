@@ -49,7 +49,9 @@ class ChainConfigLoaderTest {
         ProjectUnitTestGenerationProperties properties = new ChainConfigLoader(new DefaultResourceLoader())
                 .load("classpath:chains", "project-unit-test-generation", ProjectUnitTestGenerationProperties.class);
 
-        assertThat(properties.getProject().getId()).isEqualTo("upfs-production");
+        assertThat(properties.getProject().getId()).isEqualTo("example-project");
+        assertThat(properties.getProject().getRepo()).hasToString("CHANGE_ME_PROJECT_REPO");
+        assertThat(properties.getPaths().getOut()).hasToString("project-unit-tests/example-project");
         assertThat(properties.getSource().getPackagePaths()).isEmpty();
         assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
     }

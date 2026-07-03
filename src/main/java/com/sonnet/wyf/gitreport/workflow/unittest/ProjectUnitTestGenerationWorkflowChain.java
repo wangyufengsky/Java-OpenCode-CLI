@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.workflow.unittest;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
@@ -16,6 +17,7 @@ import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationOutputValidator.BatchValidation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -204,18 +206,18 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     private List<IncompleteOutput> incompleteBatches(ProjectUnitTestGenerationProperties properties, Path out) throws Exception {
         List<IncompleteOutput> incomplete = new ArrayList<>();
         for (Map<String, Object> batch : loadBatches(out)) {
-            ValidationCheck validation = outputValidator.validateBatchOutput(
+            BatchValidation validation = outputValidator.validateBatchResult(
                     properties.getProject().getRepo().toAbsolutePath().normalize(),
                     batchId(batch),
                     Path.of(string(batch.get("summary_json")))
             );
-            if (!validation.ok()) {
+            if (!validation.check().ok() && validation.retriable()) {
                 incomplete.add(new IncompleteOutput(
                         "test-batch",
                         batchId(batch),
                         Path.of(string(batch.get("summary_json"))),
                         string(batch.get("input_json")),
-                        validation.error()
+                        validation.check().error()
                 ));
             }
         }
@@ -242,13 +244,13 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     }
 
     private ValidationCheck validateBatch(ProjectUnitTestGenerationProperties properties, Map<String, Object> batch, ProtectedSnapshot protectedSnapshot) {
-        ValidationCheck output = outputValidator.validateBatchOutput(
+        BatchValidation output = outputValidator.validateBatchResult(
                 properties.getProject().getRepo().toAbsolutePath().normalize(),
                 batchId(batch),
                 Path.of(string(batch.get("summary_json")))
         );
-        if (!output.ok()) {
-            return output;
+        if (!output.check().ok()) {
+            return output.check();
         }
         return protectedSnapshot.validate();
     }
@@ -260,9 +262,41 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                 properties.getTest().getVerifyCommand()
         );
         reportRenderer.render(out);
+        List<String> terminalFailures = terminalBatchFailures(properties, out);
+        if (!terminalFailures.isEmpty()) {
+            throw new IllegalStateException("blocked or partial unit-test batches: " + String.join("; ", terminalFailures));
+        }
         if (!verified) {
             throw new IllegalStateException("project-unit-test-generation verification failed: " + out.resolve("verification.json"));
         }
+    }
+
+    private List<String> terminalBatchFailures(ProjectUnitTestGenerationProperties properties, Path out) throws Exception {
+        List<String> failures = new ArrayList<>();
+        Path repo = properties.getProject().getRepo().toAbsolutePath().normalize();
+        for (Map<String, Object> batch : loadBatches(out)) {
+            Path summaryJson = Path.of(string(batch.get("summary_json")));
+            BatchValidation validation = outputValidator.validateBatchResult(repo, batchId(batch), summaryJson);
+            if (validation.check().ok() && !validation.completed()) {
+                failures.add(batchId(batch) + " status=" + validation.status() + notes(summaryJson));
+            }
+        }
+        return failures;
+    }
+
+    private String notes(Path summaryJson) throws Exception {
+        if (!Files.exists(summaryJson)) {
+            return "";
+        }
+        JsonNode notes = objectMapper.readTree(summaryJson.toFile()).path("notes");
+        if (!notes.isArray() || notes.isEmpty()) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode note : notes) {
+            values.add(note.asText());
+        }
+        return ", notes=" + String.join(" | ", values);
     }
 
     private List<Map<String, Object>> loadBatches(Path out) throws Exception {

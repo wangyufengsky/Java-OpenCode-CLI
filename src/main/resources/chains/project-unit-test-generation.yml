@@ -1,12 +1,12 @@
 # 项目单元测试生成链路。默认全量扫描 src/main/java；source.package-paths 非空时仅处理指定包路径下所有类。
 
 project:
-  id: "upfs-production"
-  name: "UPFS Production"
-  repo: "/Users/wangyufeng/IdeaProjects/upfs-production"
+  id: "example-project"
+  name: "Example Project"
+  repo: "CHANGE_ME_PROJECT_REPO"
 
 paths:
-  out: "/Users/wangyufeng/reports/project-unit-tests/upfs-production"
+  out: "project-unit-tests/example-project"
 
 docs:
   agents: "AGENTS.md"
