@@ -59,6 +59,54 @@ class ProjectUnitTestGenerationOutputValidatorTest {
     }
 
     @Test
+    void rejectsSummaryTestFileOutsideCurrentBatchAllowedWrites() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class CommonServiceTest {}\n");
+        objectMapper.writeValue(summary.toFile(), Map.of(
+                "batch_id", "test-batch-001-cupservice",
+                "status", "completed",
+                "source_files", List.of("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"),
+                "test_files", List.of("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java"),
+                "checks", passedChecks(80),
+                "notes", List.of()
+        ));
+
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-cupservice", summary, batch(
+                        "upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java",
+                        "upfs-cup/src/test/**"
+                ), 80).error())
+                .contains("outside current batch allowed writes")
+                .contains("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
+    }
+
+    @Test
+    void acceptsSummaryTestFileInsideCurrentBatchAllowedWrites() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class CupServiceTest {}\n");
+        objectMapper.writeValue(summary.toFile(), Map.of(
+                "batch_id", "test-batch-001-cupservice",
+                "status", "completed",
+                "source_files", List.of("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"),
+                "test_files", List.of("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java"),
+                "checks", passedChecks(80),
+                "notes", List.of()
+        ));
+
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-cupservice", summary, batch(
+                        "upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java",
+                        "upfs-cup/src/test/**"
+                ), 80).ok()).isTrue();
+    }
+
+    @Test
     void rejectsProductionFileWrites() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
@@ -158,7 +206,7 @@ class ProjectUnitTestGenerationOutputValidatorTest {
     }
 
     @Test
-    void treatsBlockedBatchAsRetriableIncompleteOutput() throws Exception {
+    void treatsBlockedBatchAsValidTerminalFailure() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
         objectMapper.writeValue(summary.toFile(), Map.of(
@@ -173,15 +221,14 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 new ProjectUnitTestGenerationOutputValidator(objectMapper)
                         .validateBatchResult(repo, "test-batch-001-com-acme", summary);
 
-        assertThat(validation.check().ok()).isFalse();
-        assertThat(validation.check().error()).contains("status=blocked");
-        assertThat(validation.retriable()).isTrue();
+        assertThat(validation.check().ok()).isTrue();
+        assertThat(validation.retriable()).isFalse();
         assertThat(validation.completed()).isFalse();
         assertThat(validation.status()).isEqualTo("blocked");
     }
 
     @Test
-    void treatsPartialBatchAsRetriableIncompleteOutput() throws Exception {
+    void treatsPartialBatchAsValidTerminalFailure() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
         Path testFile = repo.resolve("src/test/java/com/acme/FooTest.java");
@@ -199,11 +246,26 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 new ProjectUnitTestGenerationOutputValidator(objectMapper)
                         .validateBatchResult(repo, "test-batch-001-com-acme", summary);
 
-        assertThat(validation.check().ok()).isFalse();
-        assertThat(validation.check().error()).contains("status=partial");
-        assertThat(validation.retriable()).isTrue();
+        assertThat(validation.check().ok()).isTrue();
+        assertThat(validation.retriable()).isFalse();
         assertThat(validation.completed()).isFalse();
         assertThat(validation.status()).isEqualTo("partial");
+    }
+
+    @Test
+    void treatsMissingSummaryAsRetriableIncompleteOutput() {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("missing-summary.json");
+
+        ProjectUnitTestGenerationOutputValidator.BatchValidation validation =
+                new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                        .validateBatchResult(repo, "test-batch-001-com-acme", summary);
+
+        assertThat(validation.check().ok()).isFalse();
+        assertThat(validation.check().error()).contains("summary missing");
+        assertThat(validation.retriable()).isTrue();
+        assertThat(validation.completed()).isFalse();
+        assertThat(validation.status()).isEmpty();
     }
 
     private Map<String, Object> completedSummary(Map<String, Object> checks) {
@@ -214,6 +276,13 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 "test_files", List.of("src/test/java/com/acme/FooTest.java"),
                 "checks", checks,
                 "notes", List.of()
+        );
+    }
+
+    private Map<String, Object> batch(String targetTestFile, String allowedWriteGlob) {
+        return Map.of(
+                "target_test_files", List.of(targetTestFile),
+                "allowed_write_globs", List.of(allowedWriteGlob)
         );
     }
 

@@ -148,50 +148,8 @@ public class ProjectUnitTestGenerationProperties {
     }
 
     public static class Test {
-        private int concurrency = 3;
-        private int maxTypesPerTask = 6;
-        private int maxMethodsPerTask = 40;
-        private int maxSourceCharsPerTask = 80_000;
         private int coverageThresholdPercent = 80;
         private List<String> verifyCommand = new ArrayList<>(List.of("./mvnw", "test"));
-
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
-
-        @JsonProperty("max-types-per-task")
-        public int getMaxTypesPerTask() {
-            return maxTypesPerTask;
-        }
-
-        @JsonProperty("max-types-per-task")
-        public void setMaxTypesPerTask(int maxTypesPerTask) {
-            this.maxTypesPerTask = maxTypesPerTask;
-        }
-
-        @JsonProperty("max-methods-per-task")
-        public int getMaxMethodsPerTask() {
-            return maxMethodsPerTask;
-        }
-
-        @JsonProperty("max-methods-per-task")
-        public void setMaxMethodsPerTask(int maxMethodsPerTask) {
-            this.maxMethodsPerTask = maxMethodsPerTask;
-        }
-
-        @JsonProperty("max-source-chars-per-task")
-        public int getMaxSourceCharsPerTask() {
-            return maxSourceCharsPerTask;
-        }
-
-        @JsonProperty("max-source-chars-per-task")
-        public void setMaxSourceCharsPerTask(int maxSourceCharsPerTask) {
-            this.maxSourceCharsPerTask = maxSourceCharsPerTask;
-        }
 
         @JsonProperty("coverage-threshold-percent")
         public int getCoverageThresholdPercent() {

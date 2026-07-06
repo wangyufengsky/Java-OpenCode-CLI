@@ -151,7 +151,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                 Files.createDirectories(runDir);
                 Path summaryJson = Path.of(string(batch.get("summary_json")));
                 Files.deleteIfExists(summaryJson);
-                ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(properties.getProject().getRepo(), out);
+                ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(properties.getProject().getRepo(), out, batch);
                 Path promptFile = runDir.resolve("worker-prompt.md");
                 Files.writeString(promptFile, promptBuilder.buildBatchPrompt(properties.getProject().getRepo(), Path.of(string(batch.get("input_json")))));
                 taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
@@ -174,6 +174,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                         properties.getProject().getRepo().toAbsolutePath().normalize(),
                         batchId,
                         Path.of(string(batch.get("summary_json"))),
+                        batch,
                         properties.getTest().getCoverageThresholdPercent()
                 );
                 ValidationCheck files = validation.check().ok() ? protectedSnapshot.validate() : validation.check();
@@ -206,6 +207,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                     properties.getProject().getRepo().toAbsolutePath().normalize(),
                     batchId(batch),
                     Path.of(string(batch.get("summary_json"))),
+                    batch,
                     properties.getTest().getCoverageThresholdPercent()
             );
             if (!validation.check().ok() && validation.retriable()) {
@@ -245,6 +247,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                 properties.getProject().getRepo().toAbsolutePath().normalize(),
                 batchId(batch),
                 Path.of(string(batch.get("summary_json"))),
+                batch,
                 properties.getTest().getCoverageThresholdPercent()
         );
         if (!output.check().ok()) {
@@ -278,6 +281,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                     repo,
                     batchId(batch),
                     summaryJson,
+                    batch,
                     properties.getTest().getCoverageThresholdPercent()
             );
             if (validation.check().ok() && !validation.completed()) {
@@ -332,23 +336,35 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     private static class ProtectedSnapshot {
         private final Path repo;
         private final Path out;
+        private final List<String> allowedWriteGlobs;
+        private final List<String> targetTestFiles;
         private final Map<String, String> before;
 
-        private ProtectedSnapshot(Path repo, Path out, Map<String, String> before) {
+        private ProtectedSnapshot(Path repo, Path out, List<String> allowedWriteGlobs, List<String> targetTestFiles, Map<String, String> before) {
             this.repo = repo.toAbsolutePath().normalize();
             this.out = out.toAbsolutePath().normalize();
+            this.allowedWriteGlobs = List.copyOf(allowedWriteGlobs);
+            this.targetTestFiles = List.copyOf(targetTestFiles);
             this.before = before;
         }
 
-        static ProtectedSnapshot capture(Path repo, Path out) throws Exception {
+        static ProtectedSnapshot capture(Path repo, Path out, Map<String, Object> batch) throws Exception {
             Path normalizedRepo = repo.toAbsolutePath().normalize();
             Path normalizedOut = out.toAbsolutePath().normalize();
-            return new ProtectedSnapshot(normalizedRepo, normalizedOut, fingerprint(normalizedRepo, normalizedOut));
+            List<String> allowedWriteGlobs = listOfStrings(batch.get("allowed_write_globs"));
+            List<String> targetTestFiles = listOfStrings(batch.get("target_test_files"));
+            return new ProtectedSnapshot(
+                    normalizedRepo,
+                    normalizedOut,
+                    allowedWriteGlobs,
+                    targetTestFiles,
+                    fingerprint(normalizedRepo, normalizedOut, allowedWriteGlobs, targetTestFiles)
+            );
         }
 
         ValidationCheck validate() {
             try {
-                Map<String, String> after = fingerprint(repo, out);
+                Map<String, String> after = fingerprint(repo, out, allowedWriteGlobs, targetTestFiles);
                 for (String path : before.keySet()) {
                     if (!after.containsKey(path)) {
                         return ValidationCheck.failed("deleted protected file: " + path);
@@ -368,14 +384,14 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
             }
         }
 
-        private static Map<String, String> fingerprint(Path repo, Path out) throws Exception {
+        private static Map<String, String> fingerprint(Path repo, Path out, List<String> allowedWriteGlobs, List<String> targetTestFiles) throws Exception {
             if (!Files.exists(repo)) {
                 return Map.of();
             }
             Map<String, String> hashes = new LinkedHashMap<>();
             try (var stream = Files.walk(repo)) {
                 for (Path file : stream.filter(Files::isRegularFile)
-                        .filter(file -> !isAllowedWrite(repo, out, file))
+                        .filter(file -> !isAllowedWrite(repo, out, file, allowedWriteGlobs, targetTestFiles))
                         .sorted(Comparator.comparing(Path::toString))
                         .toList()) {
                     hashes.put(normalize(repo.relativize(file.toAbsolutePath().normalize()).toString()), sha256(file));
@@ -384,12 +400,20 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
             return hashes;
         }
 
-        private static boolean isAllowedWrite(Path repo, Path out, Path file) {
+        private static boolean isAllowedWrite(Path repo, Path out, Path file, List<String> allowedWriteGlobs, List<String> targetTestFiles) {
             Path normalized = file.toAbsolutePath().normalize();
             Path gitRoot = repo.resolve(".git").normalize();
-            return ProjectUnitTestGenerationPaths.isTestSource(repo, normalized)
+            return ProjectUnitTestGenerationPaths.isAllowedBatchTestWrite(repo, normalized, allowedWriteGlobs, targetTestFiles)
+                    || ProjectUnitTestGenerationPaths.isBuildArtifact(repo, normalized)
                     || normalized.startsWith(gitRoot)
                     || (out.startsWith(repo) && normalized.startsWith(out));
+        }
+
+        private static List<String> listOfStrings(Object value) {
+            if (!(value instanceof List<?> list)) {
+                return List.of();
+            }
+            return list.stream().map(Object::toString).toList();
         }
 
         private static String sha256(Path file) throws Exception {

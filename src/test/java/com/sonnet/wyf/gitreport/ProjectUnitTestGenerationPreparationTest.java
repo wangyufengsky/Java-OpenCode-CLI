@@ -53,18 +53,37 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(batches.path("batches").get(0).path("skill").path("preferred_diagnostics").asText()).isEqualTo("AgentBridge");
         assertThat(batches.path("batches").get(0).path("skill").path("test_tools")).extracting(JsonNode::asText)
                 .containsExactly("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project");
-        assertThat(batches.path("batches").get(0).path("rules").path("diagnostics_policy").asText())
+        JsonNode rules = batches.path("batches").get(0).path("rules");
+        assertThat(rules.path("agent_bridge_io").path("read").asText())
+                .contains("必须使用", "AgentBridge", "read_file", "batch_input_json", "源码", "已有测试", "文档")
+                .doesNotContain("优先使用");
+        assertThat(rules.path("agent_bridge_io").path("write").asText())
+                .contains("AgentBridge", "edit_text", "write_file", "summary_json");
+        assertThat(rules.path("write_scope").asText())
+                .contains("allowed_write_globs", "target_test_files")
+                .contains("生产代码", "pom.xml", "Gradle", "src/main/**");
+        assertThat(rules.path("execution").path("style_review").asText())
+                .contains("查阅", "已有测试", "代码风格");
+        assertThat(rules.path("execution").path("diagnostics").asText())
                 .contains("get_compilation_errors", "开始写代码前", "已有单元测试");
-        assertThat(batches.path("batches").get(0).path("rules").path("test_feedback_policy").asText())
-                .contains("list_tests", "run_tests", "get_coverage")
+        assertThat(rules.path("execution").path("tests").asText())
+                .contains("list_tests", "run_tests")
                 .contains("根据失败原因修改", "再次循环")
                 .doesNotContain("不要调用 run_tests", "并发执行");
-        assertThat(batches.path("batches").get(0).path("rules").path("style_policy").asText())
-                .contains("查阅", "已有测试", "代码风格");
+        assertThat(rules.path("status_policy").path("completed_requires")).extracting(JsonNode::asText)
+                .containsExactly("style_reviewed", "compilation", "tests", "coverage");
+        assertThat(rules.path("status_policy").path("terminal_failures")).extracting(JsonNode::asText)
+                .containsExactly("partial", "blocked");
+        assertThat(rules.path("status_policy").path("partial").asText())
+                .contains("无法确认", "编译", "测试", "覆盖率");
+        assertThat(rules.path("status_policy").path("blocked").asText())
+                .contains("AgentBridge", "不可用", "BLOCKED");
         assertThat(batches.path("batches").get(0).path("coverage").path("threshold_percent").asInt()).isEqualTo(80);
-        assertThat(batches.path("batches").get(0).path("rules").path("coverage_policy").asText())
+        assertThat(rules.path("execution").path("coverage").asText())
                 .contains("existing_test_files", "get_coverage", "新增测试场景", "重复")
                 .contains("80%");
+        assertThat(rules.toString())
+                .doesNotContain("Java 编排会把该 task", "未完成任务补跑", "目标项目 src/test/**");
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())
                 .resolve("input.json"))).isTrue();
@@ -158,9 +177,6 @@ class ProjectUnitTestGenerationPreparationTest {
         properties.getProject().setName("Demo");
         properties.getProject().setRepo(tempDir.resolve("repo"));
         properties.getPaths().setOut(tempDir.resolve("out"));
-        properties.getTest().setMaxTypesPerTask(2);
-        properties.getTest().setMaxMethodsPerTask(8);
-        properties.getTest().setMaxSourceCharsPerTask(4000);
         return properties;
     }
 

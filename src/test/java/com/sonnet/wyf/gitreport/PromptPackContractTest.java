@@ -181,6 +181,36 @@ class PromptPackContractTest {
     }
 
     @Test
+    void projectUnitTestPromptUsesBatchRulesAsContractSource() throws Exception {
+        Path promptPack = Path.of("src/main/resources/project-unit-test-generation-prompt-pack");
+
+        String worker = Files.readString(promptPack.resolve("prompts/run-test-batch.md"));
+
+        assertThat(worker).contains(
+                "batch_input_json:",
+                "严格执行 `batch_input_json.rules`",
+                "严格执行 `batch_input_json.coverage`",
+                "严格执行 `batch_input_json.allowed_write_globs`",
+                "严格执行 `batch_input_json.target_test_files`",
+                "\"status\": \"completed|partial|blocked\"",
+                "DONE",
+                "BLOCKED"
+        );
+        assertThat(worker).doesNotContain(
+                "只允许创建或修改目标项目 src/test/** 下的测试文件",
+                "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率",
+                "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`",
+                "run_tests 失败时，根据失败原因修改测试",
+                "覆盖率未达标时必须新增测试场景",
+                "Java 编排会把该 task",
+                "未完成任务补跑"
+        );
+        assertThat(worker).doesNotContain("intellij-index", "intellij-idea", "OpenCode 原生文件");
+    }
+
+    @Test
     void promptBuilderLoadsClasspathResourcesAndEmbedsTemplates() throws Exception {
         PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
 

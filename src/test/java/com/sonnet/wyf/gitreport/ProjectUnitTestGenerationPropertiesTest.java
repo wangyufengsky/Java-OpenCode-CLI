@@ -5,6 +5,9 @@ import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPrope
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ProjectUnitTestGenerationPropertiesTest {
@@ -24,5 +27,22 @@ class ProjectUnitTestGenerationPropertiesTest {
         assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
         assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(80);
         assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
+    }
+
+    @Test
+    void testPropertiesDoNotExposeDeadBatchControls() {
+        assertThat(Arrays.stream(ProjectUnitTestGenerationProperties.Test.class.getMethods())
+                .map(method -> method.getName())
+                .collect(Collectors.toSet()))
+                .doesNotContain(
+                        "getConcurrency",
+                        "setConcurrency",
+                        "getMaxTypesPerTask",
+                        "setMaxTypesPerTask",
+                        "getMaxMethodsPerTask",
+                        "setMaxMethodsPerTask",
+                        "getMaxSourceCharsPerTask",
+                        "setMaxSourceCharsPerTask"
+                );
     }
 }

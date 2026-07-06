@@ -55,23 +55,24 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("project-unit-test-generation 单元测试批次")
                 .contains("batch_input_json:")
                 .contains("一个 task 只包含一个 Java 顶层类型")
-                .contains("只允许创建或修改目标项目 src/test/** 下的测试文件")
-                .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具")
-                .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具")
-                .contains("先查阅当前项目已有单元测试")
-                .contains("开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率")
-                .contains("写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`")
-                .contains("如果目标类已经存在单元测试，开始写代码前也必须先执行 `get_compilation_errors`")
-                .contains("调用 `run_tests` 跑当前批次相关测试")
-                .contains("run_tests 失败时，根据失败原因修改测试")
-                .contains("调用 `get_coverage` 采集当前类覆盖率")
-                .contains("覆盖率未达标时必须新增测试场景")
-                .contains("回到 `get_compilation_errors` 继续循环")
-                .doesNotContain("不要在批次 worker 内调用 `run_tests`", "并发执行多个批次")
-                .contains("如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率")
-                .contains("覆盖率达到 batch_input_json.coverage.threshold_percent 时跳过该类")
-                .contains("覆盖率未达标时只补充该类已有测试或目标测试文件")
-                .contains("`AgentBridge` MCP 读写工具不可用时必须写 `blocked` 或返回 `BLOCKED`")
+                .contains("严格执行 `batch_input_json.rules`")
+                .contains("严格执行 `batch_input_json.coverage`")
+                .contains("严格执行 `batch_input_json.allowed_write_globs`")
+                .contains("严格执行 `batch_input_json.target_test_files`")
+                .contains("`summary_json`")
+                .doesNotContain(
+                        "只允许创建或修改目标项目 src/test/** 下的测试文件",
+                        "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具",
+                        "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                        "开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率",
+                        "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`",
+                        "run_tests 失败时，根据失败原因修改测试",
+                        "覆盖率未达标时必须新增测试场景",
+                        "回到 `get_compilation_errors` 继续循环",
+                        "Java 编排会把该 task",
+                        "未完成任务补跑",
+                        "并发执行多个批次"
+                )
                 .doesNotContain("OpenCode 原生文件")
                 .doesNotContain("intellij-index", "intellij-idea");
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
@@ -92,6 +93,45 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-cupservice");
         assertThat(properties.getProject().getRepo()
                 .resolve("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java")).exists();
+    }
+
+    @Test
+    void fullRunAllowsWorkerGeneratedTargetArtifacts() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeModuleSource(properties.getProject().getRepo());
+        TargetArtifactWritingTaskRunner taskRunner = new TargetArtifactWritingTaskRunner(properties);
+
+        chain(properties, taskRunner).run(request("full", "", ""));
+
+        assertThat(properties.getProject().getRepo()
+                .resolve("target/classes/com/spdb/upfs/cup/CupService.class")).exists();
+        assertThat(properties.getProject().getRepo()
+                .resolve("upfs-cup/target/classes/com/spdb/upfs/cup/CupService.class")).exists();
+    }
+
+    @Test
+    void fullRunAllowsWorkerGeneratedGradleAndBuildArtifacts() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeModuleSource(properties.getProject().getRepo());
+        GradleBuildArtifactWritingTaskRunner taskRunner = new GradleBuildArtifactWritingTaskRunner(properties);
+
+        chain(properties, taskRunner).run(request("full", "", ""));
+
+        assertThat(properties.getProject().getRepo()
+                .resolve(".gradle/8.8/executionHistory/executionHistory.bin")).exists();
+        assertThat(properties.getProject().getRepo()
+                .resolve("upfs-cup/build/classes/java/test/CupServiceTest.class")).exists();
+    }
+
+    @Test
+    void failsWhenWorkerCreatesTestOutsideCurrentBatchAllowedModule() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeModuleSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new CrossModuleTestWritingTaskRunner(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected file")
+                .hasMessageContaining("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
     }
 
     @Test
@@ -141,21 +181,36 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
-    void blockedBatchRerunsInFreshAgentUntilCompleted() throws Exception {
+    void failsWhenWorkerCreatesProductionCodeUnderBuildNamedPackage() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new BuildPackageProductionWritingTaskRunner(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected file")
+                .hasMessageContaining("src/main/java/com/acme/build/BuildInfo.java");
+    }
+
+    @Test
+    void terminalBlockedBatchDoesNotRerunAndFailsAfterReport() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
         BlockingThenCompletingTaskRunner taskRunner = new BlockingThenCompletingTaskRunner(properties);
 
-        chain(properties, taskRunner).run(request("full", "", ""));
+        assertThatThrownBy(() -> chain(properties, taskRunner).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("blocked or partial unit-test batches")
+                .hasMessageContaining("test-batch-001-orderservice status=blocked")
+                .hasMessageContaining("missing dependencies");
 
         assertThat(taskRunner.titles).containsExactly(
-                "project-unit-test-generation-test-batch-001-orderservice",
                 "project-unit-test-generation-test-batch-001-orderservice",
                 "project-unit-test-generation-test-batch-002-userhelper"
         );
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("completed: `2`")
-                .doesNotContain("blocked: `1`");
+                .contains("completed: `1`")
+                .contains("blocked: `1`")
+                .contains("missing dependencies");
     }
 
     private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, OpenCodeServerTaskRunner taskRunner) {
@@ -301,6 +356,77 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         @Override
         public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
             Files.writeString(properties.getProject().getRepo().resolve("pom.xml"), "<project/>\n");
+            return super.runUntilValidated(spec);
+        }
+    }
+
+    private class TargetArtifactWritingTaskRunner extends CapturingTaskRunner {
+        TargetArtifactWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            Path rootArtifact = properties.getProject().getRepo()
+                    .resolve("target/classes/com/spdb/upfs/cup/CupService.class");
+            Path moduleArtifact = properties.getProject().getRepo()
+                    .resolve("upfs-cup/target/classes/com/spdb/upfs/cup/CupService.class");
+            Files.createDirectories(rootArtifact.getParent());
+            Files.createDirectories(moduleArtifact.getParent());
+            Files.writeString(rootArtifact, "compiled");
+            Files.writeString(moduleArtifact, "compiled");
+            return super.runUntilValidated(spec);
+        }
+    }
+
+    private class BuildPackageProductionWritingTaskRunner extends CapturingTaskRunner {
+        BuildPackageProductionWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            Path productionFile = properties.getProject().getRepo()
+                    .resolve("src/main/java/com/acme/build/BuildInfo.java");
+            Files.createDirectories(productionFile.getParent());
+            Files.writeString(productionFile, """
+                    package com.acme.build;
+                    class BuildInfo {}
+                    """);
+            return super.runUntilValidated(spec);
+        }
+    }
+
+    private class GradleBuildArtifactWritingTaskRunner extends CapturingTaskRunner {
+        GradleBuildArtifactWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            Path gradleArtifact = properties.getProject().getRepo()
+                    .resolve(".gradle/8.8/executionHistory/executionHistory.bin");
+            Path buildArtifact = properties.getProject().getRepo()
+                    .resolve("upfs-cup/build/classes/java/test/CupServiceTest.class");
+            Files.createDirectories(gradleArtifact.getParent());
+            Files.createDirectories(buildArtifact.getParent());
+            Files.writeString(gradleArtifact, "history");
+            Files.writeString(buildArtifact, "compiled");
+            return super.runUntilValidated(spec);
+        }
+    }
+
+    private class CrossModuleTestWritingTaskRunner extends CapturingTaskRunner {
+        CrossModuleTestWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            Path unrelatedTest = properties.getProject().getRepo()
+                    .resolve("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
+            Files.createDirectories(unrelatedTest.getParent());
+            Files.writeString(unrelatedTest, "class CommonServiceTest {}\n");
             return super.runUntilValidated(spec);
         }
     }
