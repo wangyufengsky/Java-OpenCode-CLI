@@ -448,10 +448,10 @@ public class ProjectUnitTestGenerationPreparation {
         rules.put("reader_preference", "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。");
         rules.put("writer_preference", "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。");
         rules.put("style_policy", "写测试前必须先查阅当前项目已有测试/已有单元测试，理解断言库、命名、Mock、Spring/JUnit 用法，并仿照现有代码风格。");
-        rules.put("diagnostics_policy", "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。");
-        rules.put("test_feedback_policy", "用 list_tests 查已有测试；写完后按 get_compilation_errors -> run_tests -> get_coverage 顺序校验当前批次相关测试和当前类覆盖率；任一步不通过都逐轮修正测试并回到 get_compilation_errors。");
-        rules.put("coverage_policy", "如果 types[].existing_test_files 非空，先用 get_coverage 检查该类覆盖率；覆盖率达到 " + threshold + "% 时跳过该类；覆盖率未达标时只补充该类已有测试或目标测试文件。");
-        rules.put("blocked_policy", "`AgentBridge` MCP 读写工具不可用时写 blocked 或返回 BLOCKED；诊断工具不可用且无法确认测试代码是否可编译时写 partial 或 blocked。");
+        rules.put("diagnostics_policy", "开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率；已有单元测试存在时也必须先调用 get_compilation_errors。写完或修改测试文件后，必须再次调用 `AgentBridge` MCP 诊断工具：get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。");
+        rules.put("test_feedback_policy", "用 list_tests 查已有测试；写完后按 get_compilation_errors -> run_tests -> get_coverage 顺序校验当前批次相关测试和当前类覆盖率；run_tests 失败时，根据失败原因修改测试，修改结束后回到 get_compilation_errors，再执行 run_tests，再次循环。");
+        rules.put("coverage_policy", "如果 types[].existing_test_files 非空，先用 get_coverage 检查该类覆盖率；覆盖率达到 " + threshold + "% 时跳过该类；覆盖率未达标时必须新增测试场景，只补充该类已有测试或目标测试文件，并重复 get_compilation_errors -> run_tests -> get_coverage。");
+        rules.put("blocked_policy", "`AgentBridge` MCP 读写工具不可用时写 blocked 或返回 BLOCKED；诊断、测试或覆盖率工具不可用且无法确认成功时写 partial 或 blocked，Java 编排会把 partial/blocked 作为未完成任务补跑。");
         return rules;
     }
 

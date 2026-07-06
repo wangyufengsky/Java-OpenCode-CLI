@@ -64,13 +64,15 @@ public class ProjectUnitTestGenerationOutputValidator {
                     return retriable("partial unit-test batch must explain remaining gaps in notes: " + batchId);
                 }
                 ValidationCheck files = validateTestFiles(repo, summary);
-                return files.ok() ? terminal(status) : retriable(files.error());
+                return files.ok()
+                        ? retriable("unit-test batch status requires rerun: status=" + status + ", batch=" + batchId, status)
+                        : retriable(files.error());
             }
             if ("blocked".equals(status)) {
                 if (summary.path("notes").isEmpty()) {
                     return retriable("blocked unit-test batch must explain blocker in notes: " + batchId);
                 }
-                return terminal(status);
+                return retriable("unit-test batch status requires rerun: status=" + status + ", batch=" + batchId, status);
             }
             return retriable("unit-test batch has unsupported status: status=" + status + ", summary=" + summaryJson);
         } catch (Exception exception) {
@@ -129,12 +131,12 @@ public class ProjectUnitTestGenerationOutputValidator {
         return new BatchValidation(ValidationCheck.success(), false, true, status);
     }
 
-    private BatchValidation terminal(String status) {
-        return new BatchValidation(ValidationCheck.success(), false, false, status);
-    }
-
     private BatchValidation retriable(String error) {
         return new BatchValidation(ValidationCheck.failed(error), true, false, "");
+    }
+
+    private BatchValidation retriable(String error, String status) {
+        return new BatchValidation(ValidationCheck.failed(error), true, false, status);
     }
 
     public record BatchValidation(ValidationCheck check, boolean retriable, boolean completed, String status) {

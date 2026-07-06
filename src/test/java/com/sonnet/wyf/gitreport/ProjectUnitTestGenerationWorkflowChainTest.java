@@ -59,9 +59,13 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具")
                 .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具")
                 .contains("先查阅当前项目已有单元测试")
+                .contains("开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率")
                 .contains("写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`")
+                .contains("如果目标类已经存在单元测试，开始写代码前也必须先执行 `get_compilation_errors`")
                 .contains("调用 `run_tests` 跑当前批次相关测试")
+                .contains("run_tests 失败时，根据失败原因修改测试")
                 .contains("调用 `get_coverage` 采集当前类覆盖率")
+                .contains("覆盖率未达标时必须新增测试场景")
                 .contains("回到 `get_compilation_errors` 继续循环")
                 .doesNotContain("不要在批次 worker 内调用 `run_tests`", "并发执行多个批次")
                 .contains("如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率")
@@ -137,19 +141,21 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
-    void blockedBatchDoesNotRerunButFailsFinalRunWithReport() throws Exception {
+    void blockedBatchRerunsInFreshAgentUntilCompleted() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
-        BlockingTaskRunner taskRunner = new BlockingTaskRunner(properties);
+        BlockingThenCompletingTaskRunner taskRunner = new BlockingThenCompletingTaskRunner(properties);
 
-        assertThatThrownBy(() -> chain(properties, taskRunner).run(request("full", "", "")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("blocked or partial unit-test batches")
-                .hasMessageContaining("test-batch-001-orderservice");
+        chain(properties, taskRunner).run(request("full", "", ""));
 
-        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-orderservice");
+        assertThat(taskRunner.titles).containsExactly(
+                "project-unit-test-generation-test-batch-001-orderservice",
+                "project-unit-test-generation-test-batch-001-orderservice",
+                "project-unit-test-generation-test-batch-002-userhelper"
+        );
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("blocked", "missing dependencies");
+                .contains("completed: `2`")
+                .doesNotContain("blocked: `1`");
     }
 
     private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, OpenCodeServerTaskRunner taskRunner) {
@@ -299,13 +305,22 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         }
     }
 
-    private class BlockingTaskRunner extends CapturingTaskRunner {
-        BlockingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+    private class BlockingThenCompletingTaskRunner extends CapturingTaskRunner {
+        private int orderServiceRuns;
+
+        BlockingThenCompletingTaskRunner(ProjectUnitTestGenerationProperties properties) {
             super(properties);
         }
 
         @Override
         public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+            if (!spec.title().endsWith("test-batch-001-orderservice")) {
+                return super.runUntilValidated(spec);
+            }
+            orderServiceRuns++;
+            if (orderServiceRuns > 1) {
+                return super.runUntilValidated(spec);
+            }
             titles.add(spec.title());
             prompts.add(Files.readString(spec.promptFile()));
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(

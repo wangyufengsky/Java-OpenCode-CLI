@@ -9,6 +9,7 @@
 - 文档缺失时按源码和已有测试继续，不要阻塞。
 - 读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
 - 写测试前必须先查阅当前项目已有单元测试，理解断言库、命名、Mock、Spring/JUnit 用法，并仿照现有代码风格。
+- 开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率；不要跳过已有测试的编译、测试和覆盖率确认。
 
 ## 写入边界
 
@@ -20,14 +21,16 @@
 ## 诊断与测试反馈
 
 - 写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`。
+- 如果目标类已经存在单元测试，开始写代码前也必须先执行 `get_compilation_errors`，确认当前测试代码没有编译错误。
 - `get_compilation_errors` 返回测试代码编译错误时，继续用 `AgentBridge` MCP 文件编辑工具修正测试文件，然后再次调用 `get_compilation_errors`。
 - 用 `list_tests` 查已有测试。
-- 调用 `run_tests` 跑当前批次相关测试；测试不通过时，根据报错逐个修改测试文件，然后回到 `get_compilation_errors` 继续循环。
-- 调用 `get_coverage` 采集当前类覆盖率；覆盖率未达标时补充测试案例，然后回到 `get_compilation_errors` 继续循环。
+- 调用 `run_tests` 跑当前批次相关测试；run_tests 失败时，根据失败原因修改测试，修改结束后回到 `get_compilation_errors`，再执行 `run_tests`，再次循环直到测试通过。
+- 调用 `get_coverage` 采集当前类覆盖率；覆盖率未达标时必须新增测试场景，优先补缺失分支、异常路径和边界值，然后回到 `get_compilation_errors` -> `run_tests` -> `get_coverage` 继续循环。
+- 任一步失败或覆盖率不足，修改后都必须回到 `get_compilation_errors` 继续循环。
 - 如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率。
 - 覆盖率达到 batch_input_json.coverage.threshold_percent 时跳过该类，不要为了重写风格而修改已有测试。
 - 覆盖率未达标时只补充该类已有测试或目标测试文件，优先补缺失分支、异常路径和边界值。
-- 诊断工具不可用时，在 `summary_json.notes` 中说明；如果因此无法确认测试代码是否可编译，状态写 `partial` 或 `blocked`。
+- 诊断工具不可用或 agent 中途无法继续时，在 `summary_json.notes` 中说明；如果因此无法确认测试代码是否可编译、测试是否通过或覆盖率是否达标，状态写 `partial` 或 `blocked`，Java 编排会把该 task 作为未完成任务补跑。
 - `completed` 只允许在以下条件全部满足时写入：已查阅现有测试风格、`get_compilation_errors` 无当前测试编译错误、`run_tests` 当前批次相关测试通过、`get_coverage` 当前类覆盖率达到阈值。
 
 ## 输出

@@ -54,16 +54,16 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(batches.path("batches").get(0).path("skill").path("test_tools")).extracting(JsonNode::asText)
                 .containsExactly("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project");
         assertThat(batches.path("batches").get(0).path("rules").path("diagnostics_policy").asText())
-                .contains("get_compilation_errors", "写完或修改测试文件后");
+                .contains("get_compilation_errors", "开始写代码前", "已有单元测试");
         assertThat(batches.path("batches").get(0).path("rules").path("test_feedback_policy").asText())
                 .contains("list_tests", "run_tests", "get_coverage")
-                .contains("逐轮修正")
+                .contains("根据失败原因修改", "再次循环")
                 .doesNotContain("不要调用 run_tests", "并发执行");
         assertThat(batches.path("batches").get(0).path("rules").path("style_policy").asText())
                 .contains("查阅", "已有测试", "代码风格");
         assertThat(batches.path("batches").get(0).path("coverage").path("threshold_percent").asInt()).isEqualTo(80);
         assertThat(batches.path("batches").get(0).path("rules").path("coverage_policy").asText())
-                .contains("existing_test_files", "get_coverage", "跳过", "补充")
+                .contains("existing_test_files", "get_coverage", "新增测试场景", "重复")
                 .contains("80%");
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())

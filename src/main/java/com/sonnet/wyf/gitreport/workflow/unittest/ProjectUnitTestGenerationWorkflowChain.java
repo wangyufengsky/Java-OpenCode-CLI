@@ -200,9 +200,6 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     }
 
     private List<IncompleteOutput> incompleteBatches(ProjectUnitTestGenerationProperties properties, Path out) throws Exception {
-        if (!terminalBatchFailures(properties, out).isEmpty()) {
-            return List.of();
-        }
         List<IncompleteOutput> incomplete = new ArrayList<>();
         for (Map<String, Object> batch : loadBatches(out)) {
             BatchValidation validation = outputValidator.validateBatchResult(

@@ -158,7 +158,7 @@ class ProjectUnitTestGenerationOutputValidatorTest {
     }
 
     @Test
-    void acceptsBlockedBatchAsTerminalWithoutRerun() throws Exception {
+    void treatsBlockedBatchAsRetriableIncompleteOutput() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
         objectMapper.writeValue(summary.toFile(), Map.of(
@@ -173,14 +173,15 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 new ProjectUnitTestGenerationOutputValidator(objectMapper)
                         .validateBatchResult(repo, "test-batch-001-com-acme", summary);
 
-        assertThat(validation.check().ok()).isTrue();
-        assertThat(validation.retriable()).isFalse();
+        assertThat(validation.check().ok()).isFalse();
+        assertThat(validation.check().error()).contains("status=blocked");
+        assertThat(validation.retriable()).isTrue();
         assertThat(validation.completed()).isFalse();
         assertThat(validation.status()).isEqualTo("blocked");
     }
 
     @Test
-    void acceptsPartialBatchWhenGeneratedFilesAreValidAndNotesExplainGap() throws Exception {
+    void treatsPartialBatchAsRetriableIncompleteOutput() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");
         Path testFile = repo.resolve("src/test/java/com/acme/FooTest.java");
@@ -198,8 +199,9 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 new ProjectUnitTestGenerationOutputValidator(objectMapper)
                         .validateBatchResult(repo, "test-batch-001-com-acme", summary);
 
-        assertThat(validation.check().ok()).isTrue();
-        assertThat(validation.retriable()).isFalse();
+        assertThat(validation.check().ok()).isFalse();
+        assertThat(validation.check().error()).contains("status=partial");
+        assertThat(validation.retriable()).isTrue();
         assertThat(validation.completed()).isFalse();
         assertThat(validation.status()).isEqualTo("partial");
     }
