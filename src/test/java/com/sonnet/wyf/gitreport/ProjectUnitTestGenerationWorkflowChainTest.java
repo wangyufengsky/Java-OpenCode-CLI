@@ -59,6 +59,9 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`")
                 .contains("用 `list_tests` 查已有测试，用 `get_coverage` 可选读取已有覆盖率")
                 .contains("不要在批次 worker 内调用 `run_tests` 或 `build_project`")
+                .contains("如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率")
+                .contains("覆盖率达到 batch_input_json.coverage.threshold_percent 时跳过该类")
+                .contains("覆盖率未达标时只补充该类已有测试或目标测试文件")
                 .contains("`AgentBridge` MCP 读写工具不可用时必须写 `blocked` 或返回 `BLOCKED`")
                 .doesNotContain("OpenCode 原生文件")
                 .doesNotContain("intellij-index", "intellij-idea");

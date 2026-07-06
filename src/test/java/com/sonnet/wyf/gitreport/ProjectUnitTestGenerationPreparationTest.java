@@ -50,6 +50,10 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(batches.path("batches").get(0).path("rules").path("test_feedback_policy").asText())
                 .contains("list_tests", "get_coverage")
                 .contains("不要调用 run_tests 或 build_project");
+        assertThat(batches.path("batches").get(0).path("coverage").path("threshold_percent").asInt()).isEqualTo(80);
+        assertThat(batches.path("batches").get(0).path("rules").path("coverage_policy").asText())
+                .contains("existing_test_files", "get_coverage", "跳过", "补充")
+                .contains("80%");
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())
                 .resolve("input.json"))).isTrue();

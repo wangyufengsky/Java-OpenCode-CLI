@@ -23,6 +23,7 @@ class ProjectUnitTestGenerationPropertiesTest {
         assertThat(properties.getSource().getExclude()).contains("target/**", "build/**", "generated/**");
         assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
         assertThat(properties.getTest().getMaxTypesPerTask()).isGreaterThan(0);
+        assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(80);
         assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
     }
 }

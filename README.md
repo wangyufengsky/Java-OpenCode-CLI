@@ -282,7 +282,7 @@ opencode-runner:
   mode: "full"
 ```
 
-单元测试生成链路默认扫描目标项目 `src/main/java/**/*.java`，使用 JavaParser 生成测试任务包，再让 OpenCode 按批次创建或更新目标项目 `src/test/**` 下的测试文件。链路不会自动修改生产代码、`pom.xml`、构建脚本或配置文件。输出包括：
+单元测试生成链路默认扫描目标项目 `src/main/java/**/*.java`，使用 JavaParser 生成测试任务包，再让 OpenCode 按批次创建或更新目标项目 `src/test/**` 下的测试文件。链路不会自动修改生产代码、`pom.xml`、构建脚本或配置文件。若目标类已经存在单元测试，worker 会先按 `test.coverage-threshold-percent` 检查该类覆盖率；达标则跳过，不达标则只补充该类测试。输出包括：
 
 - `unit-test-plan.json`：JavaParser 生成的源码类型、角色、目标测试文件和文档 warning。
 - `test-batches.json`：测试生成批次清单。

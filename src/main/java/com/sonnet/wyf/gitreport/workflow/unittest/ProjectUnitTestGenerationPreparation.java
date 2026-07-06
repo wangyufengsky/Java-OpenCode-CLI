@@ -419,7 +419,8 @@ public class ProjectUnitTestGenerationPreparation {
         batch.put("types", List.copyOf(accumulator.types));
         batch.put("docs", docs);
         batch.put("skill", agentBridgeSkill());
-        batch.put("rules", agentBridgeRules());
+        batch.put("coverage", coveragePolicy(accumulator.properties));
+        batch.put("rules", agentBridgeRules(accumulator.properties));
         batch.put("input_json", batchDir.resolve("input.json").toString());
         batch.put("summary_json", batchDir.resolve("summary.json").toString());
         batch.put("allowed_write_globs", allowedWriteGlobs(listOfStrings(batch.get("target_test_files"))));
@@ -437,14 +438,28 @@ public class ProjectUnitTestGenerationPreparation {
         );
     }
 
-    private Map<String, Object> agentBridgeRules() {
+    private Map<String, Object> coveragePolicy(ProjectUnitTestGenerationProperties properties) {
+        return Map.of(
+                "threshold_percent", clampPercent(properties.getTest().getCoverageThresholdPercent()),
+                "scope", "class",
+                "existing_test_action", "skip_when_existing_class_coverage_meets_threshold"
+        );
+    }
+
+    private Map<String, Object> agentBridgeRules(ProjectUnitTestGenerationProperties properties) {
+        int threshold = clampPercent(properties.getTest().getCoverageThresholdPercent());
         Map<String, Object> rules = new LinkedHashMap<>();
         rules.put("reader_preference", "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。");
         rules.put("writer_preference", "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。");
         rules.put("diagnostics_policy", "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。");
         rules.put("test_feedback_policy", "用 list_tests 查已有测试，用 get_coverage 可选读取已有覆盖率；不要调用 run_tests 或 build_project，批次并发执行时运行测试或构建会互相影响。最终验证由 Java 链路串行执行 test.verify-command。");
+        rules.put("coverage_policy", "如果 types[].existing_test_files 非空，先用 get_coverage 检查该类覆盖率；覆盖率达到 " + threshold + "% 时跳过该类；覆盖率未达标时只补充该类已有测试或目标测试文件。");
         rules.put("blocked_policy", "`AgentBridge` MCP 读写工具不可用时写 blocked 或返回 BLOCKED；诊断工具不可用且无法确认测试代码是否可编译时写 partial 或 blocked。");
         return rules;
+    }
+
+    private int clampPercent(int value) {
+        return Math.max(0, Math.min(100, value));
     }
 
     private List<String> allowedWriteGlobs(List<String> targetTestFiles) {
@@ -529,6 +544,7 @@ public class ProjectUnitTestGenerationPreparation {
     }
 
     private static class BatchAccumulator {
+        private final ProjectUnitTestGenerationProperties properties;
         private final int maxTypes;
         private final int maxMethods;
         private final int maxSourceChars;
@@ -537,6 +553,7 @@ public class ProjectUnitTestGenerationPreparation {
         private int sourceChars;
 
         private BatchAccumulator(ProjectUnitTestGenerationProperties properties) {
+            this.properties = properties;
             this.maxTypes = Math.max(1, properties.getTest().getMaxTypesPerTask());
             this.maxMethods = Math.max(1, properties.getTest().getMaxMethodsPerTask());
             this.maxSourceChars = Math.max(1, properties.getTest().getMaxSourceCharsPerTask());

@@ -23,6 +23,9 @@
 - 用 `list_tests` 查已有测试，用 `get_coverage` 可选读取已有覆盖率。
 - 不要在批次 worker 内调用 `run_tests` 或 `build_project`；本链路会并发执行多个批次，运行测试或构建会互相影响。
 - `run_tests` 和 `build_project` 只作为工具能力记录在 batch_input_json.skill.test_tools 中，不作为批次 worker 的执行步骤。最终验证由 Java 链路串行执行 `test.verify-command`。
+- 如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率。
+- 覆盖率达到 batch_input_json.coverage.threshold_percent 时跳过该类，不要为了重写风格而修改已有测试。
+- 覆盖率未达标时只补充该类已有测试或目标测试文件，优先补缺失分支、异常路径和边界值。
 - 诊断工具不可用时，在 `summary_json.notes` 中说明；如果因此无法确认测试代码是否可编译，状态写 `partial` 或 `blocked`。
 
 ## 输出

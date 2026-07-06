@@ -132,6 +132,7 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['project.repo']").value("CHANGE_ME_PROJECT_REPO"))
                 .andExpect(jsonPath("$.defaults['paths.out']").value("project-unit-tests/example-project"))
                 .andExpect(jsonPath("$.defaults['source.package-paths']").isArray())
+                .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(80))
                 .andExpect(jsonPath("$.defaults['test.verify-command'][0]").value("./mvnw"));
     }
 

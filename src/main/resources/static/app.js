@@ -92,6 +92,7 @@ const chainConfigDefinitions = {
       field('test.max-types-per-task', '每批最大类型数', '单个测试批次最多包含的 Java 类型数量。', 'number'),
       field('test.max-methods-per-task', '每批最大方法数', '单个测试批次最多包含的公开方法数量。', 'number'),
       field('test.max-source-chars-per-task', '每批源码字符数', '单个测试批次包含源码的字符上限。', 'number'),
+      field('test.coverage-threshold-percent', '覆盖率阈值', '已有测试类达到该类覆盖率百分比时跳过，否则补充测试。', 'number'),
       field('test.verify-command', '验证命令', '每行一个命令参数，例如 ./mvnw 和 test。', 'list'),
       field('opencode.timeout-minutes', 'OpenCode 超时分钟数', '单个测试生成 session 的超时时间。', 'number')
     ]

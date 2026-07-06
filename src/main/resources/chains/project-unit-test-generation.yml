@@ -29,6 +29,7 @@ test:
   max-types-per-task: 6
   max-methods-per-task: 40
   max-source-chars-per-task: 80000
+  coverage-threshold-percent: 80
   verify-command:
     - "./mvnw"
     - "test"

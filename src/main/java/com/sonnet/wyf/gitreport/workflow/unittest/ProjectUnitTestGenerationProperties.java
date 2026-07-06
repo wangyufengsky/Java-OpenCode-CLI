@@ -152,6 +152,7 @@ public class ProjectUnitTestGenerationProperties {
         private int maxTypesPerTask = 6;
         private int maxMethodsPerTask = 40;
         private int maxSourceCharsPerTask = 80_000;
+        private int coverageThresholdPercent = 80;
         private List<String> verifyCommand = new ArrayList<>(List.of("./mvnw", "test"));
 
         public int getConcurrency() {
@@ -190,6 +191,16 @@ public class ProjectUnitTestGenerationProperties {
         @JsonProperty("max-source-chars-per-task")
         public void setMaxSourceCharsPerTask(int maxSourceCharsPerTask) {
             this.maxSourceCharsPerTask = maxSourceCharsPerTask;
+        }
+
+        @JsonProperty("coverage-threshold-percent")
+        public int getCoverageThresholdPercent() {
+            return coverageThresholdPercent;
+        }
+
+        @JsonProperty("coverage-threshold-percent")
+        public void setCoverageThresholdPercent(int coverageThresholdPercent) {
+            this.coverageThresholdPercent = coverageThresholdPercent;
         }
 
         @JsonProperty("verify-command")
