@@ -56,6 +56,9 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("只允许创建或修改目标项目 src/test/** 下的测试文件")
                 .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具")
                 .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具")
+                .contains("写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`")
+                .contains("用 `list_tests` 查已有测试，用 `get_coverage` 可选读取已有覆盖率")
+                .contains("不要在批次 worker 内调用 `run_tests` 或 `build_project`")
                 .contains("`AgentBridge` MCP 读写工具不可用时必须写 `blocked` 或返回 `BLOCKED`")
                 .doesNotContain("OpenCode 原生文件")
                 .doesNotContain("intellij-index", "intellij-idea");

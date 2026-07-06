@@ -418,11 +418,33 @@ public class ProjectUnitTestGenerationPreparation {
                 .toList());
         batch.put("types", List.copyOf(accumulator.types));
         batch.put("docs", docs);
+        batch.put("skill", agentBridgeSkill());
+        batch.put("rules", agentBridgeRules());
         batch.put("input_json", batchDir.resolve("input.json").toString());
         batch.put("summary_json", batchDir.resolve("summary.json").toString());
         batch.put("allowed_write_globs", allowedWriteGlobs(listOfStrings(batch.get("target_test_files"))));
         batch.put("status", "pending");
         return batch;
+    }
+
+    private Map<String, Object> agentBridgeSkill() {
+        return Map.of(
+                "preferred_reader", "AgentBridge",
+                "preferred_writer", "AgentBridge",
+                "preferred_diagnostics", "AgentBridge",
+                "file_tools", List.of("read_file", "edit_text", "write_file"),
+                "test_tools", List.of("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project")
+        );
+    }
+
+    private Map<String, Object> agentBridgeRules() {
+        Map<String, Object> rules = new LinkedHashMap<>();
+        rules.put("reader_preference", "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。");
+        rules.put("writer_preference", "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。");
+        rules.put("diagnostics_policy", "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。");
+        rules.put("test_feedback_policy", "用 list_tests 查已有测试，用 get_coverage 可选读取已有覆盖率；不要调用 run_tests 或 build_project，批次并发执行时运行测试或构建会互相影响。最终验证由 Java 链路串行执行 test.verify-command。");
+        rules.put("blocked_policy", "`AgentBridge` MCP 读写工具不可用时写 blocked 或返回 BLOCKED；诊断工具不可用且无法确认测试代码是否可编译时写 partial 或 blocked。");
+        return rules;
     }
 
     private List<String> allowedWriteGlobs(List<String> targetTestFiles) {

@@ -42,6 +42,14 @@ class ProjectUnitTestGenerationPreparationTest {
         JsonNode batches = objectMapper.readTree(properties.getPaths().getOut().resolve("test-batches.json").toFile());
         assertThat(batches.path("batches")).hasSize(2);
         assertThat(batches.path("batches").get(0).path("docs").path("agents").asText()).isEqualTo("docs/custom-agents.md");
+        assertThat(batches.path("batches").get(0).path("skill").path("preferred_diagnostics").asText()).isEqualTo("AgentBridge");
+        assertThat(batches.path("batches").get(0).path("skill").path("test_tools")).extracting(JsonNode::asText)
+                .containsExactly("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project");
+        assertThat(batches.path("batches").get(0).path("rules").path("diagnostics_policy").asText())
+                .contains("get_compilation_errors", "写完或修改测试文件后");
+        assertThat(batches.path("batches").get(0).path("rules").path("test_feedback_policy").asText())
+                .contains("list_tests", "get_coverage")
+                .contains("不要调用 run_tests 或 build_project");
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())
                 .resolve("input.json"))).isTrue();
