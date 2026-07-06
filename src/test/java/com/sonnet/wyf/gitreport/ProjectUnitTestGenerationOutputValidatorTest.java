@@ -30,11 +30,12 @@ class ProjectUnitTestGenerationOutputValidatorTest {
                 "status", "completed",
                 "source_files", List.of("src/main/java/com/acme/Foo.java"),
                 "test_files", List.of("src/test/java/com/acme/FooTest.java"),
+                "checks", passedChecks(80),
                 "notes", List.of()
         ));
 
         assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
-                .validateBatchOutput(repo, "test-batch-001-com-acme", summary).ok()).isTrue();
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).ok()).isTrue();
     }
 
     @Test
@@ -53,7 +54,7 @@ class ProjectUnitTestGenerationOutputValidatorTest {
         ));
 
         assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
-                .validateBatchOutput(repo, "test-batch-001-com-acme", summary).error())
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
                 .contains("outside src/test");
     }
 
@@ -73,8 +74,67 @@ class ProjectUnitTestGenerationOutputValidatorTest {
         ));
 
         assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
-                .validateBatchOutput(repo, "test-batch-001-com-acme", summary).error())
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
                 .contains("outside src/test");
+    }
+
+    @Test
+    void rejectsCompletedBatchWithoutChecks() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("src/test/java/com/acme/FooTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class FooTest {}\n");
+        objectMapper.writeValue(summary.toFile(), Map.of(
+                "batch_id", "test-batch-001-com-acme",
+                "status", "completed",
+                "source_files", List.of("src/main/java/com/acme/Foo.java"),
+                "test_files", List.of("src/test/java/com/acme/FooTest.java"),
+                "notes", List.of()
+        ));
+
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
+                .contains("completed unit-test batch must record checks");
+    }
+
+    @Test
+    void rejectsCompletedBatchWhenCompilationTestsOrCoverageAreNotPassing() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("src/test/java/com/acme/FooTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class FooTest {}\n");
+
+        objectMapper.writeValue(summary.toFile(), completedSummary(Map.of(
+                "style_reviewed", true,
+                "compilation", Map.of("passed", false),
+                "tests", Map.of("passed", true),
+                "coverage", Map.of("percent", 80)
+        )));
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
+                .contains("compilation.passed=true");
+
+        objectMapper.writeValue(summary.toFile(), completedSummary(Map.of(
+                "style_reviewed", true,
+                "compilation", Map.of("passed", true),
+                "tests", Map.of("passed", false),
+                "coverage", Map.of("percent", 80)
+        )));
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
+                .contains("tests.passed=true");
+
+        objectMapper.writeValue(summary.toFile(), completedSummary(Map.of(
+                "style_reviewed", true,
+                "compilation", Map.of("passed", true),
+                "tests", Map.of("passed", true),
+                "coverage", Map.of("percent", 79)
+        )));
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-com-acme", summary, 80).error())
+                .contains("coverage.percent >= 80");
     }
 
     @Test
@@ -122,5 +182,25 @@ class ProjectUnitTestGenerationOutputValidatorTest {
         assertThat(validation.retriable()).isFalse();
         assertThat(validation.completed()).isFalse();
         assertThat(validation.status()).isEqualTo("partial");
+    }
+
+    private Map<String, Object> completedSummary(Map<String, Object> checks) {
+        return Map.of(
+                "batch_id", "test-batch-001-com-acme",
+                "status", "completed",
+                "source_files", List.of("src/main/java/com/acme/Foo.java"),
+                "test_files", List.of("src/test/java/com/acme/FooTest.java"),
+                "checks", checks,
+                "notes", List.of()
+        );
+    }
+
+    private Map<String, Object> passedChecks(int percent) {
+        return Map.of(
+                "style_reviewed", true,
+                "compilation", Map.of("passed", true),
+                "tests", Map.of("passed", true),
+                "coverage", Map.of("percent", percent)
+        );
     }
 }

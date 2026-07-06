@@ -1,4 +1,5 @@
 # 项目单元测试生成链路。默认全量扫描 src/main/java；source.package-paths 非空时仅处理指定包路径下所有类。
+# 链路按顺序执行，每个 task 只包含一个 Java 顶层类型，一个 agent 只写一个类的单元测试。
 
 project:
   id: "example-project"
@@ -25,10 +26,6 @@ source:
     - "**/generated/**"
 
 test:
-  concurrency: 3
-  max-types-per-task: 6
-  max-methods-per-task: 40
-  max-source-chars-per-task: 80000
   coverage-threshold-percent: 80
   verify-command:
     - "./mvnw"

@@ -97,12 +97,16 @@ class ConsoleMvcTest {
                 .contains("review.grouping.max-regions-per-task")
                 .contains("project-unit-test-generation")
                 .contains("source.package-paths")
+                .contains("每任务一个类")
                 .contains("test.verify-command")
                 .contains("git-code-contribution-report")
                 .contains("synthesis")
                 .contains("总报告重跑不需要编号")
                 .contains("/api/chains/")
                 .doesNotContain("review.max-regions-per-batch")
+                .doesNotContain("test.concurrency")
+                .doesNotContain("test.max-types-per-task")
+                .doesNotContain("每批最大类型数")
                 .doesNotContain("rerunTypeSelect.disabled = !rerunMode")
                 .doesNotContain("src/main/resources/smartesb-transactions");
         mockMvc.perform(get("/runs/" + runId))
@@ -132,6 +136,8 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['project.repo']").value("CHANGE_ME_PROJECT_REPO"))
                 .andExpect(jsonPath("$.defaults['paths.out']").value("project-unit-tests/example-project"))
                 .andExpect(jsonPath("$.defaults['source.package-paths']").isArray())
+                .andExpect(jsonPath("$.defaults['test.concurrency']").doesNotExist())
+                .andExpect(jsonPath("$.defaults['test.max-types-per-task']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(80))
                 .andExpect(jsonPath("$.defaults['test.verify-command'][0]").value("./mvnw"));
     }

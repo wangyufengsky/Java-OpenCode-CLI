@@ -40,16 +40,27 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(service.path("existing_test_files").get(0).asText()).isEqualTo("src/test/java/com/acme/order/OrderServiceTest.java");
 
         JsonNode batches = objectMapper.readTree(properties.getPaths().getOut().resolve("test-batches.json").toFile());
-        assertThat(batches.path("batches")).hasSize(2);
+        assertThat(batches.path("batches")).hasSize(3);
         assertThat(batches.path("batches").get(0).path("docs").path("agents").asText()).isEqualTo("docs/custom-agents.md");
+        assertThat(batches.path("batches").get(0).path("batch_id").asText()).isEqualTo("test-batch-001-ordercontroller");
+        assertThat(batches.path("batches").get(0).path("scope").path("type").asText()).isEqualTo("class");
+        assertThat(batches.path("batches").get(0).path("scope").path("qualified_name").asText()).isEqualTo("com.acme.order.OrderController");
+        assertThat(batches.path("batches").get(0).path("source_files")).extracting(JsonNode::asText)
+                .containsExactly("src/main/java/com/acme/order/OrderController.java");
+        assertThat(batches.path("batches").get(0).path("target_test_files")).extracting(JsonNode::asText)
+                .containsExactly("src/test/java/com/acme/order/OrderControllerTest.java");
+        assertThat(batches.path("batches").get(0).path("types")).hasSize(1);
         assertThat(batches.path("batches").get(0).path("skill").path("preferred_diagnostics").asText()).isEqualTo("AgentBridge");
         assertThat(batches.path("batches").get(0).path("skill").path("test_tools")).extracting(JsonNode::asText)
                 .containsExactly("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project");
         assertThat(batches.path("batches").get(0).path("rules").path("diagnostics_policy").asText())
                 .contains("get_compilation_errors", "写完或修改测试文件后");
         assertThat(batches.path("batches").get(0).path("rules").path("test_feedback_policy").asText())
-                .contains("list_tests", "get_coverage")
-                .contains("不要调用 run_tests 或 build_project");
+                .contains("list_tests", "run_tests", "get_coverage")
+                .contains("逐轮修正")
+                .doesNotContain("不要调用 run_tests", "并发执行");
+        assertThat(batches.path("batches").get(0).path("rules").path("style_policy").asText())
+                .contains("查阅", "已有测试", "代码风格");
         assertThat(batches.path("batches").get(0).path("coverage").path("threshold_percent").asInt()).isEqualTo(80);
         assertThat(batches.path("batches").get(0).path("rules").path("coverage_policy").asText())
                 .contains("existing_test_files", "get_coverage", "跳过", "补充")
@@ -98,7 +109,9 @@ class ProjectUnitTestGenerationPreparationTest {
 
         JsonNode batches = objectMapper.readTree(properties.getPaths().getOut().resolve("test-batches.json").toFile());
         assertThat(batches.path("batches").get(0).path("allowed_write_globs")).extracting(JsonNode::asText)
-                .containsExactly("upfs-common/src/test/**", "upfs-cup/src/test/**");
+                .containsExactly("upfs-common/src/test/**");
+        assertThat(batches.path("batches").get(1).path("allowed_write_globs")).extracting(JsonNode::asText)
+                .containsExactly("upfs-cup/src/test/**");
     }
 
     @Test

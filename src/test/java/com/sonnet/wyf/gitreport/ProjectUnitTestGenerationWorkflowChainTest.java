@@ -6,9 +6,7 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
-import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
-import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
@@ -49,16 +47,23 @@ class ProjectUnitTestGenerationWorkflowChainTest {
 
         chain(properties, taskRunner).run(request("full", "", ""));
 
-        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-com-acme-order");
+        assertThat(taskRunner.titles).containsExactly(
+                "project-unit-test-generation-test-batch-001-orderservice",
+                "project-unit-test-generation-test-batch-002-userhelper"
+        );
         assertThat(taskRunner.prompts.get(0))
                 .contains("project-unit-test-generation 单元测试批次")
                 .contains("batch_input_json:")
+                .contains("一个 task 只包含一个 Java 顶层类型")
                 .contains("只允许创建或修改目标项目 src/test/** 下的测试文件")
                 .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具")
                 .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具")
+                .contains("先查阅当前项目已有单元测试")
                 .contains("写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`")
-                .contains("用 `list_tests` 查已有测试，用 `get_coverage` 可选读取已有覆盖率")
-                .contains("不要在批次 worker 内调用 `run_tests` 或 `build_project`")
+                .contains("调用 `run_tests` 跑当前批次相关测试")
+                .contains("调用 `get_coverage` 采集当前类覆盖率")
+                .contains("回到 `get_compilation_errors` 继续循环")
+                .doesNotContain("不要在批次 worker 内调用 `run_tests`", "并发执行多个批次")
                 .contains("如果目标类已经存在单元测试，先用 `get_coverage` 检查该类覆盖率")
                 .contains("覆盖率达到 batch_input_json.coverage.threshold_percent 时跳过该类")
                 .contains("覆盖率未达标时只补充该类已有测试或目标测试文件")
@@ -66,9 +71,10 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .doesNotContain("OpenCode 原生文件")
                 .doesNotContain("intellij-index", "intellij-idea");
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
+        assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/user/UserHelperTest.java")).exists();
         assertThat(properties.getPaths().getOut().resolve("verification.json")).exists();
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("project-unit-test-generation", "test-batch-001-com-acme-order");
+                .contains("project-unit-test-generation", "test-batch-001-orderservice", "test-batch-002-userhelper");
     }
 
     @Test
@@ -89,19 +95,20 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         writeSource(properties.getProject().getRepo());
         ProjectUnitTestGenerationPreparation preparation = new ProjectUnitTestGenerationPreparation(objectMapper);
         preparation.prepare(properties, true);
-        Path staleSummary = properties.getPaths().getOut().resolve("test-batches/test-batch-001-com-acme-order/summary.json");
+        Path staleSummary = properties.getPaths().getOut().resolve("test-batches/test-batch-001-orderservice/summary.json");
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(staleSummary.toFile(), Map.of(
-                "batch_id", "test-batch-001-com-acme-order",
+                "batch_id", "test-batch-001-orderservice",
                 "status", "completed",
                 "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
                 "test_files", List.of("src/test/java/com/acme/order/OrderServiceTest.java"),
+                "checks", passedChecks(),
                 "notes", List.of()
         ));
         Path testFile = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java");
         Files.createDirectories(testFile.getParent());
         Files.writeString(testFile, "class OrderServiceTest {}\n");
 
-        assertThatThrownBy(() -> chain(properties, new NoopTaskRunner()).run(request("rerun", "test-batch", "test-batch-001-com-acme-order")))
+        assertThatThrownBy(() -> chain(properties, new NoopTaskRunner()).run(request("rerun", "test-batch", "test-batch-001-orderservice")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("outputs incomplete");
     }
@@ -125,9 +132,9 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         assertThatThrownBy(() -> chain(properties, taskRunner).run(request("full", "", "")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("blocked or partial unit-test batches")
-                .hasMessageContaining("test-batch-001-com-acme-order");
+                .hasMessageContaining("test-batch-001-orderservice");
 
-        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-com-acme-order");
+        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-orderservice");
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
                 .contains("blocked", "missing dependencies");
     }
@@ -143,7 +150,6 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 new ProjectUnitTestGenerationReportRenderer(objectMapper),
                 fakeServerManager(),
                 taskRunner,
-                directTaskRunner(),
                 new OutputCompletionGate(objectMapper, 1),
                 objectMapper
         );
@@ -156,7 +162,6 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         properties.getProject().setRepo(tempDir.resolve("repo"));
         properties.getPaths().setOut(tempDir.resolve("out"));
         properties.getTest().setVerifyCommand(List.of("sh", "-c", "printf ok"));
-        properties.getTest().setMaxTypesPerTask(10);
         return properties;
     }
 
@@ -178,6 +183,17 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                     }
                 }
                 """);
+        Files.createDirectories(repo.resolve("src/main/java/com/acme/user"));
+        Files.writeString(repo.resolve("src/main/java/com/acme/user/UserHelper.java"), """
+                package com.acme.user;
+                public final class UserHelper {
+                    private UserHelper() {
+                    }
+                    public static String normalize(String value) {
+                        return value == null ? "" : value.trim();
+                    }
+                }
+                """);
     }
 
     private OpenCodeServerManager fakeServerManager() {
@@ -185,19 +201,6 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             @Override
             public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) {
                 return new OpenCodeServerHandle(URI.create("http://127.0.0.1:1"), false);
-            }
-        };
-    }
-
-    private ConcurrentWorkflowTaskRunner directTaskRunner() {
-        return new ConcurrentWorkflowTaskRunner(Runnable::run) {
-            @Override
-            public <T> List<TaskRunResult> run(String workflowName, List<T> tasks, int concurrency, java.util.function.Function<T, String> taskKey, java.util.function.Function<T, java.util.concurrent.Callable<TaskRunResult>> taskFactory) throws Exception {
-                java.util.ArrayList<TaskRunResult> results = new java.util.ArrayList<>();
-                for (T task : tasks) {
-                    results.add(taskFactory.apply(task).call());
-                }
-                return results;
             }
         };
     }
@@ -216,14 +219,19 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
             titles.add(spec.title());
             prompts.add(Files.readString(spec.promptFile()));
-            Path testFile = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java");
+            Map<String, Object> batch = objectMapper.readValue(spec.runDir().resolve("input.json").toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            String batchId = batch.get("batch_id").toString();
+            List<String> sourceFiles = ((List<?>) batch.get("source_files")).stream().map(Object::toString).toList();
+            String testPath = ((List<?>) batch.get("target_test_files")).get(0).toString();
+            Path testFile = properties.getProject().getRepo().resolve(testPath);
             Files.createDirectories(testFile.getParent());
-            Files.writeString(testFile, "package com.acme.order; class OrderServiceTest {}\n");
+            Files.writeString(testFile, "class " + testFile.getFileName().toString().replace(".java", "") + " {}\n");
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(
-                    "batch_id", "test-batch-001-com-acme-order",
+                    "batch_id", batchId,
                     "status", "completed",
-                    "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
-                    "test_files", List.of("src/test/java/com/acme/order/OrderServiceTest.java"),
+                    "source_files", sourceFiles,
+                    "test_files", List.of(testPath),
+                    "checks", passedChecks(),
                     "notes", List.of()
             ));
             return null;
@@ -263,7 +271,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             titles.add(spec.title());
             prompts.add(Files.readString(spec.promptFile()));
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(
-                    "batch_id", "test-batch-001-com-acme-order",
+                    "batch_id", "test-batch-001-orderservice",
                     "status", "blocked",
                     "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
                     "test_files", List.of(),
@@ -271,6 +279,15 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             ));
             return null;
         }
+    }
+
+    private Map<String, Object> passedChecks() {
+        return Map.of(
+                "style_reviewed", true,
+                "compilation", Map.of("passed", true),
+                "tests", Map.of("passed", true),
+                "coverage", Map.of("percent", 80)
+        );
     }
 
     private static class FixedChainConfigLoader extends ChainConfigLoader {
