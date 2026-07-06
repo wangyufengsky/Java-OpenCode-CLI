@@ -102,14 +102,13 @@ public class ProjectUnitTestGenerationOutputValidator {
 
     private ValidationCheck validateTestFiles(Path repo, JsonNode summary) throws Exception {
         Path repoRoot = repo.toAbsolutePath().normalize();
-        Path testRoot = repoRoot.resolve("src/test").normalize();
         for (JsonNode testFileNode : summary.path("test_files")) {
             String testFile = normalize(testFileNode.asText());
             Path resolved = repoRoot.resolve(testFile).normalize();
             if (!resolved.startsWith(repoRoot)) {
                 return ValidationCheck.failed("unit-test output escapes repo: " + testFile);
             }
-            if (!resolved.startsWith(testRoot)) {
+            if (!ProjectUnitTestGenerationPaths.isTestSource(repoRoot, resolved)) {
                 return ValidationCheck.failed("unit-test output outside src/test: " + testFile);
             }
             if (!Files.exists(resolved)) {

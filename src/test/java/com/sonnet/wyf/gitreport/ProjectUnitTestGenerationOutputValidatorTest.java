@@ -39,6 +39,26 @@ class ProjectUnitTestGenerationOutputValidatorTest {
     }
 
     @Test
+    void acceptsCompletedBatchWithTestsUnderModuleSrcTest() throws Exception {
+        Path repo = tempDir.resolve("repo");
+        Path summary = tempDir.resolve("summary.json");
+        Path testFile = repo.resolve("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java");
+        Files.createDirectories(testFile.getParent());
+        Files.writeString(testFile, "class CupServiceTest {}\n");
+        objectMapper.writeValue(summary.toFile(), Map.of(
+                "batch_id", "test-batch-001-cupservice",
+                "status", "completed",
+                "source_files", List.of("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"),
+                "test_files", List.of("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java"),
+                "checks", passedChecks(80),
+                "notes", List.of()
+        ));
+
+        assertThat(new ProjectUnitTestGenerationOutputValidator(objectMapper)
+                .validateBatchOutput(repo, "test-batch-001-cupservice", summary, 80).ok()).isTrue();
+    }
+
+    @Test
     void rejectsProductionFileWrites() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path summary = tempDir.resolve("summary.json");

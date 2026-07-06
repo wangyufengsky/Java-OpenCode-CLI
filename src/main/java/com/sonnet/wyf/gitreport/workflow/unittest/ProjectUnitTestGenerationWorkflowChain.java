@@ -389,9 +389,8 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
 
         private static boolean isAllowedWrite(Path repo, Path out, Path file) {
             Path normalized = file.toAbsolutePath().normalize();
-            Path testRoot = repo.resolve("src/test").normalize();
             Path gitRoot = repo.resolve(".git").normalize();
-            return normalized.startsWith(testRoot)
+            return ProjectUnitTestGenerationPaths.isTestSource(repo, normalized)
                     || normalized.startsWith(gitRoot)
                     || (out.startsWith(repo) && normalized.startsWith(out));
         }

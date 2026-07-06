@@ -78,6 +78,19 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void fullRunAllowsGeneratedTestsUnderModuleSrcTest() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeModuleSource(properties.getProject().getRepo());
+        CapturingTaskRunner taskRunner = new CapturingTaskRunner(properties);
+
+        chain(properties, taskRunner).run(request("full", "", ""));
+
+        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-cupservice");
+        assertThat(properties.getProject().getRepo()
+                .resolve("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java")).exists();
+    }
+
+    @Test
     void rerunRejectsUnknownBatchId() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
@@ -191,6 +204,31 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                     }
                     public static String normalize(String value) {
                         return value == null ? "" : value.trim();
+                    }
+                }
+                """);
+    }
+
+    private void writeModuleSource(Path repo) throws Exception {
+        Files.createDirectories(repo);
+        Files.writeString(repo.resolve("pom.xml"), """
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.spdb</groupId>
+                  <artifactId>upfs-nl-json</artifactId>
+                  <version>1.0.0</version>
+                  <packaging>pom</packaging>
+                  <modules>
+                    <module>upfs-cup</module>
+                  </modules>
+                </project>
+                """);
+        Files.createDirectories(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup"));
+        Files.writeString(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"), """
+                package com.spdb.upfs.cup;
+                public class CupService {
+                    public String handle(String value) {
+                        return value;
                     }
                 }
                 """);
