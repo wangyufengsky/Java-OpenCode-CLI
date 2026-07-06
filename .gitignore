@@ -43,3 +43,8 @@ D:/
 
 ### Task console runtime output ###
 data/
+
+### AgentBridge local runtime state ###
+.agentbridge/conversation.db*
+.agentbridge/sessions/
+.agentbridge/hooks/.provision-hashes
