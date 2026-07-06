@@ -13,7 +13,7 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 ```
 
 3. 子 agent prompt 必须是 `prompts\run-author-report.md` 的原文，再追加上面两行输入载荷。
-4. 单批最多派发 5 个子 agent；人员很多时分批等待，避免压垮 IntelliJ MCP 或上下文调度。
+4. 单批最多派发 5 个子 agent；人员很多时分批等待，避免压垮 AgentBridge MCP 或上下文调度。
 5. 派发前，主 agent 确认 `tasks[i].detail_json`、`tasks[i].report_md` 和 `tasks[i].quality_summary_json` 均已由脚本预创建；若缺失，重新运行统计准备脚本，不让子 agent 创建文件。
 6. 子 agent 完成后，主 agent 按 `tasks[i].report_md` 和 `tasks[i].quality_summary_json` 的确定路径逐个读取个人报告和质量摘要，禁止使用 `reports\*\person-report.md` 或 `reports\*\quality-summary.json` 通配符替代 `tasks[]`。
 7. 个人报告缺失、仍只包含 marker、质量摘要仍为 `quality_summary_marker`、内容明显为空或写入失败时，生成主报告之前必须只补跑该人员一次。补跑校验仍未完成时，停止生成主报告并列出失败人员、失败路径和失败原因；不得继续写 `code-contribution-report.md`。

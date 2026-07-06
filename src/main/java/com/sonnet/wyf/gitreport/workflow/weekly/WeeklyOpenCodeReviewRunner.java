@@ -160,7 +160,7 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
 
                 严格边界：
                 - 只读取本 review unit 的 input_json。
-                - 读取 input_json 时，必须使用 `intellij-idea` MCP 文件读取工具：intellij-idea_read_file 或 intellij-idea_get_file_text_by_path。
+                - 读取 input_json 时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。
                 - 只审查 input_json.changed_regions 内的 hunk，不得把完整文件或其他历史链路产物作为归因依据。
                 - reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id。
                 - 不得只挑重点审查，不得因为文件多而跳过低风险 region；没有问题的 region 也必须计入 reviewed_region_ids。
@@ -168,8 +168,8 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
                 - severity 只能是 P0、P1、P2。
                 - summary 可以写模块级结论，但每条 finding 必须落回具体 region。
                 - code-review.md 必须按模块/文件分节，保留完整审查说明，便于最终分卷报告用相对链接跳转。
-                - 写入 summary_json 和 review_md 时，必须使用 `intellij-idea` MCP 文件编辑工具：intellij-idea_replace_text_in_file 或 intellij-idea_replace_text_undoable。
-                - `intellij-idea` MCP 读写工具不可用时必须返回 BLOCKED，不要改用 shell、Python、重定向或其他文件读写方式。
+                - 写入 summary_json 和 review_md 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。
+                - `AgentBridge` MCP 读写工具不可用时必须返回 BLOCKED，不要改用 shell、Python、重定向或其他文件读写方式。
                 - 输出必须写入 summary_json 和 review_md，最终只输出 DONE 或 BLOCKED。
 
                 input_json: %s

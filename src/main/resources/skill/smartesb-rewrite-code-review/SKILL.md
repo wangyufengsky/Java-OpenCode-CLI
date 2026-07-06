@@ -5,7 +5,7 @@ compatibility: opencode
 metadata:
   environment: windows
   domain: smartesb
-tools: intellij-idea,intellij-index,intellij-db
+tools: AgentBridge,AgentBridge,intellij-db
 ---
 
 # SmartESB Rewrite Code Review
@@ -24,20 +24,20 @@ tools: intellij-idea,intellij-index,intellij-db
 
 | 行为 | 优先 MCP | 规则 |
 | --- | --- | --- |
-| 定位重构项目代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 先在 `new_project` 找入口、Service、Handler、Mapper、DTO、配置和测试。 |
-| 读取源码和配置 | `intellij-index_ide_read_file` | 禁止用 `grep`、`cat`、`rg` 读取源码；MCP 不可用时该范围标记未验证。 |
-| 定位老项目代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 先按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字搜索。 |
-| 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到刚生成或刚修改的文件时先同步，再重试一次。 |
-| 写审查报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只写准备脚本已预创建的文件；Markdown 小块写入；不要一次写完整长报告。 |
+| 定位重构项目代码 | `search_symbols`、`list_project_files`、`search_text` | 先在 `new_project` 找入口、Service、Handler、Mapper、DTO、配置和测试。 |
+| 读取源码和配置 | `read_file` | 禁止用 `grep`、`cat`、`rg` 读取源码；MCP 不可用时该范围标记未验证。 |
+| 定位老项目代码 | `search_symbols`、`list_project_files`、`search_text` | 先按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字搜索。 |
+| 刷新项目文件视图 | `list_project_files`、`list_directory_tree` | 搜索不到刚生成或刚修改的文件时先同步，再重试一次。 |
+| 写审查报告 | `edit_text`、`write_file` | 只写准备脚本已预创建的文件；Markdown 小块写入；不要一次写完整长报告。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 需要表结构、SQL、数据字典证据时优先使用；未暴露时记录未验证，不用 shell 强行连库。 |
 | 运行准备脚本 | shell / PowerShell | 仅用于生成编排 JSON 和预创建报告/汇总占位文件；调用 shell 必须带中文 `description`。 |
 
-禁止把源码获取、报告写入、索引同步、数据库证据获取交给 shell。shell 只允许用于任务准备脚本。
+禁止把源码获取、报告写入、项目文件视图刷新、数据库证据获取交给 shell。shell 只允许用于任务准备脚本。
 
 ## Required Workflow
 
 1. 如果用户没有提供交易名，先询问用户要审查哪些交易，不要自行补默认交易。
-2. 从用户项目工作目录用 Windows PowerShell 运行准备脚本，不要切到 skill 安装目录执行。`--out` 必须是 Windows 绝对路径，例如 `D:\review-output\smartesb-20260612`，且该路径必须能被 IDEA MCP 写入。
+2. 从用户项目工作目录用 Windows PowerShell 运行准备脚本，不要切到 skill 安装目录执行。`--out` 必须是 Windows 绝对路径，例如 `D:\review-output\smartesb-20260612`，且该路径必须能被 AgentBridge MCP 写入。
 3. 准备脚本必须预创建顶层 `index.md`、`summary.md`，以及每个交易的 `review.md`、`mapping-matrix.md`、`sections\01-findings.md`、`sections\02-code-chains.md`、`sections\03-protocol-review.md`、`sections\04-behavior-review.md`、`sections\05-verification.md`、`sections\06-code-standard.md` 和 `summary.json`。交易级文件是子 agent 唯一允许写入的文件。
 4. 读取脚本生成的 `summary.json`、`index_inputs.json` 和 `tasks\transaction-*.json`。
 5. 按 `index_inputs.json.tasks[].task_path` 每个交易派发一个子 agent。
@@ -93,7 +93,7 @@ task_json_path: <index_inputs.tasks[i].task_path>
 summary_schema: <index_inputs.schemas.transaction_summary>
 ```
 
-4. 一批最多派发 3-5 个交易子 agent；交易很多时分批等待，避免压垮 IntelliJ MCP 或上下文调度。
+4. 一批最多派发 3-5 个交易子 agent；交易很多时分批等待，避免压垮 AgentBridge MCP 或上下文调度。
 5. 派发前，主 agent 确认 `index_inputs.tasks[i]` 中的 `review_md`、`summary_json` 以及 task JSON 的 `output.*_md` 目标均已由准备脚本预创建；若缺失，重新运行准备脚本，不让子 agent 创建文件。
 6. 子 agent 完成后，主 agent 按 `index_inputs.tasks[i].summary_json` 的确定路径逐个读取摘要，不使用 `reports\*\summary.json` 通配符作为主依据。
 7. 摘要缺失、JSON 格式错误、schema 校验失败或 `status=failed` 时，只对该交易补跑一次，补跑 prompt 使用 `prompts\rerun-single-transaction.md`，输入同一个 `task_json_path` 和上一轮可读的 `summary.json` 或 `review.md` 路径。
@@ -103,9 +103,9 @@ summary_schema: <index_inputs.schemas.transaction_summary>
 
 每个子 agent 只接收一个 task JSON，不接收全量任务列表。子 agent 必须：
 
-- 先通过 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 找重构项目交易代码。
+- 先通过 `search_symbols`、`list_project_files`、`search_text` 找重构项目交易代码。
 - 再根据 `重构项目详细设计文档.md` 理解重构架构。
-- 再通过 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 找老 SmartESB 交易代码。
+- 再通过 `search_symbols`、`list_project_files`、`search_text` 找老 SmartESB 交易代码。
 - 最后根据 `8583.md`、`json.md`、`8583 to json.md` 审查字段映射和处理逻辑。
 - 写交易入口到 `reports\<transaction>\review.md`，详细报告写入 `sections\*.md` 和 `mapping-matrix.md`。
 - 写机器可读摘要到 `reports\<transaction>\summary.json`。
@@ -148,11 +148,11 @@ summary.md
 
 - Markdown 文件已包含唯一追加标记；具体值以 task JSON 的 `output_markers` 为准。
 - 子 agent 必须读取 task JSON 的 `output_markers`，使用对应文件的 exact marker；禁止按示例自行猜 marker。
-- 用 `intellij-idea_replace_text_undoable` 把对应 marker 替换为“小块内容 + 原 marker”，实现分块追加。
+- 用 `edit_text` 把对应 marker 替换为“小块内容 + 原 marker”，实现分块追加。
 - 每次追加仍然不超过 6000 字符和 120 行。
-- `summary.json` 初始内容为 `{}`；子 agent 用 `intellij-idea_replace_text_in_file` 把整个 `{}` 替换为合法 JSON。
+- `summary.json` 初始内容为 `{}`；子 agent 用 `write_file` 把整个 `{}` 替换为合法 JSON。
 
-子 agent 不得调用 `intellij-idea_create_new_file`。如果任一目标文件缺失，子 agent 返回 `BLOCKED` 并列出缺失路径；主 agent 重新运行准备脚本后再派发。只有 IDEA MCP 替换文件内容不可用、输出目录不在 IDEA 项目内或 MCP 返回无法写入时，停止写入并报告失败；禁止使用 shell、本地脚本或临时重定向写报告。
+子 agent 不得创建、重命名、删除或移动输出文件。如果任一目标文件缺失，子 agent 返回 `BLOCKED` 并列出缺失路径；主 agent 重新运行准备脚本后再派发，不允许用 `write_file` 创建缺失输出。只有 AgentBridge MCP 替换文件内容不可用、输出目录不在 IDEA 项目内或 MCP 返回无法写入时，停止写入并报告失败；禁止使用 shell、本地脚本或临时重定向写报告。
 
 只有运行 `prepare_rewrite_review_tasks.py` 准备任务时允许调用 Shell/Bash/PowerShell。调用时必须同时提供中文 `description` 和实际 `command`；禁止只传命令，否则会报 `SchemaError: Missing key: description`。审查过程、报告写入和源码读取不得使用 shell。
 

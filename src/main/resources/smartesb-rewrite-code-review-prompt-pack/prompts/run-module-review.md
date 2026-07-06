@@ -35,7 +35,7 @@
 只有以下情况才能返回 `BLOCKED`：
 
 - task JSON、目标输出文件或必要的 `new_project` 路径不存在。
-- `intellij-idea` MCP 文件编辑工具不可用，导致无法写入报告。
+- `AgentBridge` MCP 文件编辑工具不可用，导致无法写入报告。
 - 目标路径不可写，或预创建输出文件缺失。
 
 以下情况不得返回 `BLOCKED`：
@@ -49,12 +49,12 @@
 
 ## 受控读写与取证规则
 
-- 读取 task JSON 和准备器输出时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 定位模块代码时优先使用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file`。
-- 搜索不到刚生成或刚修改的文件时，先尝试 `intellij-index_ide_sync_files`，再重试一次。
-- 代码和文档定位、读取、取证必须使用 `intellij-index` 和 `intellij-idea` MCP；不得使用其他读取方式。
-- 写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 task JSON 和准备器输出时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
+- 定位模块代码时优先使用 `search_symbols`、`list_project_files`、`search_text`。
+- 搜索不到刚生成或刚修改的文件时，先尝试 `list_project_files`，再重试一次。
+- 代码和文档定位、读取、取证必须使用 `AgentBridge` MCP；不得使用其他读取方式。
+- 写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
+- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件或详细设计。
 
 ## 审查重点

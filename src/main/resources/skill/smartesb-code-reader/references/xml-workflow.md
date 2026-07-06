@@ -341,7 +341,7 @@ Markdown 报告之间的链接必须使用相对路径：
 
 模块 Mermaid 流程图规则：
 
-- 模块子Agent 必须基于 base XML、biz 小流程和 IntelliJ-index MCP 返回的 Java 主流程证据生成模块级 Mermaid 时序图。
+- 模块子Agent 必须基于 base XML、biz 小流程和 AgentBridge MCP 返回的 Java 主流程证据生成模块级 Mermaid 时序图。
 - Mermaid 源码必须是完整图定义，第一行必须是 `sequenceDiagram`，不能只写 participant 或 message 片段。
 - Mermaid 必须采用“生命线 + 调用箭头 + alt/else 条件块”的形式；优先展示入口类/方法、上下文/变量读取、核心处理器、外部调用、异常/返回码处理、输出写回。
 - participant 和消息标签使用短类名、短对象名、短方法名、短变量名、短调用目标或短条件。
@@ -429,22 +429,21 @@ Java 候选通过以下方式匹配：
 
 如果 `.biz` 中某个 `adapter/id` 等于该 `.biz` 自身的 `id`、`name`、`nickName` 或当前 `serviceId`，该 adapter 是自引用占位或默认节点，不进入 `adapter_java_hints`，也不进入 `java_candidates`。`biz_summary.adapters[].self_reference` 会标记这种节点，模块子Agent 不要据此递归分析同一个 biz。
 
-模块子Agent 使用任务 JSON 中的 `base_xml_summary`、`base_xml_candidates`、`biz_summary`、`biz_candidates` 和 `java_candidates` 定位模块，但 Java 代码流程必须由模块子Agent 通过 IntelliJ-index MCP 工具取证后分析。准备脚本不生成 Java 源码切片，避免切片遗漏真实逻辑。
+模块子Agent 使用任务 JSON 中的 `base_xml_summary`、`base_xml_candidates`、`biz_summary`、`biz_candidates` 和 `java_candidates` 定位模块，但 Java 代码流程必须由模块子Agent 通过 AgentBridge MCP 工具取证后分析。准备脚本不生成 Java 源码切片，避免切片遗漏真实逻辑。
 
 Java 分析工具规则：
 
-- 调用 IntelliJ-index MCP 工具时，把用户项目工作目录作为 `project_path`，避免多项目打开时查错项目。
-- 工具名统一使用 `intellij-index_...` 格式。
-- 优先使用 `intellij-index_ide_find_class` 按类名定位 Java 类，例如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
-- 使用 `intellij-index_ide_find_file` 按文件名、通配符或 XML 文件定位候选，例如 `Application.java`、`application*.yml`、`*.xml`。
-- 使用 `intellij-index_ide_read_file` 读取候选文件内容，用于分析 Java 主流程、配置、XML、mapper XML 或其他证据文件。
-- `intellij-index_ide_read_file.file` 必须使用 IntelliJ-index 查找工具返回的 `file` 相对路径原文，不要删掉最前面的模块目录。若 `project_path` 指向父级工作区，例如 `D:/upfs/qianzhi`，而返回路径是 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须完整传 `upfs-cloud-xc/ECIS/src/.../BaseX.java`；传 `ECIS/src/.../BaseX.java` 会找不到文件。
-- 如果 `ide_read_file` 报 `File not found`，先用相同 `project_path` 重新 `ide_find_file`，再把返回的 `file` 字段原样传给 `ide_read_file`；不要自己裁剪、拼接或归一化掉首段目录。
-- 需要一次查找多种关键文件时使用 `intellij-index_ide_find_key_file`，例如同时查找 `Application.java`、`application-*.yml`、关键 mapper XML。
+- AgentBridge MCP 工具名统一使用裸名形式；需要限定项目时，使用当前客户端支持的项目或路径参数，避免多项目打开时查错项目。
+- 优先使用 `search_symbols` 按类名定位 Java 类，例如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
+- 使用 `list_project_files` 按文件名、通配符或 XML 文件定位候选，例如 `Application.java`、`application*.yml`、`*.xml`。
+- 使用 `read_file` 读取候选文件内容，用于分析 Java 主流程、配置、XML、mapper XML 或其他证据文件。
+- `read_file.file` 必须使用 AgentBridge 查找工具返回的 `file` 相对路径原文，不要删掉最前面的模块目录。若返回路径是 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须完整传 `upfs-cloud-xc/ECIS/src/.../BaseX.java`；传 `ECIS/src/.../BaseX.java` 会找不到文件。
+- 如果 `read_file` 报 `File not found`，先用 `list_project_files` 或 `search_text` 重新定位，再把返回的 `file` 字段原样传给 `read_file`；不要自己裁剪、拼接或归一化掉首段目录。
+- 需要一次查找多种关键文件时使用 `search_text`，例如同时查找 `Application.java`、`application-*.yml`、关键 mapper XML。
 - 按命名风格递进查找，不同项目命名可能不同：先查更贴近 `serviceId` 的类，再查常见后缀如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
-- 不要优先用 shell/grep/rg 读取 Java 源码。只有 IntelliJ-index MCP 工具不可用、候选缺失、返回内容不足或需要核对非 Java 文件时，才做最小范围文件读取，并把原因写入 `risks_or_uncertainties`。
+- 不要优先用 shell/grep/rg 读取 Java 源码。只有 AgentBridge MCP 工具不可用、候选缺失、返回内容不足或需要核对非 Java 文件时，才做最小范围文件读取，并把原因写入 `risks_or_uncertainties`。
 
-若 `java_candidates` 有多个候选，模块子Agent 必须结合 base XML、biz 小流程、类名、包名和 IntelliJ-index MCP 返回的源码证据判断；无法唯一确定时，在中文报告中说明歧义。
+若 `java_candidates` 有多个候选，模块子Agent 必须结合 base XML、biz 小流程、类名、包名和 AgentBridge MCP 返回的源码证据判断；无法唯一确定时，在中文报告中说明歧义。
 
 ## 歧义处理策略
 

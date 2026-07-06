@@ -23,7 +23,7 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 
 ## 写入规则
 
-- 必须立即调用可用的文件读取/写入工具完成最终报告写入，不要只回复计划或摘要。
+- 必须立即调用 `AgentBridge` MCP 工具完成最终报告写入：用 `read_file` 读取 `synthesis_inputs_json`，用 `edit_text` 或 `write_file` 写入最终报告；不要只回复计划或摘要。
 - 总报告单次写入不超过 6000 字符、120 行；排名表、个人报告链接表、未完成个人报告表较长时分块写。
 - 最终报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `synthesis_inputs.final_report_placeholders` 中列出的占位符。
 - 写入完成后，最终报告不得残留 `{{...}}` 占位符。
@@ -42,9 +42,9 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 
 ## 受控读写规则
 
-- 读取 `synthesis_inputs_json` 时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
-- 写入最终报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `synthesis_inputs_json` 时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
+- 写入最终报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
+- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入最终报告、输入 JSON 或个人报告。
 
 ## Markdown 表格安全

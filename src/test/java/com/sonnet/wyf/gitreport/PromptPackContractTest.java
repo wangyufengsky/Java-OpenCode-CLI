@@ -33,24 +33,22 @@ class PromptPackContractTest {
         String combined = worker + "\n" + synthesis;
 
         assertThat(combined).contains(
-                "intellij-idea_read_file",
-                "intellij-idea_get_file_text_by_path",
-                "intellij-idea_replace_text_in_file",
-                "intellij-idea_replace_text_undoable",
-                "intellij-index_ide_find_references",
-                "intellij-index_ide_call_hierarchy",
-                "intellij-index_ide_type_hierarchy",
-                "intellij-index_ide_find_implementations"
+                "AgentBridge",
+                "read_file",
+                "edit_text",
+                "write_file",
+                "search_text",
+                "search_symbols"
         );
         assertThat(worker).contains(
-                "读取 `detail_json` 时，必须使用 `intellij-idea` MCP 文件读取工具",
-                "写入个人报告和质量摘要时，必须使用 `intellij-idea` MCP 文件编辑工具",
+                "读取 `detail_json` 时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "写入个人报告和质量摘要时，必须使用 `AgentBridge` MCP 文件编辑工具",
                 "必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`",
                 "质量分析只能基于 `detail.changed_regions`",
                 "不得打开或通读 `detail.top_files[].path` 对应的完整文件",
-                "代码取证必须使用 `intellij-index` MCP",
+                "代码取证必须使用 `AgentBridge` MCP",
                 "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
-                "`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`",
                 "将 `|` 转义为 `\\|`",
@@ -58,13 +56,15 @@ class PromptPackContractTest {
         );
         assertThat(synthesis).contains(
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
-                "读取 `synthesis_inputs_json` 时，必须使用 `intellij-idea` MCP 文件读取工具",
-                "写入最终报告时，必须使用 `intellij-idea` MCP 文件编辑工具",
-                "`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取 `synthesis_inputs_json` 时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "写入最终报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
         );
+        assertThat(combined).doesNotContain("intellij-index", "intellij-idea");
+        assertThat(combined).doesNotContain("可用的文件读取/写入工具", "可用定位工具");
         assertThat(combined).doesNotContain("OpenCode 原生文件", "OpenCode `explore`", "pathInProject", "file_path");
         assertThat(worker).doesNotContain("inspect_top_files");
         assertThat(worker).doesNotContain("替换 `detail.output.report_marker`", "保留 marker", "移除 marker");
@@ -83,15 +83,15 @@ class PromptPackContractTest {
         String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-index.md"));
 
         assertThat(worker + "\n" + module).contains(
-                "读取 task JSON 和准备脚本输出时，必须使用 `intellij-idea` MCP 文件读取工具",
-                "写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具",
-                "`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取 task JSON 和准备脚本输出时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "只能替换 task JSON 中 `output_placeholders` 列出的占位符",
                 "写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符"
         );
         assertThat(rerun + "\n" + rerunModule).contains(
-                "写文件必须使用 `intellij-idea` MCP",
+                "写文件必须使用 `AgentBridge` MCP",
                 "只能替换 `output_placeholders` 中列出的占位符"
         );
         assertThat(worker + "\n" + rerun + "\n" + module + "\n" + rerunModule + "\n" + synthesis).contains(
@@ -107,14 +107,14 @@ class PromptPackContractTest {
                 "证据不足时必须写 `summary_json`，`status` 设为 `partial`"
         );
         assertThat(synthesis).contains(
-                "读取汇总输入和审查项摘要时，必须使用 `intellij-idea` MCP 文件读取工具",
-                "写入 `index.md` 和 `summary.md` 时，必须使用 `intellij-idea` MCP 文件编辑工具",
-                "`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取汇总输入和审查项摘要时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "写入 `index.md` 和 `summary.md` 时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
                 "只能替换 `index_inputs.output_placeholders` 中列出的占位符"
         );
-        assertThat(worker).contains("`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`");
-        assertThat(rerun).contains("写文件必须使用 `intellij-idea` MCP");
-        assertThat(synthesis).contains("`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`");
+        assertThat(worker).contains("`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`");
+        assertThat(rerun).contains("写文件必须使用 `AgentBridge` MCP");
+        assertThat(synthesis).contains("`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`");
         assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
@@ -124,9 +124,11 @@ class PromptPackContractTest {
                 "可以读取 old-8583-doc 中当前交易相关的老代码详细设计片段",
                 "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据",
                 "只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段",
-                "代码和文档定位、读取、取证必须使用 `intellij-index` 和 `intellij-idea` MCP",
+                "代码和文档定位、读取、取证必须使用 `AgentBridge` MCP",
                 "`old_code_paths` 必须写空数组"
         );
+        assertThat(combined).doesNotContain("intellij-index", "intellij-idea");
+        assertThat(combined).doesNotContain("文件创建工具", "受控文件编辑工具", "projectPath");
         assertThat(combined).doesNotContain(
                 "OpenCode 原生文件",
                 "OpenCode `explore`",
@@ -154,12 +156,13 @@ class PromptPackContractTest {
         String combined = module + "\n" + transaction + "\n" + synthesis;
 
         assertThat(combined).contains(
-                "读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `intellij-idea` MCP 文件读取工具",
-                "写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具",
-                "`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `AgentBridge` MCP 文件读取工具",
+                "写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md"
         );
+        assertThat(combined).doesNotContain("intellij-index", "intellij-idea");
         assertThat(module).contains("SmartESB code-reader 模块阅读任务", "review_type: module");
         assertThat(transaction).contains("SmartESB code-reader 交易阅读任务", "review_type: transaction");
         assertThat(synthesis).contains("index_inputs_json");

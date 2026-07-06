@@ -70,15 +70,16 @@ class WeeklyOpenCodeReviewRunnerTest {
         String prompt = Files.readString(taskRunner.spec.promptFile());
         assertThat(prompt)
                 .contains("review unit", "模块/作者", "多文件", "多 commit")
-                .contains("读取 input_json 时，必须使用 `intellij-idea` MCP 文件读取工具")
-                .contains("写入 summary_json 和 review_md 时，必须使用 `intellij-idea` MCP 文件编辑工具")
-                .contains("`intellij-idea` MCP 读写工具不可用时必须返回 BLOCKED")
+                .contains("读取 input_json 时，必须使用 `AgentBridge` MCP 文件读取工具")
+                .contains("写入 summary_json 和 review_md 时，必须使用 `AgentBridge` MCP 文件编辑工具")
+                .contains("`AgentBridge` MCP 读写工具不可用时必须返回 BLOCKED")
                 .contains("reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id")
                 .contains("不得只挑重点审查，不得因为文件多而跳过低风险 region")
                 .contains("finding 必须绑定 region_id、author_key、commit、file、line_start、line_end")
                 .contains("code-review.md 必须按模块/文件分节")
                 .contains("unit_id: review-unit-001")
-                .doesNotContain("OpenCode 原生文件");
+                .doesNotContain("OpenCode 原生文件")
+                .doesNotContain("intellij-index", "intellij-idea");
     }
 
     @Test

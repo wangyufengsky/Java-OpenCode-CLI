@@ -330,20 +330,21 @@ class PromptContractTest(unittest.TestCase):
         skill_dir = SCRIPT_PATH.parents[1]
         workflow_file = "workflows/mcp-tool-contract.md"
         required_terms = [
-            "OpenCode MCP 工具命名规范",
-            "intellij-idea_read_file",
-            "intellij-idea_get_file_text_by_path",
-            "intellij-index_ide_find_references",
-            "intellij-index_ide_call_hierarchy",
-            "intellij-idea_replace_text_in_file",
-            "intellij-idea_replace_text_undoable",
+            "AgentBridge MCP 工具命名规范",
+            "AgentBridge",
+            "read_file",
+            "edit_text",
+            "write_file",
+            "search_text",
+            "search_symbols",
+            "list_project_files",
         ]
 
         workflow_content = (skill_dir / workflow_file).read_text(encoding="utf-8")
         for term in required_terms:
             self.assertIn(term, workflow_content, workflow_file)
-        self.assertNotIn("intellij-index_ide_find_key_file", workflow_content, workflow_file)
-        self.assertNotIn("intellij-index_ide_read_file", workflow_content, workflow_file)
+        self.assertNotIn("intellij-index", workflow_content, workflow_file)
+        self.assertNotIn("intellij-idea", workflow_content, workflow_file)
         self.assertNotIn("mcp__intellij", workflow_content, workflow_file)
 
         prompt_required_terms = [
@@ -352,9 +353,9 @@ class PromptContractTest(unittest.TestCase):
             "以 workflow 规则为准",
         ]
         forbidden_prompt_terms = [
-            "OpenCode MCP 工具命名规范",
-            "intellij-idea_",
-            "intellij-index_",
+            "AgentBridge MCP 工具命名规范",
+            "intellij-idea",
+            "intellij-index",
             "intellij-db",
             "<server-name>_<tool-name>",
         ]
@@ -370,8 +371,8 @@ class PromptContractTest(unittest.TestCase):
 
         skill_md = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("workflows/mcp-tool-contract.md", skill_md)
-        self.assertNotIn("intellij-idea_read_file", skill_md)
-        self.assertNotIn("intellij-index_ide_find_references", skill_md)
+        self.assertNotIn("read_file", skill_md)
+        self.assertNotIn("search_symbols", skill_md)
 
     def test_quality_rules_reward_public_reused_code_with_risk_balance(self):
         skill_dir = SCRIPT_PATH.parents[1]

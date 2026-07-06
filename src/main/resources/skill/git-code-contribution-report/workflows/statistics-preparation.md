@@ -67,7 +67,7 @@ Dockerfile Dockerfile.* Makefile makefile GNUmakefile Jenkinsfile Jenkinsfile.*
 
 最终计入条件必须同时满足：文件路径命中 `metadata.include`，且不命中 `metadata.exclude`。Markdown、Excel、Word、PPT、PDF、普通文本、媒体和归档类文件不计入任何统计和分数。只修改非统计文件的提交不计入 `commit_count`；混合提交只统计符合计入条件的开发文件。
 
-`--out` 必须使用 Windows 绝对路径，并确保该路径能被 IDEA MCP 读取和写入，例如：
+`--out` 必须使用 Windows 绝对路径，并确保该路径能被 AgentBridge MCP 读取和写入，例如：
 
 ```powershell
 D:\review-output\git-code-contribution-20260612

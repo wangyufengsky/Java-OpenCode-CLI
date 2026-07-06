@@ -81,7 +81,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         required=True,
-        help="Windows absolute output review workspace directory emitted into task JSON and used by IDEA MCP.",
+        help="Windows absolute output review workspace directory emitted into task JSON and used by AgentBridge MCP.",
     )
     parser.add_argument(
         "--local-out",
@@ -112,7 +112,7 @@ def main() -> int:
     if not is_windows_absolute_path(args.out):
         parser.error(
             "--out must be a Windows absolute path such as D:\\review-output\\case1. "
-            "This path is written into task JSON and must be writable by IDEA MCP on Windows."
+            "This path is written into task JSON and must be writable by AgentBridge MCP on Windows."
         )
     if os.name != "nt" and not args.local_out:
         parser.error("--local-out is required when running this Windows-path workflow outside Windows.")
@@ -204,19 +204,20 @@ def main() -> int:
                 "prompt": str(skill_dir / "prompts" / "run-transaction-review.md"),
                 "transaction_template": str(skill_dir / "templates" / "transaction-review.md"),
                 "summary_schema": path_string(summary_schema),
-                "preferred_writer": "idea_mcp",
-                "idea_mcp_write_tools": [
-                    "intellij-idea_replace_text_undoable",
-                    "intellij-idea_replace_text_in_file",
+                "preferred_writer": "agentbridge",
+                "agentbridge_write_tools": [
+                    "edit_text",
+                    "write_file",
                 ],
-                "index_mcp_code_tools": [
-                    "intellij-index_ide_find_class",
-                    "intellij-index_ide_find_file",
-                    "intellij-index_ide_find_key_file",
-                    "intellij-index_ide_read_file",
+                "agentbridge_code_tools": [
+                    "search_symbols",
+                    "list_project_files",
+                    "search_text",
+                    "read_file",
                 ],
-                "index_mcp_sync_tools": [
-                    "intellij-index_ide_sync_files",
+                "agentbridge_refresh_tools": [
+                    "list_project_files",
+                    "list_directory_tree",
                 ],
                 "db_mcp_tool_prefix": "intellij-db_*",
             },
@@ -235,14 +236,14 @@ def main() -> int:
             },
             "output_markers": TRANSACTION_OUTPUT_MARKERS,
             "rules": {
-                "code_lookup": "必须使用 intellij-index MCP 定位和读取代码；MCP 不可用时标记未验证或停止审查，禁止使用 shell。",
-                "index_sync": "搜索不到刚生成或刚修改的文件时，先尝试 intellij-index_ide_sync_files，再重试一次。",
+                "code_lookup": "必须使用 AgentBridge MCP 定位和读取代码；MCP 不可用时标记未验证或停止审查，禁止使用 shell。",
+                "agentbridge_refresh": "搜索不到刚生成或刚修改的文件时，先用 list_project_files 或 list_directory_tree 刷新项目文件视图，再重试一次。",
                 "db_lookup": "需要数据库/SQL 证据时，优先使用当前客户端暴露的 intellij-db_* 工具；未暴露时记录未验证，不用 shell 强行连库。",
                 "scope": "只审查当前交易。",
                 "protocol_focus": "重点审查 8583 到 JSON 的字段映射和处理等价性。",
                 "output_language": "所有 Markdown 报告必须全中文；代码标识符、路径、协议域号和 JSON path 可保留原文。",
                 "precreated_outputs": "准备脚本已预创建 review.md、mapping-matrix.md、sections/*.md 和 summary.json；子 agent 只能替换这些已存在文件的内容，禁止创建新文件。",
-                "writer_preference": "必须使用 intellij-idea_replace_text_undoable、intellij-idea_replace_text_in_file 写入已存在文件；子 agent 禁止调用 intellij-idea_create_new_file。IDEA MCP 不可用或输出路径不可写时停止并报告失败，禁止使用 shell。",
+                "writer_preference": "必须使用 edit_text 或 write_file 写入已存在文件；子 agent 禁止创建准备脚本未预创建的输出文件。AgentBridge MCP 不可用或输出路径不可写时停止并报告失败，禁止使用 shell。",
                 "markdown_write": "Markdown 必须分块写入，不要一次生成很大的 MD 文件。",
                 "markdown_max_chars_per_write": 6000,
                 "markdown_max_lines_per_write": 120,

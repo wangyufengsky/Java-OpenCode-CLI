@@ -7,7 +7,7 @@ metadata:
   python: "3.11"
   domain: git
   report_language: chinese
-tools: intellij-idea,intellij-index
+tools: AgentBridge,AgentBridge
 ---
 
 # Git Code Contribution Report

@@ -7,13 +7,13 @@
 - `review_type: module`
 - 读取 task JSON 中的 `serviceId`、`base_xml_candidates`、`biz_candidates`、`java_candidates`、`used_by_transactions`、`document_path`、`summary_path`。
 - 可以读取 task JSON 指定的 XML、.biz 和 Java 候选文件。
-- 读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
 - 不读取或执行任何外部 skill、SKILL.md、旧脚本或批处理任务。
 
 ## 写入契约
 
-- 写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`。
+- 写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
+- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`。
 - 只替换预创建 `analysis.md` 中的 `{{MODULE_ANALYSIS}}`，不要删除标题。
 

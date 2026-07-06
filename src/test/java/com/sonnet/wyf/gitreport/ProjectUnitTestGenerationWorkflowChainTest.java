@@ -54,10 +54,11 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("project-unit-test-generation 单元测试批次")
                 .contains("batch_input_json:")
                 .contains("只允许创建或修改目标项目 src/test/** 下的测试文件")
-                .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `intellij-idea` MCP 文件读取工具")
-                .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `intellij-idea` MCP 文件编辑工具")
-                .contains("`intellij-idea` MCP 读写工具不可用时必须写 `blocked` 或返回 `BLOCKED`")
-                .doesNotContain("OpenCode 原生文件");
+                .contains("读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具")
+                .contains("创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具")
+                .contains("`AgentBridge` MCP 读写工具不可用时必须写 `blocked` 或返回 `BLOCKED`")
+                .doesNotContain("OpenCode 原生文件")
+                .doesNotContain("intellij-index", "intellij-idea");
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
         assertThat(properties.getPaths().getOut().resolve("verification.json")).exists();
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()

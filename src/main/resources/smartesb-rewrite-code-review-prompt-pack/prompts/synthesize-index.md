@@ -13,14 +13,14 @@
 
 ## 受控读写规则
 
-- 读取汇总输入和审查项摘要时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+- 读取汇总输入和审查项摘要时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
 - 读取交易/模块审查 session 摘要时只读取 `<out>/summary.json`、`<out>/index_inputs.json`、`<out>/reports/*/summary.json` 允许的文件。
 - `index.md` 和 `summary.md` 已由准备脚本预创建为完整模板；本汇总 session 使用 `index_inputs.output.index_md`、`index_inputs.output.summary_md` 和 `index_inputs.output_placeholders` 替换占位符，不创建交易级或模块级输出文件。
-- 写入 `index.md` 和 `summary.md` 时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
-- `intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 写入 `index.md` 和 `summary.md` 时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
+- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 - 只能替换 `index_inputs.output_placeholders` 中列出的占位符；写入完成后，`index.md` 和 `summary.md` 不得残留 `{{...}}` 占位符。
-- 搜索不到刚生成的报告或索引疑似过期时，先尝试 `intellij-index_ide_sync_files`，再重试读取。
-- `intellij-idea` MCP 读写工具不可用或路径不可写时，停止汇总写入并向用户报告失败；禁止使用 shell、本地脚本或临时重定向。
+- 搜索不到刚生成的报告或项目文件视图疑似过期时，先尝试 `list_project_files`，再重试读取。
+- `AgentBridge` MCP 读写工具不可用或路径不可写时，停止汇总写入并向用户报告失败；禁止使用 shell、本地脚本或临时重定向。
 - 汇总阶段不得用 shell 扫描源码、不得重新做交易级或模块级代码审查。
 - 汇总阶段不读取或检索 old_project 下的老代码源码，也不重新读取映射文档、old-8583-doc 或重构详细设计；只使用 summary 输入和审查项摘要。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入汇总输入、审查项摘要、`index.md` 或 `summary.md`。

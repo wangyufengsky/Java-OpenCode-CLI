@@ -11,8 +11,8 @@
 
 - 读取子 agent 摘要时只读取 `<out>\summary.json`、`<out>\index_inputs.json`、`<out>\reports\*\summary.json` 允许的文件。
 - `index.md` 和 `summary.md` 已由准备脚本预创建；主 agent 使用 `index_inputs.output.index_md`、`index_inputs.output.summary_md` 和 `index_inputs.output_markers` 写入或覆盖内容，不把创建文件动作交给子 agent。
-- 搜索不到刚生成的报告或索引疑似过期时，先尝试 `intellij-index_ide_sync_files`，再重试读取。
-- IDEA MCP 不可用或路径不可写时，停止汇总写入并向用户报告失败；禁止使用 shell、本地脚本或临时重定向。
+- 搜索不到刚生成的报告或项目文件视图疑似过期时，先尝试 `list_project_files`，再重试读取。
+- AgentBridge MCP 不可用或路径不可写时，停止汇总写入并向用户报告失败；禁止使用 shell、本地脚本或临时重定向。
 - 汇总阶段不得用 shell 扫描源码、不得重新做交易级代码审查。
 - 汇总阶段必须按 `index_inputs.schemas.transaction_summary` 校验每个交易 `summary.json`，不得跳过 schema 校验。
 

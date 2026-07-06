@@ -10,19 +10,19 @@ Skill目录：{skill_dir}
 2. 使用任务中的 base_xml_summary、base_xml_candidates、biz_summary、biz_candidates、java_candidates 定位模块。
 3. 如果没有直接匹配到模块 Java，但存在同名或同 id 的 .biz 文件，必须把该 .biz 视为该 base 模块的小流程配置；.biz 中每个 adapter 的 id 通常对应一个 base Java 文件。
 4. 如果 .biz 中某个 adapter/id 等于该 .biz 自身的 id、name、nickName 或当前 serviceId，这是自引用占位或默认节点，不要把它当作 Java 候选，也不要因此递归分析同一个 biz。
-5. 分析 Java 时必须使用 IntelliJ-index MCP 工具取证，工具名使用 `intellij-index_...` 格式，调用工具时把工作目录 `{workspace}` 作为 `project_path`。优先用 `intellij-index_ide_find_class` 按类名定位候选，用 `intellij-index_ide_find_file` 按文件名、通配符或 XML 文件定位候选，再用 `intellij-index_ide_read_file` 读取候选文件内容；需要一次查找多种关键文件时使用 `intellij-index_ide_find_key_file`。
-6. 调用 `intellij-index_ide_read_file` 时，`file` 必须使用 IntelliJ-index 工具返回的相对路径原文，不能删掉最前面的模块目录。例如 `project_path` 是 `D:/upfs/qianzhi` 且工具返回 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须传 `file="upfs-cloud-xc/ECIS/src/.../BaseX.java"`，不能传 `ECIS/src/.../BaseX.java`。如果第一次读取失败，先用同一个 `project_path` 重新 `ide_find_file`，再把返回的 `file` 字段原样传给 `ide_read_file`。
-7. 不要依赖准备脚本生成源码切片；不要优先用 shell/grep/rg 读取 Java 源码。只有 IntelliJ-index MCP 工具不可用、候选缺失或返回内容不足时，才把原因写入风险，并用最小范围文件读取补证。
-8. 如果有多个 Java 候选，结合 base XML、biz 小流程、类名、包名和 IntelliJ-index MCP 返回的源码证据判断；无法唯一确定时，在文档中说明歧义。
+5. 分析 Java 时必须使用 AgentBridge MCP 工具取证，工具名使用裸名形式。需要限定项目时，使用当前客户端支持的项目或路径参数。优先用 `search_symbols` 按类名定位候选，用 `list_project_files` 按文件名、通配符或 XML 文件定位候选，再用 `read_file` 读取候选文件内容；需要一次查找多种关键文件时使用 `search_text`。
+6. 调用 `read_file` 时，`file` 必须使用 AgentBridge 工具返回的相对路径原文，不能删掉最前面的模块目录。例如工具返回 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须传 `file="upfs-cloud-xc/ECIS/src/.../BaseX.java"`，不能传 `ECIS/src/.../BaseX.java`。如果第一次读取失败，先用 `list_project_files` 或 `search_text` 重新定位，再把返回的 `file` 字段原样传给 `read_file`。
+7. 不要依赖准备脚本生成源码切片；不要优先用 shell/grep/rg 读取 Java 源码。只有 AgentBridge MCP 工具不可用、候选缺失或返回内容不足时，才把原因写入风险，并用最小范围文件读取补证。
+8. 如果有多个 Java 候选，结合 base XML、biz 小流程、类名、包名和 AgentBridge MCP 返回的源码证据判断；无法唯一确定时，在文档中说明歧义。
 9. 必须按 {skill_dir}/templates/module.md 的完整结构写该任务 JSON 中的 document_path；不能只写概述、流程图和总结。
 10. 模块文档必须包含：输入证据、定位与消歧、base XML 摘要、biz 小流程、入参、上下文与变量读写、Java 主流程表、详细说明、外部依赖、异常/返回码/降级、输出与副作用、Mermaid 时序图、被交易使用、风险与不确定项、总结。
 11. 模板中的每个占位符都必须填充；证据不足时写“未确认”或“未从当前证据确认”，不要留下 `{placeholder}`。
-12. Java 主流程必须基于 IntelliJ-index MCP 返回的源码证据。每个关键步骤写明方法/位置、操作、关键读写、分支条件和证据；不要只写泛泛流程描述。
+12. Java 主流程必须基于 AgentBridge MCP 返回的源码证据。每个关键步骤写明方法/位置、操作、关键读写、分支条件和证据；不要只写泛泛流程描述。
 13. 变量读写必须覆盖 map/header/body/context/request/response/DTO/BO/VO/entity 等能从源码确认的读写；无法确认类型或结构时写明不确定原因。
 14. 外部依赖必须覆盖能确认的数据库/Mapper/DAO、远程服务、ESB/base 调用、缓存、文件、消息、工具类和配置读取；没有发现时明确写“未确认外部依赖”。
 15. 异常、返回码与降级必须覆盖 catch/throw、错误码设置、空值处理、默认值、重试/跳过、forceExecute 或类似强制执行语义；没有发现时明确写“未确认特殊异常处理”。
 16. 输出与副作用必须覆盖返回对象、上下文写回、报文域写入、数据库写入、日志/审计/文件/消息副作用；没有发现时明确写“未确认输出副作用”。
-17. 必须生成模块级 Mermaid 时序图，写入“流程图”章节。流程图基于 base XML、biz 小流程和 IntelliJ-index MCP 返回的 Java 主流程证据生成；第一行必须是 `sequenceDiagram`，要参照“生命线 + 调用箭头 + alt/else 条件块”的形式，优先展示入口类/方法、上下文、核心处理器、外部依赖和返回结果。
+17. 必须生成模块级 Mermaid 时序图，写入“流程图”章节。流程图基于 base XML、biz 小流程和 AgentBridge MCP 返回的 Java 主流程证据生成；第一行必须是 `sequenceDiagram`，要参照“生命线 + 调用箭头 + alt/else 条件块”的形式，优先展示入口类/方法、上下文、核心处理器、外部依赖和返回结果。
 18. 模块 Mermaid participant 和消息标签必须短小：participant 使用短类名、短对象名或职责名；消息写短方法名、短变量名、短调用目标或短条件；异常/返回码/分支使用 `alt`/`else`/`opt`。调用只使用普通 `->>`，返回只使用普通 `-->>`；禁止使用 `->>+`、`-->>-`、`activate`、`deactivate` 等 activation 语法，避免分支内重复 deactivate 导致 Mermaid 渲染失败。禁止把完整 Java 包名、完整方法体、完整路径或长表达式塞进 Mermaid，完整细节写在“Java 主流程”和“详细说明”中。
 19. 同时写一个小型 summary_path，字段必须包含：serviceId、document_link、summary、inputs、variables、main_steps、outputs、external_calls、error_handling、used_by_transactions、risks_or_uncertainties。
 

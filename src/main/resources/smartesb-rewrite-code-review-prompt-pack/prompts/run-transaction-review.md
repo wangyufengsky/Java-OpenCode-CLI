@@ -32,7 +32,7 @@
 - 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
-- 代码和文档定位、读取、取证必须使用 `intellij-index` 和 `intellij-idea` MCP；不得使用其他读取方式。
+- 代码和文档定位、读取、取证必须使用 `AgentBridge` MCP；不得使用其他读取方式。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -45,13 +45,13 @@
 
 ## 受控读写与取证规则
 
-读取 task JSON 和准备脚本输出时，必须使用 `intellij-idea` MCP 文件读取工具：`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path`。
+读取 task JSON 和准备脚本输出时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
 
-分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，必须使用 `intellij-index` 和 `intellij-idea` MCP：用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file`、`intellij-index_ide_search_text` 定位候选，再用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取当前交易相关片段；不要读取完整文档、完整源码文件或大段摘录。
+分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，必须使用 `AgentBridge` MCP：用 `search_symbols`、`list_project_files`、`search_text` 定位候选，再用 `read_file` 读取当前交易相关片段；不要读取完整文档、完整源码文件或大段摘录。
 
-写入 Markdown 和 JSON 报告时，必须使用 `intellij-idea` MCP 文件编辑工具：`intellij-idea_replace_text_in_file` 或 `intellij-idea_replace_text_undoable`。
+写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
 
-`intellij-idea` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
 
 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、映射文档或详细设计。
 
@@ -59,14 +59,14 @@
 
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
-| 定位 new_project 新代码 | `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` | 同步索引后重试；仍失败再记录到 `unverified`。 |
-| 分析 new_project 新代码 | `intellij-index_*` 定位，`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 只读取当前交易相关片段；不要把完整源码拉入主上下文。 |
-| 分析映射文档、old-8583-doc 和重构详细设计 | `intellij-index_*` 定位，`intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取 | 只读取当前交易相关片段；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
-| 刷新索引 | `intellij-index_ide_sync_files` | 搜索不到新增文件或明显索引过期时先同步，再重试一次。 |
-| 写 Markdown/JSON 报告 | `intellij-idea_replace_text_undoable`、`intellij-idea_replace_text_in_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
+| 定位 new_project 新代码 | `search_symbols`、`list_project_files`、`search_text` | 搜索不到时用 `list_directory_tree` 刷新项目文件视图后重试；仍失败再记录到 `unverified`。 |
+| 分析 new_project 新代码 | `search_symbols`、`list_project_files`、`search_text` 定位，`read_file` 读取 | 只读取当前交易相关片段；不要把完整源码拉入主上下文。 |
+| 分析映射文档、old-8583-doc 和重构详细设计 | `list_project_files`、`search_text` 定位，`read_file` 读取 | 只读取当前交易相关片段；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
+| 刷新项目文件视图 | `list_project_files`、`list_directory_tree` | 搜索不到新增文件或文件视图疑似过期时先刷新，再重试一次。 |
+| 写 Markdown/JSON 报告 | `edit_text`、`write_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
 
-禁止把源码读取、报告写入、索引同步、数据库证据获取交给 shell。
+禁止把源码读取、报告写入、项目文件视图刷新、数据库证据获取交给 shell。
 
 ## Markdown 写入规则
 
@@ -74,12 +74,12 @@
 
 - 每次写入不超过 `rules.markdown_max_chars_per_write` 字符，默认 6000。
 - 每次写入不超过 `rules.markdown_max_lines_per_write` 行，默认 120。
-- 必须使用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file` 写入已存在文件，不要调用 shell。
+- 必须使用 `edit_text` 或 `write_file` 写入已存在文件，不要调用 shell。
 
 ### 受控文件写入方式
 
 1. 先确认目标输出文件已经存在：`output.review_md`、`output.matrix_md`、`output.findings_md`、`output.code_chains_md`、`output.protocol_review_md`、`output.behavior_review_md`、`output.verification_md`、`output.code_standard_md`、`output.summary_json`。
-2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要调用文件创建工具，不要用 shell 创建。
+2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要用 `write_file` 创建缺失输出，不要用 shell 创建。
 3. 每个 Markdown 文件初始内容必须是准备器写入的完整模板，并包含 task JSON 中 `output_placeholders` 列出的占位符。不要猜占位符，不要新增占位符：
 
 - `output.review_md` 只替换 `output_placeholders.review_md`
@@ -97,42 +97,42 @@
 {{FINDINGS_DETAIL}}
 ```
 
-4. 写入内容时，用 `intellij-idea_replace_text_undoable` 或 `intellij-idea_replace_text_in_file` 替换对应文件的 exact placeholder：
+4. 写入内容时，用 `edit_text` 或 `write_file` 替换对应文件的 exact placeholder：
 
 ```text
 oldText: "<output_placeholders 中该文件的 placeholder>"
 newText: "<小块中文内容>"
 ```
 
-5. `summary_json` 初始内容为 `{}`，用受控文件编辑工具将整个 `{}` 替换为合法 JSON。
-6. 使用 `intellij-idea` MCP 写入时，`projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
+5. `summary_json` 初始内容为 `{}`，用 `write_file` 将整个 `{}` 替换为合法 JSON。
+6. 使用 `AgentBridge` MCP 写入时，优先使用 task JSON 中的输出绝对路径或 AgentBridge 返回的 `file` 原文；需要限定项目时，使用当前 AgentBridge 客户端支持的项目或路径参数。仍失败时停止写入并报告失败。
 7. 写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符；发现残留必须立即继续替换或返回 `BLOCKED`。
 
 ### 写入失败处理
 
-`intellij-idea` MCP 读写工具不可用、目标路径不可写或工具返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
+`AgentBridge` MCP 读写工具不可用、目标路径不可写或工具返回无法替换时，不要使用 shell、本地脚本或临时重定向写报告。能够写 `summary_json` 时将状态设为 `failed` 或 `partial` 并说明原因；无法写任何文件时直接向用户报告失败。
 
 如果一个章节超过限制，按 finding、表格行分组、调用链阶段或协议域分组拆分。不要把完整报告、完整矩阵或大段代码一次性写入一个 heredoc。
 
 ## Shell 工具禁止规则
 
-交易 session 不允许使用 shell、bash、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 做源码读取、报告写入、文件创建、索引同步或数据库取证。遇到受控读写工具或 MCP 不可用时，按“写入失败处理”或 `unverified` 规则处理。
+交易 session 不允许使用 shell、bash、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 做源码读取、报告写入、文件创建、项目文件视图刷新或数据库取证。遇到受控读写工具或 MCP 不可用时，按“写入失败处理”或 `unverified` 规则处理。
 
 ## 审查顺序
 
-以下每一步默认按“`intellij-index` 定位/读取代码，受控文件编辑工具写报告，`intellij-db` 取数据库证据”的顺序执行；受控工具不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
+以下每一步默认按“`AgentBridge` 的 `search_symbols`、`list_project_files`、`search_text` 定位，`read_file` 读取，`edit_text` 或 `write_file` 写报告，`intellij-db` 取数据库证据”的顺序执行；受控工具不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
 
-1. 用 `intellij-index_ide_find_class`、`intellij-index_ide_find_file`、`intellij-index_ide_find_key_file` 在 `new_project` 中定位重构交易代码。
-   - 优先 `intellij-index_ide_find_class` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
-   - 用 `intellij-index_ide_find_file` 按文件名、通配符、XML、Mapper、配置文件定位候选。
-   - 对候选文件内容用 `intellij-idea_read_file` 或 `intellij-idea_get_file_text_by_path` 读取当前交易相关片段。
-   - 需要一次查找多类关键文件时，用 `intellij-index_ide_find_key_file`。
+1. 用 `search_symbols`、`list_project_files`、`search_text` 在 `new_project` 中定位重构交易代码。
+   - 优先 `search_symbols` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
+   - 用 `list_project_files` 按文件名、通配符、XML、Mapper、配置文件定位候选。
+   - 对候选文件内容用 `read_file` 读取当前交易相关片段。
+   - 需要一次查找多类关键文件时，用 `search_text`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
 2. 只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段：
    - `documents.mapping_8583_to_json`
    - `documents.old_8583_doc`
    - `documents.reconstructed_design`
-   - 文档分析用 `intellij-index` 和 `intellij-idea` MCP 读取当前交易、8583 域、JSON path、类名相关片段。
+   - 文档分析用 `list_project_files`、`search_text` 定位当前交易、8583 域、JSON path、类名相关片段，再用 `read_file` 读取。
 3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码源码。
 4. 从映射文档、old-8583-doc、重构详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
 5. 根据 new_project 新代码、映射文档、old-8583-doc、重构详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取 old_project 源码补齐。
@@ -248,4 +248,4 @@ newText: "<小块中文内容>"
 `old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码源码。
 `documents_checked` 只能填写实际读取过的 `mapping_8583_to_json`、`old_8583_doc` 和 `reconstructed_design` 路径。
 
-如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 `intellij-idea` MCP 覆盖修正，不要把不完整摘要留给汇总阶段。
+如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 `write_file` 覆盖修正，不要把不完整摘要留给汇总阶段。

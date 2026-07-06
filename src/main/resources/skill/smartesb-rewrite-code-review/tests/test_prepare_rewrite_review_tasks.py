@@ -131,7 +131,11 @@ class PrepareRewriteReviewTasksTest(unittest.TestCase):
 
             self.assertEqual(markers["findings_md"], "<!-- OPENCODE_APPEND:01-findings -->")
             self.assertEqual(markers["review_md"], "<!-- OPENCODE_APPEND:review -->")
-            self.assertNotIn("intellij-idea_create_new_file", task["skill"]["idea_mcp_write_tools"])
+            self.assertIn("edit_text", task["skill"]["agentbridge_write_tools"])
+            self.assertIn("write_file", task["skill"]["agentbridge_write_tools"])
+            self.assertNotIn("create_new_file", json.dumps(task["skill"]))
+            self.assertNotIn("intellij-idea", json.dumps(task["skill"]))
+            self.assertNotIn("intellij-index", json.dumps(task["skill"]))
 
             for key, marker in markers.items():
                 if not key.endswith("_md"):
@@ -157,6 +161,26 @@ class PrepareRewriteReviewTasksTest(unittest.TestCase):
 
         self.assertNotIn("空报告目录结构", text)
         self.assertNotIn("写完整报告到 `reports\\<transaction>\\review.md`", text)
+
+    def test_skill_docs_use_current_agentbridge_contract_language(self) -> None:
+        files = [
+            SKILL_MD,
+            SKILL_DIR / "prompts" / "rerun-single-transaction.md",
+            SKILL_DIR / "prompts" / "run-transaction-review.md",
+            SKILL_DIR / "prompts" / "synthesize-index.md",
+            SKILL_DIR.parents[1]
+            / "smartesb-rewrite-code-review-prompt-pack"
+            / "prompts"
+            / "synthesize-index.md",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
+
+        self.assertNotIn("禁止调用 `write_file`", combined)
+        self.assertNotIn("不得调用 `write_file`", combined)
+        self.assertNotIn("刷新索引", combined)
+        self.assertNotIn("索引疑似过期", combined)
+        self.assertIn("write_file", combined)
+        self.assertIn("项目文件视图", combined)
 
 
 if __name__ == "__main__":
