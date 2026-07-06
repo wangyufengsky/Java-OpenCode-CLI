@@ -18,7 +18,15 @@ public class ProjectUnitTestGenerationOutputValidator {
         return validateBatchResult(repo, batchId, summaryJson).check();
     }
 
+    public ValidationCheck validateBatchOutput(Path repo, String batchId, Path summaryJson, int coverageThresholdPercent) {
+        return validateBatchResult(repo, batchId, summaryJson, coverageThresholdPercent).check();
+    }
+
     public BatchValidation validateBatchResult(Path repo, String batchId, Path summaryJson) {
+        return validateBatchResult(repo, batchId, summaryJson, 0);
+    }
+
+    public BatchValidation validateBatchResult(Path repo, String batchId, Path summaryJson, int coverageThresholdPercent) {
         try {
             if (!Files.exists(summaryJson)) {
                 return retriable("unit-test batch summary missing: " + summaryJson);
@@ -42,7 +50,11 @@ public class ProjectUnitTestGenerationOutputValidator {
                     return retriable("completed unit-test batch must contain at least one test file: " + batchId);
                 }
                 ValidationCheck files = validateTestFiles(repo, summary);
-                return files.ok() ? completed(status) : retriable(files.error());
+                if (!files.ok()) {
+                    return retriable(files.error());
+                }
+                ValidationCheck checks = validateCompletedChecks(batchId, summary, coverageThresholdPercent);
+                return checks.ok() ? completed(status) : retriable(checks.error());
             }
             if ("partial".equals(status)) {
                 if (summary.path("test_files").isEmpty()) {
@@ -64,6 +76,28 @@ public class ProjectUnitTestGenerationOutputValidator {
         } catch (Exception exception) {
             return retriable("unit-test batch validation failed: " + exception.getMessage());
         }
+    }
+
+    private ValidationCheck validateCompletedChecks(String batchId, JsonNode summary, int coverageThresholdPercent) {
+        JsonNode checks = summary.path("checks");
+        if (!checks.isObject()) {
+            return ValidationCheck.failed("completed unit-test batch must record checks: " + batchId);
+        }
+        if (!checks.path("style_reviewed").asBoolean(false)) {
+            return ValidationCheck.failed("completed unit-test batch checks must include style_reviewed=true: " + batchId);
+        }
+        if (!checks.path("compilation").path("passed").asBoolean(false)) {
+            return ValidationCheck.failed("completed unit-test batch checks must include compilation.passed=true: " + batchId);
+        }
+        if (!checks.path("tests").path("passed").asBoolean(false)) {
+            return ValidationCheck.failed("completed unit-test batch checks must include tests.passed=true: " + batchId);
+        }
+        int threshold = clampPercent(coverageThresholdPercent);
+        double coverage = checks.path("coverage").path("percent").asDouble(Double.NaN);
+        if (Double.isNaN(coverage) || coverage < threshold) {
+            return ValidationCheck.failed("completed unit-test batch checks must include coverage.percent >= " + threshold + ": " + batchId);
+        }
+        return ValidationCheck.success();
     }
 
     private ValidationCheck validateTestFiles(Path repo, JsonNode summary) throws Exception {
@@ -109,5 +143,9 @@ public class ProjectUnitTestGenerationOutputValidator {
 
     private String normalize(String value) {
         return value == null ? "" : value.replace('\\', '/').replaceAll("^/+", "");
+    }
+
+    private int clampPercent(int value) {
+        return Math.max(0, Math.min(100, value));
     }
 }

@@ -8,7 +8,6 @@ import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
 import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
 import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
 import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
-import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
@@ -48,7 +47,6 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     private final ProjectUnitTestGenerationReportRenderer reportRenderer;
     private final OpenCodeServerManager serverManager;
     private final OpenCodeServerTaskRunner taskRunner;
-    private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
     private final OutputCompletionGate completionGate;
     private final ObjectMapper objectMapper;
 
@@ -62,7 +60,6 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
             ProjectUnitTestGenerationReportRenderer reportRenderer,
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
-            ConcurrentWorkflowTaskRunner concurrentTaskRunner,
             OutputCompletionGate completionGate,
             ObjectMapper objectMapper
     ) {
@@ -75,7 +72,6 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         this.reportRenderer = reportRenderer;
         this.serverManager = serverManager;
         this.taskRunner = taskRunner;
-        this.concurrentTaskRunner = concurrentTaskRunner;
         this.completionGate = completionGate;
         this.objectMapper = objectMapper;
     }
@@ -126,28 +122,19 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
             return;
         }
         OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
-        int concurrency = Math.max(1, Math.min(properties.getTest().getConcurrency(), request.openCode().getMaxConcurrency()));
-        List<TaskRunResult> results = concurrentTaskRunner.run(
-                "project unit-test generation",
-                batches,
-                concurrency,
-                this::batchId,
-                batch -> batchCallable(properties, request, out, server, batch)
-        );
-        List<String> failures = results.stream()
-                .filter(result -> !result.success())
-                .map(result -> result.taskName() + ": " + result.error())
-                .toList();
-        if (!failures.isEmpty()) {
-            log.warn("unit-test generation batches finished with incomplete outputs; completion gate will rerun: {}",
-                    String.join("; ", failures));
-            failures.stream()
-                    .filter(failure -> failure.contains("protected file"))
-                    .findFirst()
-                    .ifPresent(failure -> {
-                        throw new IllegalStateException("project-unit-test-generation protected file violation: " + failure);
-                    });
+        log.info("Starting project unit-test generation tasks serially: taskCount={}", batches.size());
+        for (Map<String, Object> batch : batches) {
+            TaskRunResult result = batchCallable(properties, request, out, server, batch).call();
+            if (!result.success()) {
+                String failure = result.taskName() + ": " + result.error();
+                log.warn("unit-test generation batch stopped serial execution: {}", failure);
+                if (failure.contains("protected file")) {
+                    throw new IllegalStateException("project-unit-test-generation protected file violation: " + failure);
+                }
+                return;
+            }
         }
+        log.info("Project unit-test generation tasks completed serially");
     }
 
     private Callable<TaskRunResult> batchCallable(
@@ -183,11 +170,20 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                         request.openCode().getOutputWaitSeconds(),
                         0
                 ));
-                ValidationCheck validation = validateBatch(properties, batch, protectedSnapshot);
-                if (validation.ok()) {
+                BatchValidation validation = outputValidator.validateBatchResult(
+                        properties.getProject().getRepo().toAbsolutePath().normalize(),
+                        batchId,
+                        Path.of(string(batch.get("summary_json"))),
+                        properties.getTest().getCoverageThresholdPercent()
+                );
+                ValidationCheck files = validation.check().ok() ? protectedSnapshot.validate() : validation.check();
+                if (files.ok() && validation.completed()) {
                     return TaskRunResult.success(batchId, batchId, runDir.resolve("status.json"));
                 }
-                return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), validation.error());
+                if (files.ok()) {
+                    return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), "terminal unit-test batch status=" + validation.status());
+                }
+                return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), files.error());
             } catch (Exception exception) {
                 return TaskRunResult.failed(batchId, batchId, runDir.resolve("status.json"), exception.getMessage());
             }
@@ -204,12 +200,16 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     }
 
     private List<IncompleteOutput> incompleteBatches(ProjectUnitTestGenerationProperties properties, Path out) throws Exception {
+        if (!terminalBatchFailures(properties, out).isEmpty()) {
+            return List.of();
+        }
         List<IncompleteOutput> incomplete = new ArrayList<>();
         for (Map<String, Object> batch : loadBatches(out)) {
             BatchValidation validation = outputValidator.validateBatchResult(
                     properties.getProject().getRepo().toAbsolutePath().normalize(),
                     batchId(batch),
-                    Path.of(string(batch.get("summary_json")))
+                    Path.of(string(batch.get("summary_json"))),
+                    properties.getTest().getCoverageThresholdPercent()
             );
             if (!validation.check().ok() && validation.retriable()) {
                 incomplete.add(new IncompleteOutput(
@@ -247,7 +247,8 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         BatchValidation output = outputValidator.validateBatchResult(
                 properties.getProject().getRepo().toAbsolutePath().normalize(),
                 batchId(batch),
-                Path.of(string(batch.get("summary_json")))
+                Path.of(string(batch.get("summary_json"))),
+                properties.getTest().getCoverageThresholdPercent()
         );
         if (!output.check().ok()) {
             return output.check();
@@ -276,7 +277,12 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         Path repo = properties.getProject().getRepo().toAbsolutePath().normalize();
         for (Map<String, Object> batch : loadBatches(out)) {
             Path summaryJson = Path.of(string(batch.get("summary_json")));
-            BatchValidation validation = outputValidator.validateBatchResult(repo, batchId(batch), summaryJson);
+            BatchValidation validation = outputValidator.validateBatchResult(
+                    repo,
+                    batchId(batch),
+                    summaryJson,
+                    properties.getTest().getCoverageThresholdPercent()
+            );
             if (validation.check().ok() && !validation.completed()) {
                 failures.add(batchId(batch) + " status=" + validation.status() + notes(summaryJson));
             }

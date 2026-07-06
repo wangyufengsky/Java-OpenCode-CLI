@@ -389,38 +389,34 @@ public class ProjectUnitTestGenerationPreparation {
 
     private List<Map<String, Object>> buildBatches(ProjectUnitTestGenerationProperties properties, Path out, List<Map<String, Object>> types, Map<String, Object> docs) {
         List<Map<String, Object>> batches = new ArrayList<>();
-        BatchAccumulator current = new BatchAccumulator(properties);
         for (Map<String, Object> type : types.stream().sorted(Comparator.comparing(row -> string(row.get("qualified_name")))).toList()) {
-            if (!current.isEmpty() && !current.canAccept(type)) {
-                batches.add(batch(out, batches.size() + 1, current, docs));
-                current = new BatchAccumulator(properties);
-            }
-            current.add(type);
-        }
-        if (!current.isEmpty()) {
-            batches.add(batch(out, batches.size() + 1, current, docs));
+            batches.add(batch(out, batches.size() + 1, type, docs, properties));
         }
         return batches;
     }
 
-    private Map<String, Object> batch(Path out, int index, BatchAccumulator accumulator, Map<String, Object> docs) {
-        String packageName = packageOf(accumulator.types.get(0));
-        String batchId = "test-batch-%03d-%s".formatted(index, slug(packageName));
+    private Map<String, Object> batch(Path out, int index, Map<String, Object> type, Map<String, Object> docs, ProjectUnitTestGenerationProperties properties) {
+        String qualifiedName = string(type.get("qualified_name"));
+        String sourceFile = string(type.get("source_file"));
+        String batchId = "test-batch-%03d-%s".formatted(index, slug(simpleName(qualifiedName)));
         Path batchDir = out.resolve("test-batches").resolve(batchId);
         Map<String, Object> batch = new LinkedHashMap<>();
         batch.put("batch_id", batchId);
-        batch.put("scope", Map.of("type", "package", "path", packageName));
-        batch.put("source_files", accumulator.types.stream().map(type -> string(type.get("source_file"))).distinct().toList());
-        batch.put("target_test_files", accumulator.types.stream().map(type -> string(type.get("target_test_file"))).distinct().toList());
-        batch.put("existing_test_files", accumulator.types.stream()
-                .flatMap(type -> listOfStrings(type.get("existing_test_files")).stream())
+        batch.put("scope", Map.of(
+                "type", "class",
+                "qualified_name", qualifiedName,
+                "source_file", sourceFile
+        ));
+        batch.put("source_files", List.of(sourceFile));
+        batch.put("target_test_files", List.of(string(type.get("target_test_file"))));
+        batch.put("existing_test_files", listOfStrings(type.get("existing_test_files")).stream()
                 .distinct()
                 .toList());
-        batch.put("types", List.copyOf(accumulator.types));
+        batch.put("types", List.of(type));
         batch.put("docs", docs);
         batch.put("skill", agentBridgeSkill());
-        batch.put("coverage", coveragePolicy(accumulator.properties));
-        batch.put("rules", agentBridgeRules(accumulator.properties));
+        batch.put("coverage", coveragePolicy(properties));
+        batch.put("rules", agentBridgeRules(properties));
         batch.put("input_json", batchDir.resolve("input.json").toString());
         batch.put("summary_json", batchDir.resolve("summary.json").toString());
         batch.put("allowed_write_globs", allowedWriteGlobs(listOfStrings(batch.get("target_test_files"))));
@@ -451,8 +447,9 @@ public class ProjectUnitTestGenerationPreparation {
         Map<String, Object> rules = new LinkedHashMap<>();
         rules.put("reader_preference", "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。");
         rules.put("writer_preference", "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。");
+        rules.put("style_policy", "写测试前必须先查阅当前项目已有测试/已有单元测试，理解断言库、命名、Mock、Spring/JUnit 用法，并仿照现有代码风格。");
         rules.put("diagnostics_policy", "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。");
-        rules.put("test_feedback_policy", "用 list_tests 查已有测试，用 get_coverage 可选读取已有覆盖率；不要调用 run_tests 或 build_project，批次并发执行时运行测试或构建会互相影响。最终验证由 Java 链路串行执行 test.verify-command。");
+        rules.put("test_feedback_policy", "用 list_tests 查已有测试；写完后按 get_compilation_errors -> run_tests -> get_coverage 顺序校验当前批次相关测试和当前类覆盖率；任一步不通过都逐轮修正测试并回到 get_compilation_errors。");
         rules.put("coverage_policy", "如果 types[].existing_test_files 非空，先用 get_coverage 检查该类覆盖率；覆盖率达到 " + threshold + "% 时跳过该类；覆盖率未达标时只补充该类已有测试或目标测试文件。");
         rules.put("blocked_policy", "`AgentBridge` MCP 读写工具不可用时写 blocked 或返回 BLOCKED；诊断工具不可用且无法确认测试代码是否可编译时写 partial 或 blocked。");
         return rules;
@@ -511,10 +508,6 @@ public class ProjectUnitTestGenerationPreparation {
         }
     }
 
-    private String packageOf(Map<String, Object> type) {
-        return string(type.get("package"));
-    }
-
     private List<String> listOfStrings(Object value) {
         if (!(value instanceof List<?> list)) {
             return List.of();
@@ -534,6 +527,11 @@ public class ProjectUnitTestGenerationPreparation {
         return value.endsWith(".java") ? value.substring(0, value.length() - 5) : value;
     }
 
+    private String simpleName(String qualifiedName) {
+        int index = qualifiedName.lastIndexOf('.');
+        return index < 0 ? qualifiedName : qualifiedName.substring(index + 1);
+    }
+
     private String slug(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
         return normalized.isBlank() ? "root" : normalized.substring(0, Math.min(80, normalized.length()));
@@ -543,47 +541,4 @@ public class ProjectUnitTestGenerationPreparation {
         return value == null ? "" : value.toString();
     }
 
-    private static class BatchAccumulator {
-        private final ProjectUnitTestGenerationProperties properties;
-        private final int maxTypes;
-        private final int maxMethods;
-        private final int maxSourceChars;
-        private final List<Map<String, Object>> types = new ArrayList<>();
-        private int methods;
-        private int sourceChars;
-
-        private BatchAccumulator(ProjectUnitTestGenerationProperties properties) {
-            this.properties = properties;
-            this.maxTypes = Math.max(1, properties.getTest().getMaxTypesPerTask());
-            this.maxMethods = Math.max(1, properties.getTest().getMaxMethodsPerTask());
-            this.maxSourceChars = Math.max(1, properties.getTest().getMaxSourceCharsPerTask());
-        }
-
-        private boolean isEmpty() {
-            return types.isEmpty();
-        }
-
-        private boolean canAccept(Map<String, Object> type) {
-            int nextMethods = methods + methodCount(type);
-            int nextSourceChars = sourceChars + intValue(type.get("source_chars"));
-            return types.size() + 1 <= maxTypes
-                    && nextMethods <= maxMethods
-                    && nextSourceChars <= maxSourceChars;
-        }
-
-        private void add(Map<String, Object> type) {
-            types.add(type);
-            methods += methodCount(type);
-            sourceChars += intValue(type.get("source_chars"));
-        }
-
-        private int methodCount(Map<String, Object> type) {
-            Object methods = type.get("public_methods");
-            return methods instanceof List<?> list ? list.size() : 0;
-        }
-
-        private int intValue(Object value) {
-            return value instanceof Number number ? number.intValue() : 0;
-        }
-    }
 }

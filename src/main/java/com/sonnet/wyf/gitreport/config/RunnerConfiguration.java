@@ -232,7 +232,6 @@ public class RunnerConfiguration {
             ProjectUnitTestGenerationReportRenderer reportRenderer,
             OpenCodeServerManager serverManager,
             OpenCodeServerTaskRunner taskRunner,
-            ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner,
             OutputCompletionGate outputCompletionGate,
             ObjectMapper objectMapper
     ) {
@@ -246,7 +245,6 @@ public class RunnerConfiguration {
                 reportRenderer,
                 serverManager,
                 taskRunner,
-                concurrentWorkflowTaskRunner,
                 outputCompletionGate,
                 objectMapper
         );

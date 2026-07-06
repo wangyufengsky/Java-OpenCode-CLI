@@ -76,7 +76,7 @@ const chainConfigDefinitions = {
     ]
   },
   'project-unit-test-generation': {
-    description: '默认全量扫描项目源码，也可按包路径生成 src/test 下的单元测试。',
+    description: '默认全量扫描项目源码，也可按包路径串行生成 src/test 下的单元测试；每任务一个类，一个 agent 只写一个类。',
     fields: [
       field('project.id', '项目标识', '写入任务和报告元信息的项目 ID。'),
       field('project.name', '项目名称', '写入任务和报告标题的项目名称。'),
@@ -88,11 +88,7 @@ const chainConfigDefinitions = {
       field('source.package-paths', '包路径', '每行一个包名或源码路径，留空表示全量。', 'list'),
       field('source.include', '包含路径', '可选；每行一个 include glob。', 'list'),
       field('source.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建产物或生成代码。', 'list'),
-      field('test.concurrency', '测试生成并发数', '单元测试生成批次并发数。', 'number'),
-      field('test.max-types-per-task', '每批最大类型数', '单个测试批次最多包含的 Java 类型数量。', 'number'),
-      field('test.max-methods-per-task', '每批最大方法数', '单个测试批次最多包含的公开方法数量。', 'number'),
-      field('test.max-source-chars-per-task', '每批源码字符数', '单个测试批次包含源码的字符上限。', 'number'),
-      field('test.coverage-threshold-percent', '覆盖率阈值', '已有测试类达到该类覆盖率百分比时跳过，否则补充测试。', 'number'),
+      field('test.coverage-threshold-percent', '覆盖率阈值', '当前类达到该覆盖率百分比后，当前 agent 才能完成。', 'number'),
       field('test.verify-command', '验证命令', '每行一个命令参数，例如 ./mvnw 和 test。', 'list'),
       field('opencode.timeout-minutes', 'OpenCode 超时分钟数', '单个测试生成 session 的超时时间。', 'number')
     ]
