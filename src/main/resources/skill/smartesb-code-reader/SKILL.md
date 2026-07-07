@@ -1,7 +1,7 @@
 ---
 name: smartesb-code-reader
 description: 从 serviceIdentify.xml、交易 XML、base XML、.biz 和 Java 源码生成 Sm@rtESB 8583 交易分层中文文档；主agent按一个模块batch或一个交易task对应一个子Agent分配任务。
-compatibility: opencode
+compatibility: agentbridge
 metadata:
   environment: cross-platform
   domain: smartesb
@@ -17,7 +17,7 @@ metadata:
 
 - 使用两层编排：`主agent` 启动 `模块批次子Agent` 和 `单任务交易子Agent`。
 - 主agent 分配任务的唯一单位是一个模块 batch 或一个交易 task；同一个子Agent不得接收多个模块 batch、多个交易 task，或 batch/task 混合任务。
-- OpenCode 桌面版中子Agent不能再启动子Agent；模块批次子Agent必须用待办事项顺序处理 batch 内任务，禁止 `子Agent -> 子Agent` 的嵌套派发。
+- AgentBridge 桌面版中子Agent不能再启动子Agent；模块批次子Agent必须用待办事项顺序处理 batch 内任务，禁止 `子Agent -> 子Agent` 的嵌套派发。
 - 交易侧取消 batch；交易子Agent一次只执行一个 `tasks/transaction-*.json`。
 - 不要把多 agent 工作流降级为单次本地分析。
 - 准备脚本只做事实收集和任务 JSON 生成；不要让准备脚本生成分析结论。

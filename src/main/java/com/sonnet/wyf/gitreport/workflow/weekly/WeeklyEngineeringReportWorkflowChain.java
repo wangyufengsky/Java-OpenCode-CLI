@@ -1,7 +1,7 @@
 package com.sonnet.wyf.gitreport.workflow.weekly;
 
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
@@ -13,7 +13,7 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
     public static final String ID = "weekly-engineering-report";
 
     private final ChainConfigLoader configLoader;
-    private final OpenCodeRunnerProperties runnerProperties;
+    private final AgentBridgeRunnerProperties runnerProperties;
     private final WeeklyEvidenceBuilder evidenceBuilder;
     private final WeeklyEvidenceValidator evidenceValidator;
     private final WeeklyCodeReviewRunner codeReviewRunner;
@@ -21,7 +21,7 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
 
     public WeeklyEngineeringReportWorkflowChain(
             ChainConfigLoader configLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             WeeklyEvidenceBuilder evidenceBuilder,
             WeeklyEvidenceValidator evidenceValidator,
             WeeklyCodeReviewRunner codeReviewRunner,

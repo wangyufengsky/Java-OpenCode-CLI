@@ -63,22 +63,20 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/output/review_md").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\reports\\CaRolloutRepeal\\review.md");
         assertThat(task.at("/output_placeholders/code_standard_md/0").asText()).isEqualTo("{{CODE_STANDARD_REVIEW}}");
         assertThat(task.has("output_markers")).isFalse();
-        assertThat(task.at("/skill/preferred_reader").asText()).isEqualTo("AgentBridge");
-        assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("AgentBridge");
-        assertThat(task.at("/skill/file_tools").toString()).contains("read_file", "edit_text", "write_file");
+        assertThat(task.at("/skill/reader_hint").asText()).contains("当前 AgentBridge 环境可用能力");
+        assertThat(task.at("/skill/writer_hint").asText()).contains("路径载荷指定的目标文件");
+        assertThat(task.at("/skill/file_tools").isMissingNode()).isTrue();
         assertThat(task.at("/skill/agentbridge_code_tools").isMissingNode()).isTrue();
-        assertThat(task.at("/skill/agentbridge_search_tools").toString()).contains("search_text", "search_symbols");
-        assertThat(task.at("/rules/reader_preference").asText()).contains("必须使用 `AgentBridge` MCP 文件读取工具");
-        assertThat(task.at("/rules/writer_preference").asText()).contains("必须使用 `AgentBridge` MCP 文件编辑工具");
-        assertThat(task.at("/rules/writer_preference").asText()).contains("`AgentBridge` MCP 读写工具不可用时返回 BLOCKED");
+        assertThat(task.at("/skill/agentbridge_search_tools").isMissingNode()).isTrue();
+        assertThat(task.at("/rules/reader_hint").asText()).contains("当前 AgentBridge 环境可用能力");
+        assertThat(task.at("/rules/writer_hint").asText()).contains("路径载荷指定的 Markdown 和 JSON 文件");
         assertThat(task.at("/rules/template_contract").asText()).contains("只能替换 output_placeholders");
         assertThat(task.at("/rules/external_skill_policy").asText()).contains("不要在执行前搜索、读取、加载或调用任何外部 skill");
         assertThat(task.at("/rules/external_skill_policy").asText()).contains("brainstorming");
         assertThat(task.at("/rules/scope").asText()).contains("old-8583-doc 老代码详细设计");
         assertThat(task.at("/rules/scope").asText()).contains("不读取或检索 old_project 下的老代码源码");
-        assertThat(task.at("/rules/explore_preference").asText()).contains("必须使用 `AgentBridge` MCP 定位、读取和取证");
+        assertThat(task.at("/rules/explore_preference").asText()).contains("当前 AgentBridge 环境可用能力");
         assertThat(task.toString()).doesNotContain("intellij-index", "intellij-idea");
-        assertThat(task.at("/rules/explore_preference").asText()).doesNotContain("OpenCode explore");
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/documents/mapping_8583_to_json").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\docment\\8583 to json.md");
         assertThat(task.at("/documents/old_8583_doc").asText()).isEqualTo("D:\\upfs-nl-json\\doc\\old-8583.md");
@@ -126,9 +124,9 @@ class SmartEsbPreparationTest {
         assertThat(task.at("/documents/json").isMissingNode()).isTrue();
         assertThat(task.at("/skill/summary_schema").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/schemas/transaction-summary.schema.json");
         assertThat(task.at("/rules/scope").asText()).contains("只审查当前交易的新代码、映射文档、重构详细设计和 old-8583-doc 老代码详细设计");
-        assertThat(task.at("/rules/explore_preference").asText()).contains("必须使用 `AgentBridge` MCP 定位、读取和取证");
+        assertThat(task.at("/rules/explore_preference").asText()).contains("当前 AgentBridge 环境可用能力");
         assertThat(task.has("old_project")).isFalse();
-        assertThat(task.at("/skill/preferred_writer").asText()).isEqualTo("AgentBridge");
+        assertThat(task.at("/skill/writer_hint").asText()).contains("路径载荷指定的目标文件");
         assertThat(task.toString()).doesNotContain("intellij-index", "intellij-idea");
         assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
                 .contains(

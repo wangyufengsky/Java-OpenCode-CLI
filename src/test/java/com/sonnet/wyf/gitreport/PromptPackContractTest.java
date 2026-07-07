@@ -34,21 +34,17 @@ class PromptPackContractTest {
 
         assertThat(combined).contains(
                 "AgentBridge",
-                "read_file",
-                "edit_text",
-                "write_file",
-                "search_text",
-                "search_symbols"
+                "当前 AgentBridge 环境可用能力",
+                "路径载荷指定文件"
         );
         assertThat(worker).contains(
-                "读取 `detail_json` 时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "写入个人报告和质量摘要时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "读取 `detail_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "写入个人报告和质量摘要时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
                 "必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`",
                 "质量分析只能基于 `detail.changed_regions`",
                 "不得打开或通读 `detail.top_files[].path` 对应的完整文件",
-                "代码取证必须使用 `AgentBridge` MCP",
                 "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
-                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`",
                 "将 `|` 转义为 `\\|`",
@@ -56,9 +52,9 @@ class PromptPackContractTest {
         );
         assertThat(synthesis).contains(
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
-                "读取 `synthesis_inputs_json` 时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "写入最终报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
-                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取 `synthesis_inputs_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "写入最终报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "将 `|` 转义为 `\\|`",
                 "只能替换模板中已有的 `{{...}}` 占位符"
@@ -83,15 +79,15 @@ class PromptPackContractTest {
         String synthesis = Files.readString(promptPack.resolve("prompts/synthesize-index.md"));
 
         assertThat(worker + "\n" + module).contains(
-                "读取 task JSON 和准备脚本输出时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
-                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取 task JSON 和准备脚本输出时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "只能替换 task JSON 中 `output_placeholders` 列出的占位符",
                 "写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符"
         );
         assertThat(rerun + "\n" + rerunModule).contains(
-                "写文件必须使用 `AgentBridge` MCP",
+                "写文件使用当前 AgentBridge 环境可用能力",
                 "只能替换 `output_placeholders` 中列出的占位符"
         );
         assertThat(worker + "\n" + rerun + "\n" + module + "\n" + rerunModule + "\n" + synthesis).contains(
@@ -107,14 +103,14 @@ class PromptPackContractTest {
                 "证据不足时必须写 `summary_json`，`status` 设为 `partial`"
         );
         assertThat(synthesis).contains(
-                "读取汇总输入和审查项摘要时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "写入 `index.md` 和 `summary.md` 时，必须使用 `AgentBridge` MCP 文件编辑工具",
-                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取汇总输入和审查项摘要时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "写入 `index.md` 和 `summary.md` 时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "只能替换 `index_inputs.output_placeholders` 中列出的占位符"
         );
-        assertThat(worker).contains("`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`");
-        assertThat(rerun).contains("写文件必须使用 `AgentBridge` MCP");
-        assertThat(synthesis).contains("`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`");
+        assertThat(worker).contains("`AgentBridge` MCP 读写工具不可用时必须写入失败说明");
+        assertThat(rerun).contains("写文件使用当前 AgentBridge 环境可用能力");
+        assertThat(synthesis).contains("`AgentBridge` MCP 读写工具不可用时必须写入失败说明");
         assertThat(worker).doesNotContain("output_markers", "同一个 marker", "OPENCODE_APPEND");
         assertThat(rerun).doesNotContain("output_markers", "追加标记", "OPENCODE_APPEND");
         assertThat(synthesis).doesNotContain("output_markers", "OPENCODE_APPEND");
@@ -124,7 +120,7 @@ class PromptPackContractTest {
                 "可以读取 old-8583-doc 中当前交易相关的老代码详细设计片段",
                 "交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据",
                 "只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段",
-                "代码和文档定位、读取、取证必须使用 `AgentBridge` MCP",
+                "代码和文档定位、读取、取证使用当前 AgentBridge 环境可用能力",
                 "`old_code_paths` 必须写空数组"
         );
         assertThat(combined).doesNotContain("intellij-index", "intellij-idea");
@@ -156,9 +152,9 @@ class PromptPackContractTest {
         String combined = module + "\n" + transaction + "\n" + synthesis;
 
         assertThat(combined).contains(
-                "读取任务输入、XML、.biz、Java 候选文件和摘要时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具",
-                "`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`",
+                "读取任务输入、XML、.biz、Java 候选文件和摘要时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "当前能力不可用或证据不足时，在输出文件中说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md"
         );

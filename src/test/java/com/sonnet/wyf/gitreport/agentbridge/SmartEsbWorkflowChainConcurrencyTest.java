@@ -1,10 +1,14 @@
-package com.sonnet.wyf.gitreport.opencode;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
@@ -23,7 +27,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -56,21 +59,20 @@ class SmartEsbWorkflowChainConcurrencyTest {
     }
 
     @Test
-    void runsTransactionReviewsWithRunnerOpenCodeConcurrency() throws Exception {
+    void runsTransactionReviewsWithRunnerAgentBridgeConcurrency() throws Exception {
         SmartEsbRewriteProperties properties = smartEsbProperties();
         writeTransactions(properties.getTransactionPlanDir());
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbDailyTransactionPlanLoader(),
                 new SmartEsbReviewPreparation(objectMapper),
                 new SmartEsbPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbSummaryValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -94,18 +96,17 @@ class SmartEsbWorkflowChainConcurrencyTest {
         );
         writeCompletedSummary(out, "Gamma");
         Path logicalOut = Path.of(properties.getOut()).resolve("2026-06-17");
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbDailyTransactionPlanLoader(),
                 new SmartEsbReviewPreparation(objectMapper),
                 new SmartEsbPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbSummaryValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -132,18 +133,17 @@ class SmartEsbWorkflowChainConcurrencyTest {
         SmartEsbRewriteProperties properties = smartEsbProperties();
         writeTransactionsAndModules(properties.getTransactionPlanDir());
         Path logicalOut = Path.of(properties.getOut()).resolve("2026-06-24");
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbDailyTransactionPlanLoader(),
                 new SmartEsbReviewPreparation(objectMapper),
                 new SmartEsbPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbSummaryValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -168,7 +168,7 @@ class SmartEsbWorkflowChainConcurrencyTest {
     void rerunsIncompleteReviewOutputsBeforeIndexWithoutSameSessionCorrections() throws Exception {
         SmartEsbRewriteProperties properties = smartEsbProperties();
         writeTransactions(properties.getTransactionPlanDir());
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
         settings.setValidationMaxCorrections(3);
@@ -176,12 +176,11 @@ class SmartEsbWorkflowChainConcurrencyTest {
         taskRunner.completeAfterAttempt("smartesb-review-Beta", 2);
         SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbDailyTransactionPlanLoader(),
                 new SmartEsbReviewPreparation(objectMapper),
                 new SmartEsbPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbSummaryValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -209,19 +208,18 @@ class SmartEsbWorkflowChainConcurrencyTest {
     void stopsAfterFiveIncompleteRerunRoundsAndRecordsUnfinishedReports() throws Exception {
         SmartEsbRewriteProperties properties = smartEsbProperties();
         writeSingleTransaction(properties.getTransactionPlanDir());
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         taskRunner.neverComplete("smartesb-review-Alpha");
         SmartEsbWorkflowChain chain = new SmartEsbWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbDailyTransactionPlanLoader(),
                 new SmartEsbReviewPreparation(objectMapper),
                 new SmartEsbPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbSummaryValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -308,7 +306,7 @@ class SmartEsbWorkflowChainConcurrencyTest {
         return executor;
     }
 
-    private class TrackingTaskRunner extends OpenCodeServerTaskRunner {
+    private class TrackingTaskRunner extends AgentBridgeTaskRunner {
         private final AtomicInteger activeTransactions = new AtomicInteger();
         private final AtomicInteger maxActiveTransactions = new AtomicInteger();
         private final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
@@ -319,50 +317,15 @@ class SmartEsbWorkflowChainConcurrencyTest {
         private final java.util.Set<String> neverCompleteTitles = ConcurrentHashMap.newKeySet();
 
         TrackingTaskRunner() {
-            super(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
+            super(new AgentBridgeClient(objectMapper), scheduledProbeWaiter());
         }
 
         @Override
-        public OpenCodeRunResult runUntil(
-                OpenCodeServerHandle server,
-                Path repo,
-                String title,
-                Path promptFile,
-                String message,
-                Path runDir,
-                CompletionProbe completionProbe,
-                String sessionModel,
-                int createSessionTimeoutSeconds,
-                int requestTimeoutSeconds,
-                int pollMillis,
-                int timeoutMinutes
-        ) throws Exception {
-            prompts.add(Files.readString(promptFile));
-            titles.add(title);
-            return runTrackedTask(server, title, promptFile, runDir);
-        }
-
-        @Override
-        public OpenCodeRunResult runUntilValidated(
-                OpenCodeServerHandle server,
-                Path repo,
-                String title,
-                Path promptFile,
-                String message,
-                Path runDir,
-                ValidationProbe validationProbe,
-                String sessionModel,
-                int createSessionTimeoutSeconds,
-                int requestTimeoutSeconds,
-                int pollMillis,
-                int timeoutMinutes,
-                int validationSettleSeconds,
-                int validationMaxCorrections
-        ) throws Exception {
-            prompts.add(Files.readString(promptFile));
-            titles.add(title);
-            validationMaxCorrectionsByTitle.put(title, validationMaxCorrections);
-            return runTrackedTask(server, title, promptFile, runDir);
+        public AgentBridgeRunResult runUntilValidated(ValidatedAgentBridgeTaskSpec spec) throws Exception {
+            prompts.add(Files.readString(spec.promptFile()));
+            titles.add(spec.title());
+            validationMaxCorrectionsByTitle.put(spec.title(), spec.validationMaxCorrections());
+            return runTrackedTask(spec);
         }
 
         void completeAfterAttempt(String title, int attempt) {
@@ -373,10 +336,13 @@ class SmartEsbWorkflowChainConcurrencyTest {
             neverCompleteTitles.add(title);
         }
 
-        private OpenCodeRunResult runTrackedTask(OpenCodeServerHandle server, String title, Path promptFile, Path runDir) throws Exception {
+        private AgentBridgeRunResult runTrackedTask(ValidatedAgentBridgeTaskSpec spec) throws Exception {
+            String title = spec.title();
+            Path promptFile = spec.promptFile();
+            Path runDir = spec.runDir();
             if ("index".equals(runDir.getFileName().toString())) {
                 writeIndexOutputs(runDir);
-                return new OpenCodeRunResult("index-session", server.serverUrl().toString(), false, false, true, false, "idle");
+                return new AgentBridgeRunResult("index-task", spec.webBaseUrl().toString(), false, true, "idle", true, "", 0);
             }
             int attempt = attemptsByTitle.computeIfAbsent(title, ignored -> new AtomicInteger()).incrementAndGet();
             int active = activeTransactions.incrementAndGet();
@@ -387,7 +353,7 @@ class SmartEsbWorkflowChainConcurrencyTest {
                         && attempt >= completeAfterAttemptByTitle.getOrDefault(title, 1)) {
                     writeReviewOutputs(promptFile, runDir);
                 }
-                return new OpenCodeRunResult("session-" + runDir.getFileName(), server.serverUrl().toString(), false, false, true, false, "idle");
+                return new AgentBridgeRunResult("task-" + runDir.getFileName(), spec.webBaseUrl().toString(), false, true, "idle", true, "", 0);
             } finally {
                 activeTransactions.decrementAndGet();
             }
@@ -457,17 +423,6 @@ class SmartEsbWorkflowChainConcurrencyTest {
         Files.writeString(sections.resolve("04-behavior-review.md"), "# behavior\n完成\n");
         Files.writeString(sections.resolve("05-verification.md"), "# verification\n完成\n");
         Files.writeString(sections.resolve("06-code-standard.md"), "# code standard\n完成\n");
-    }
-
-    private class HealthyServerManager extends OpenCodeServerManager {
-        HealthyServerManager() {
-            super(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
-        }
-
-        @Override
-        public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) {
-            return new OpenCodeServerHandle(URI.create(settings.getServerUrl()), false);
-        }
     }
 
     private static class FixedChainConfigLoader extends ChainConfigLoader {

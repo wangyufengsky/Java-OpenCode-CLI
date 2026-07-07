@@ -55,7 +55,7 @@ class ConsoleMvcTest {
 
         mockMvc.perform(get("/"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("OpenCode 任务控制台")))
+                .andExpect(content().string(containsString("AgentBridge 任务控制台")))
                 .andExpect(content().string(containsString("最近运行")))
                 .andExpect(content().string(containsString("代码贡献报告")));
         mockMvc.perform(get("/history"))

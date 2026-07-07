@@ -29,25 +29,25 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - 写个人报告时只替换 `detail.output.report_marker`。
 - 写质量摘要时只替换 `detail.output.quality_summary_marker`；这是 quality-summary.json 专用 marker，不得使用 `detail.output.report_marker` 写 `quality_summary_json`。
 - 读取 `detail.execution_worklist` 后，必须按 `step` 升序逐项执行；不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
-- 如果 `detail.execution_worklist` 缺失、为空或不包含 `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response`，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+- 如果 `detail.execution_worklist` 缺失、为空或不包含 `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response`，最终只返回 `无法完成 step=<step> action=<action> path=<path> reason=<reason>`。
 - 必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`；个人报告中的质量与风险内容必须来自已写入的质量摘要证据。
-- 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 分析完成后必须立即调用 MCP 写入工具先写 `quality-summary.json`，再写 `person-report.md`。只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束；AgentBridge 子 agent 结束后主会话无法继续提示它。
+- 分析完成后必须立即调用 MCP 写入工具先写 `quality-summary.json`，再写 `person-report.md`。只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `完成` 或 `无法完成`。
 
 ## MCP 规则
 
 - 读取、搜索、调用链取证、写入和禁止项全部按 `workflows/mcp-tool-contract.md` 执行。
 - 质量分析只能基于 `detail.changed_regions` 中脚本从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
 - `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
-- 优先使用 OpenCode `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。
+- 优先使用 AgentBridge `explore` 做上下文探索，当前作者 session 只消费 `explore` 返回的短证据摘要、文件路径、符号名或调用点位置；`explore` 不得返回完整文件、大段源码或未压缩搜索结果。
 - 不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
 - 判断公共代码、工具类代码复用价值时，优先使用 MCP workflow 允许的引用或调用链取证方式确认调用点，并记录实际工具名；最多读取 5 个候选调用点文件。
 - 不得为了质量分析额外读取 Markdown、Office、普通文档、媒体或归档文件；这些文件已由脚本排除，不属于统计和评分依据。
 - 将 `detail.output.quality_summary_json` 中的 `detail.output.quality_summary_marker` 替换为合法 JSON 对象。
 - 搜索已生成文件时优先按 `detail.output` 中的确定路径直接读取。
-- 不得使用 shell、PowerShell、Python 临时脚本、`cat`、`type` 或 `Get-Content` 读取或写入报告文件。
-- 如果目标 `person_report_md` 缺失，返回 `BLOCKED` 并列出缺失路径；不要调用文件创建工具。
-- 如果目标 `quality_summary_json` 缺失，返回 `BLOCKED` 并列出缺失路径；不要调用文件创建工具。
+- 不要扩大任务边界、PowerShell、Python 临时脚本、`cat`、`type` 或 `Get-Content` 读取或写入报告文件。
+- 如果目标 `person_report_md` 缺失，返回 `无法完成` 并列出缺失路径；不要调用文件创建工具。
+- 如果目标 `quality_summary_json` 缺失，返回 `无法完成` 并列出缺失路径；不要调用文件创建工具。
 
 ## Markdown 写入规则
 
@@ -58,7 +58,7 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - Top 文件表、扩展名分布表、主要提交表较长时按行分批写入。
 - 写中间块时，将 `detail.output.report_marker` 替换为“本次内容 + 同一个 marker”，保留 marker 供下一块继续追加。
 - 写最后一块时，再将 marker 替换为最后内容或移除 marker。
-- 如果 marker 不存在、MCP 替换失败或目标文件不可写，立即停止并报告失败；不要改用 shell、PowerShell、Python 临时脚本或重定向写文件。
+- 如果 marker 不存在、MCP 替换失败或目标文件不可写，立即停止并报告失败；不要扩大任务边界、PowerShell、Python 临时脚本或重定向写文件。
 
 写入执行规则：
 
@@ -66,8 +66,8 @@ person_report_template: <path-to-skill>\templates\person-code-contribution-repor
 - `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response` 是必经步骤；不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - 必须立即调用 MCP 写入工具；不要先发送“准备写入”“Let me write”“Now I will write”等进度文本。
 - 写入 `quality-summary.json` 后继续写 `person-report.md`，不要等待主会话继续提示。
-- 两个文件均写入成功后，最终只返回 `DONE person_report_md=<path> quality_summary_json=<path>`。
-- 任一文件无法写入或校验失败时，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+- 两个文件均写入成功后，最终只返回 `完成 person_report_md=<path> quality_summary_json=<path>`。
+- 任一文件无法写入或校验失败时，最终只返回 `无法完成 step=<step> action=<action> path=<path> reason=<reason>`。
 
 ## Markdown 表格安全规则
 

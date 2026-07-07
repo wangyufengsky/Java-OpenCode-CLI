@@ -1,21 +1,19 @@
-package com.sonnet.wyf.gitreport.opencode;
+package com.sonnet.wyf.gitreport.agentbridge;
 
+import java.net.URI;
 import java.nio.file.Path;
 
-public record ValidatedOpenCodeTaskSpec(
-        OpenCodeServerHandle server,
+public record ValidatedAgentBridgeTaskSpec(
         Path repo,
         String title,
         Path promptFile,
         String message,
         Path runDir,
         ValidationProbe validationProbe,
-        String sessionModel,
-        int createSessionTimeoutSeconds,
-        int requestTimeoutSeconds,
         int pollMillis,
         int timeoutMinutes,
         int validationSettleSeconds,
-        int validationMaxCorrections
+        int validationMaxCorrections,
+        URI webBaseUrl
 ) {
 }

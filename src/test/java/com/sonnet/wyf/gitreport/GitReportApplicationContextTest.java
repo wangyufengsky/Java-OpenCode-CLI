@@ -1,8 +1,8 @@
 package com.sonnet.wyf.gitreport;
 
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
@@ -26,24 +26,24 @@ class GitReportApplicationContextTest {
             assertThat(context).hasSingleBean(GitReportProperties.class);
             assertThat(context).hasSingleBean(GitReportPreparation.class);
             assertThat(context).hasSingleBean(PromptBuilder.class);
-            assertThat(context).hasSingleBean(OpenCodeServerManager.class);
-            assertThat(context).hasSingleBean(OpenCodeServerTaskRunner.class);
+            assertThat(context).hasSingleBean(AgentBridgeClient.class);
+            assertThat(context).hasSingleBean(AgentBridgeTaskRunner.class);
             assertThat(context).hasSingleBean(GitReportOrchestrator.class);
             assertThat(context).hasSingleBean(ScheduledProbeWaiter.class);
             assertThat(context).doesNotHaveBean(WorkflowRunner.class);
             assertThat(context).hasBean("authorTaskExecutor");
-            assertThat(context).hasBean("openCodeTaskScheduler");
+            assertThat(context).hasBean("agentBridgeTaskScheduler");
             assertThat(context.getBean("authorTaskExecutor")).isInstanceOf(AsyncTaskExecutor.class);
-            assertThat(context.getBean("openCodeTaskScheduler")).isInstanceOf(TaskScheduler.class);
+            assertThat(context.getBean("agentBridgeTaskScheduler")).isInstanceOf(TaskScheduler.class);
         });
     }
 
     @Test
-    void authorExecutorUsesRunnerOpenCodeConcurrency() {
+    void authorExecutorUsesRunnerAgentBridgeConcurrency() {
         contextRunner
                 .withPropertyValues(
-                        "opencode-runner.opencode.concurrency=2",
-                        "opencode-runner.opencode.max-concurrency=5"
+                        "agentbridge-runner.agentbridge.concurrency=2",
+                        "agentbridge-runner.agentbridge.max-concurrency=5"
                 )
                 .run(context -> {
                     ThreadPoolTaskExecutor executor = context.getBean("authorTaskExecutor", ThreadPoolTaskExecutor.class);

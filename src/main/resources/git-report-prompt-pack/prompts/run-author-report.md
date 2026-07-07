@@ -8,7 +8,7 @@ Java 调度器会在本 prompt 后追加以下路径载荷：
 detail_json: <path>
 ```
 
-`detail_json` 是 Java 已生成的个人明细 JSON 文件。读取后，将 JSON 内容对象称为 `detail`。项目标识使用 `detail.metadata.project_id`，项目名称使用 `detail.metadata.project_name`，本次运行标识使用 `detail.metadata.run_id`；不要从 OpenCode 会话或 MCP 上下文推断项目。个人报告模板会以内嵌 Markdown 形式追加在本 prompt 后面，不需要再读取外部模板文件。
+`detail_json` 是 Java 已生成的个人明细 JSON 文件。读取后，将 JSON 内容对象称为 `detail`。项目标识使用 `detail.metadata.project_id`，项目名称使用 `detail.metadata.project_name`，本次运行标识使用 `detail.metadata.run_id`；不要从 AgentBridge 会话或 MCP 上下文推断项目。个人报告模板会以内嵌 Markdown 形式追加在本 prompt 后面，不需要再读取外部模板文件。
 
 ## 严格边界
 
@@ -29,11 +29,11 @@ detail_json: <path>
 
 ## 受控读写与取证规则
 
-- 读取 `detail_json` 时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
-- 写入个人报告和质量摘要时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
-- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
+- 读取 `detail_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入。
+- 写入个人报告和质量摘要时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
+- `AgentBridge` MCP 读写工具不可用时必须写入失败说明，不要改用其他读写工具，也不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入报告、质量摘要或代码文件。
-- 代码取证必须使用 `AgentBridge` MCP：`search_symbols`、`search_text`、`list_project_files`、`list_directory_tree` 定位候选调用点，再用 `read_file` 读取候选调用点文件。
+- 代码取证使用当前 AgentBridge 环境可用能力：`当前可用搜索能力`、`当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用目录浏览能力` 定位候选调用点，再读取候选调用点文件。
 - 公共代码取证只能用于理解调用关系；不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员。
 - 代码取证 MCP 不足，或问题需要查看提交区域之外的完整上下文才能确认时，写入 `unverified`，不要写无证据 finding。
 
@@ -46,7 +46,7 @@ detail_json: <path>
 
 ## 写入规则
 
-- 必须立即调用 `AgentBridge` MCP 工具完成读写：用 `read_file` 读取输入，用 `edit_text` 或 `write_file` 写入输出；不要只回复计划、摘要或“准备写入”。
+- 必须立即调用 `AgentBridge` MCP 工具完成读写：读取输入，写入输出；不要只回复计划、摘要或“准备写入”。
 - 个人 Markdown 单次写入不超过 6000 字符、120 行；长表格分块写。
 - 个人报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `detail.output.report_placeholders` 中列出的占位符。
 - `quality-summary.json` 必须保持合法 JSON object，并将 `status` 改为 `completed`。
@@ -55,13 +55,13 @@ detail_json: <path>
 - 任一文件无法写入或校验失败时，最终只返回：
 
 ```text
-BLOCKED step=<step> action=<action> path=<path> reason=<reason>
+无法完成 step=<step> action=<action> path=<path> reason=<reason>
 ```
 
 - 两个文件均写入成功后，最终只返回：
 
 ```text
-DONE person_report_md=<path> quality_summary_json=<path>
+完成 person_report_md=<path> quality_summary_json=<path>
 ```
 
 ## 个人报告要求

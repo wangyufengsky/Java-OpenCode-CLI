@@ -2,14 +2,12 @@ package com.sonnet.wyf.gitreport.workflow.weekly;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
 
@@ -19,24 +17,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
-    private static final int OPENCODE_POLL_MILLIS = 10_000;
-
+public class WeeklyAgentBridgeReviewRunner implements WeeklyCodeReviewRunner {
     private final ObjectMapper objectMapper;
-    private final OpenCodeServerManager serverManager;
-    private final OpenCodeServerTaskRunner taskRunner;
+    private final AgentBridgeTaskRunner taskRunner;
     private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
     private final WeeklyCodeReviewOutputValidator outputValidator;
 
-    public WeeklyOpenCodeReviewRunner(
+    public WeeklyAgentBridgeReviewRunner(
             ObjectMapper objectMapper,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ConcurrentWorkflowTaskRunner concurrentTaskRunner,
             WeeklyCodeReviewOutputValidator outputValidator
     ) {
         this.objectMapper = objectMapper;
-        this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.concurrentTaskRunner = concurrentTaskRunner;
         this.outputValidator = outputValidator;
@@ -64,15 +57,14 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
         if (batches.isEmpty()) {
             return;
         }
-        OpenCodeSettings openCode = effectiveOpenCode(request.openCode(), properties);
-        OpenCodeServerHandle server = serverManager.ensureReady(openCode, out);
-        int concurrency = Math.max(1, Math.min(properties.getReview().getConcurrency(), openCode.getMaxConcurrency()));
+        AgentBridgeSettings agentBridge = effectiveAgentBridge(request.agentBridge(), properties);
+        int concurrency = Math.max(1, Math.min(properties.getReview().getConcurrency(), agentBridge.getMaxConcurrency()));
         List<TaskRunResult> results = concurrentTaskRunner.run(
                 "weekly code review",
                 batches,
                 concurrency,
                 batch -> string(batch.get("batch_id")),
-                batch -> batchCallable(properties, openCode, out, server, batch)
+                batch -> batchCallable(properties, agentBridge, out, batch)
         );
         List<String> failures = results.stream().filter(result -> !result.success()).map(result -> result.taskName() + ": " + result.error()).toList();
         if (!failures.isEmpty()) {
@@ -82,36 +74,32 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
 
     private Callable<TaskRunResult> batchCallable(
             WeeklyEngineeringReportProperties properties,
-            OpenCodeSettings openCode,
+            AgentBridgeSettings agentBridge,
             Path out,
-            OpenCodeServerHandle server,
             Map<String, Object> batch
     ) {
         return () -> {
             String batchId = string(batch.get("batch_id"));
             Path runDir = out.resolve("runs").resolve(batchId);
-            Path statusPath = runDir.resolve("session-status.json");
+            Path statusPath = runDir.resolve("agent-status.json");
             Path summaryJson = Path.of(string(batch.get("summary_json")));
             try {
                 Files.createDirectories(runDir);
                 Files.createDirectories(summaryJson.getParent());
                 Path promptFile = runDir.resolve("worker-prompt.md");
                 Files.writeString(promptFile, buildPrompt(batch));
-                taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                        server,
+                taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                         properties.getProject().getRepo(),
                         "weekly-code-review-" + batchId,
                         promptFile,
-                        "严格执行 worker-prompt.md，写入 code-review-summary.json 和 code-review.md，最终只输出 DONE 或 BLOCKED。",
+                        agentBridge.getTaskMessage(),
                         runDir,
                         () -> validationCheck(batch, summaryJson),
-                        openCode.getSessionModel(),
-                        openCode.getCreateSessionTimeoutSeconds(),
-                        openCode.getRequestTimeoutSeconds(),
-                        OPENCODE_POLL_MILLIS,
-                        openCode.getTimeoutMinutes(),
-                        openCode.getOutputWaitSeconds(),
-                        openCode.getValidationMaxCorrections()
+                        agentBridge.getPollMillis(),
+                        agentBridge.getTimeoutMinutes(),
+                        agentBridge.getValidationSettleSeconds(),
+                        agentBridge.getValidationMaxCorrections(),
+                        java.net.URI.create(agentBridge.getWebBaseUrl())
                 ));
                 var validation = outputValidator.validate(batch, summaryJson);
                 if (validation.ok()) {
@@ -124,22 +112,19 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
         };
     }
 
-    private OpenCodeSettings effectiveOpenCode(OpenCodeSettings requestSettings, WeeklyEngineeringReportProperties properties) {
-        OpenCodeSettings settings = new OpenCodeSettings();
-        settings.setServerUrl(firstNonBlank(properties.getOpencode().getServerUrl(), requestSettings.getServerUrl()));
-        settings.setManageServer(properties.getOpencode().isManageServer());
-        settings.setServerStartTimeoutSeconds(properties.getOpencode().getServerStartTimeoutSeconds());
-        settings.setCreateSessionTimeoutSeconds(properties.getOpencode().getCreateSessionTimeoutSeconds());
-        settings.setRequestTimeoutSeconds(properties.getOpencode().getRequestTimeoutSeconds());
-        settings.setConcurrency(properties.getOpencode().getConcurrency());
-        settings.setTimeoutMinutes(properties.getOpencode().getTimeoutMinutes());
-        settings.setOutputWaitSeconds(properties.getOpencode().getOutputWaitSeconds());
-        settings.setValidationMaxCorrections(properties.getOpencode().getValidationMaxCorrections());
-        settings.setMaxRetries(properties.getOpencode().getMaxRetries());
-        settings.setMaxConcurrency(properties.getOpencode().getMaxConcurrency());
-        settings.setSessionModel(firstNonBlank(properties.getOpencode().getSessionModel(), requestSettings.getSessionModel()));
-        settings.setEnvironment(properties.getOpencode().getEnvironment());
-        settings.setOpencodeBin(requestSettings.getOpencodeBin());
+    private AgentBridgeSettings effectiveAgentBridge(AgentBridgeSettings requestSettings, WeeklyEngineeringReportProperties properties) {
+        AgentBridgeSettings settings = new AgentBridgeSettings();
+        settings.setWebBaseUrl(firstNonBlank(properties.getAgentbridge().getWebBaseUrl(), requestSettings.getWebBaseUrl()));
+        settings.setMcpUrl(firstNonBlank(properties.getAgentbridge().getMcpUrl(), requestSettings.getMcpUrl()));
+        settings.setConcurrency(properties.getAgentbridge().getConcurrency());
+        settings.setTimeoutMinutes(properties.getAgentbridge().getTimeoutMinutes());
+        settings.setPollMillis(properties.getAgentbridge().getPollMillis());
+        settings.setValidationSettleSeconds(properties.getAgentbridge().getValidationSettleSeconds());
+        settings.setValidationMaxCorrections(properties.getAgentbridge().getValidationMaxCorrections());
+        settings.setMaxRetries(properties.getAgentbridge().getMaxRetries());
+        settings.setMaxConcurrency(properties.getAgentbridge().getMaxConcurrency());
+        settings.setTaskMessage(firstNonBlank(properties.getAgentbridge().getTaskMessage(), requestSettings.getTaskMessage()));
+        settings.setSynthesisTaskMessage(firstNonBlank(properties.getAgentbridge().getSynthesisTaskMessage(), requestSettings.getSynthesisTaskMessage()));
         return settings;
     }
 
@@ -160,7 +145,7 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
 
                 严格边界：
                 - 只读取本 review unit 的 input_json。
-                - 读取 input_json 时，必须使用 `AgentBridge` MCP 文件读取工具：read_file。
+                - 读取 input_json，并按其中的 changed_regions 审查。
                 - 只审查 input_json.changed_regions 内的 hunk，不得把完整文件或其他历史链路产物作为归因依据。
                 - reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id。
                 - 不得只挑重点审查，不得因为文件多而跳过低风险 region；没有问题的 region 也必须计入 reviewed_region_ids。
@@ -168,9 +153,9 @@ public class WeeklyOpenCodeReviewRunner implements WeeklyCodeReviewRunner {
                 - severity 只能是 P0、P1、P2。
                 - summary 可以写模块级结论，但每条 finding 必须落回具体 region。
                 - code-review.md 必须按模块/文件分节，保留完整审查说明，便于最终分卷报告用相对链接跳转。
-                - 写入 summary_json 和 review_md 时，必须使用 `AgentBridge` MCP 文件编辑工具：edit_text 或 write_file。
-                - `AgentBridge` MCP 读写工具不可用时必须返回 BLOCKED，不要改用 shell、Python、重定向或其他文件读写方式。
-                - 输出必须写入 summary_json 和 review_md，最终只输出 DONE 或 BLOCKED。
+                - 写入 summary_json 和 review_md 指定的文件。
+                - 不要求使用指定读写工具名；使用当前 AgentBridge 环境可用的能力完成文件读取和写入。
+                - 完成后回复简短完成信息即可，Java 会校验输出文件。
 
                 input_json: %s
                 summary_json: %s

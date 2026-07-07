@@ -3,7 +3,7 @@ package com.sonnet.wyf.gitreport.workflow.unittest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
@@ -20,7 +20,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     public static final String ID = "project-unit-test-generation";
 
     private final ChainConfigLoader configLoader;
-    private final OpenCodeRunnerProperties runnerProperties;
+    private final AgentBridgeRunnerProperties runnerProperties;
     private final ProjectUnitTestGenerationPreparation preparation;
     private final ProjectUnitTestGenerationBatchRunner batchRunner;
     private final ProjectUnitTestGenerationReportRenderer reportRenderer;
@@ -28,7 +28,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
 
     public ProjectUnitTestGenerationWorkflowChain(
             ChainConfigLoader configLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             ProjectUnitTestGenerationPreparation preparation,
             ProjectUnitTestGenerationBatchRunner batchRunner,
             ProjectUnitTestGenerationReportRenderer reportRenderer,

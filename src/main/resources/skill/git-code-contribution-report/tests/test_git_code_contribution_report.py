@@ -326,18 +326,18 @@ class OutputLayoutTest(unittest.TestCase):
 
 
 class PromptContractTest(unittest.TestCase):
-    def test_mcp_tool_names_match_opencode_runtime(self):
+    def test_mcp_tool_names_match_agentbridge_runtime(self):
         skill_dir = SCRIPT_PATH.parents[1]
         workflow_file = "workflows/mcp-tool-contract.md"
         required_terms = [
             "AgentBridge MCP 工具命名规范",
             "AgentBridge",
-            "read_file",
-            "edit_text",
-            "write_file",
-            "search_text",
-            "search_symbols",
-            "list_project_files",
+            "当前可用读取能力",
+            "当前可用写入能力",
+            "当前可用写入能力",
+            "当前可用搜索能力",
+            "当前可用搜索能力",
+            "当前可用项目文件列表能力",
         ]
 
         workflow_content = (skill_dir / workflow_file).read_text(encoding="utf-8")
@@ -371,8 +371,8 @@ class PromptContractTest(unittest.TestCase):
 
         skill_md = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("workflows/mcp-tool-contract.md", skill_md)
-        self.assertNotIn("read_file", skill_md)
-        self.assertNotIn("search_symbols", skill_md)
+        self.assertNotIn("当前可用读取能力", skill_md)
+        self.assertNotIn("当前可用搜索能力", skill_md)
 
     def test_quality_rules_reward_public_reused_code_with_risk_balance(self):
         skill_dir = SCRIPT_PATH.parents[1]
@@ -610,10 +610,10 @@ class PromptContractTest(unittest.TestCase):
             for term in required_terms:
                 self.assertIn(term, content, relative_path)
 
-    def test_opencode_explore_is_allowed_as_bounded_context_probe(self):
+    def test_agentbridge_explore_is_allowed_as_bounded_context_probe(self):
         skill_dir = SCRIPT_PATH.parents[1]
         required_terms = [
-            "优先使用 OpenCode `explore` 做上下文探索",
+            "优先使用 AgentBridge `explore` 做上下文探索",
             "当前作者 session 只消费 `explore` 返回的短证据摘要",
             "`explore` 不得返回完整文件、大段源码或未压缩搜索结果",
             "不得把完整文件中不属于 `detail.changed_regions` 的代码归因给该人员",
@@ -635,7 +635,7 @@ class PromptContractTest(unittest.TestCase):
             "不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束",
             "必须立即调用 MCP 写入工具",
             "先写 `quality-summary.json`，再写 `person-report.md`",
-            "只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`",
+            "只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `完成` 或 `无法完成`",
         ]
 
         for relative_path in [
@@ -654,7 +654,7 @@ class PromptContractTest(unittest.TestCase):
             "按 `step` 升序逐项执行",
             "不得把 worklist 作为最终响应",
             "不得在生成 worklist 后停止",
-            "BLOCKED step=<step> action=<action> path=<path> reason=<reason>",
+            "无法完成 step=<step> action=<action> path=<path> reason=<reason>",
             "write_person_report",
             "write_quality_summary",
             "verify_outputs",

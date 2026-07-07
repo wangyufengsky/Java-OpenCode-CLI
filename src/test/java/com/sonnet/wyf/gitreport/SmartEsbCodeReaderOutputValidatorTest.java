@@ -1,7 +1,7 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderOutputValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

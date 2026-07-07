@@ -169,7 +169,7 @@ Markdown 报告之间的链接必须使用相对路径：
 ]
 ```
 
-`tasks/batches/module-batch-*.json` 是模块批次子Agent的输入。默认每个模块批次最多 10 个任务；如果命令行传入 `--batch-size`，以命令行值为准。OpenCode 桌面版中子Agent不能再启动子Agent，因此模块批次子Agent读取 batch JSON 后，必须把其中每个 `task_path` 建成待办事项，并按待办顺序逐个执行模块任务；不要在模块批次子Agent内启动任何子Agent。
+`tasks/batches/module-batch-*.json` 是模块批次子Agent的输入。默认每个模块批次最多 10 个任务；如果命令行传入 `--batch-size`，以命令行值为准。AgentBridge 桌面版中子Agent不能再启动子Agent，因此模块批次子Agent读取 batch JSON 后，必须把其中每个 `task_path` 建成待办事项，并按待办顺序逐个执行模块任务；不要在模块批次子Agent内启动任何子Agent。
 
 交易侧不生成 batch。每个 `tasks/transaction-*.json` 直接分配给一个单任务交易子Agent；一个交易子Agent只能接收一个 `task_json_path`。
 
@@ -434,12 +434,12 @@ Java 候选通过以下方式匹配：
 Java 分析工具规则：
 
 - AgentBridge MCP 工具名统一使用裸名形式；需要限定项目时，使用当前客户端支持的项目或路径参数，避免多项目打开时查错项目。
-- 优先使用 `search_symbols` 按类名定位 Java 类，例如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
-- 使用 `list_project_files` 按文件名、通配符或 XML 文件定位候选，例如 `Application.java`、`application*.yml`、`*.xml`。
-- 使用 `read_file` 读取候选文件内容，用于分析 Java 主流程、配置、XML、mapper XML 或其他证据文件。
-- `read_file.file` 必须使用 AgentBridge 查找工具返回的 `file` 相对路径原文，不要删掉最前面的模块目录。若返回路径是 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须完整传 `upfs-cloud-xc/ECIS/src/.../BaseX.java`；传 `ECIS/src/.../BaseX.java` 会找不到文件。
-- 如果 `read_file` 报 `File not found`，先用 `list_project_files` 或 `search_text` 重新定位，再把返回的 `file` 字段原样传给 `read_file`；不要自己裁剪、拼接或归一化掉首段目录。
-- 需要一次查找多种关键文件时使用 `search_text`，例如同时查找 `Application.java`、`application-*.yml`、关键 mapper XML。
+- 优先使用 `当前可用搜索能力` 按类名定位 Java 类，例如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
+- 使用 `当前可用项目文件列表能力` 按文件名、通配符或 XML 文件定位候选，例如 `Application.java`、`application*.yml`、`*.xml`。
+- 使用 当前可用读取能力 读取候选文件内容，用于分析 Java 主流程、配置、XML、mapper XML 或其他证据文件。
+- `当前可用读取能力.file` 必须使用 AgentBridge 查找工具返回的 `file` 相对路径原文，不要删掉最前面的模块目录。若返回路径是 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须完整传 `upfs-cloud-xc/ECIS/src/.../BaseX.java`；传 `ECIS/src/.../BaseX.java` 会找不到文件。
+- 如果 当前可用读取能力 报 `File not found`，先用 `当前可用项目文件列表能力` 或 `当前可用搜索能力` 重新定位，再把返回的 `file` 字段原样传给 当前可用读取能力；不要自己裁剪、拼接或归一化掉首段目录。
+- 需要一次查找多种关键文件时使用 `当前可用搜索能力`，例如同时查找 `Application.java`、`application-*.yml`、关键 mapper XML。
 - 按命名风格递进查找，不同项目命名可能不同：先查更贴近 `serviceId` 的类，再查常见后缀如 Controller、Service、Mapper、DAO、Task、Listener、Entity、DTO、BO、VO。
 - 不要优先用 shell/grep/rg 读取 Java 源码。只有 AgentBridge MCP 工具不可用、候选缺失、返回内容不足或需要核对非 Java 文件时，才做最小范围文件读取，并把原因写入 `risks_or_uncertainties`。
 

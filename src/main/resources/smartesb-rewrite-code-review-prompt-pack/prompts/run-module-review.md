@@ -30,31 +30,31 @@
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。
 
-## BLOCKED 边界
+## 无法完成 边界
 
-只有以下情况才能返回 `BLOCKED`：
+只有以下情况才能写入失败说明：
 
 - task JSON、目标输出文件或必要的 `new_project` 路径不存在。
 - `AgentBridge` MCP 文件编辑工具不可用，导致无法写入报告。
 - 目标路径不可写，或预创建输出文件缺失。
 
-以下情况不得返回 `BLOCKED`：
+以下情况不得写入失败说明：
 
 - 任务复杂、搜索结果少、需要更多分析时间。
 - 想使用额外任务 session 或其他派发能力。
 - 模块不是交易，或者在映射文档、old-8583-doc、重构设计中找不到同名交易。
 - 只找到基础类、公共类、抽象类或工具类。
 
-证据不足时必须写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围；完成文件写入后输出 `DONE`。
+证据不足时必须写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围；完成文件写入后回复简短完成信息。
 
 ## 受控读写与取证规则
 
-- 读取 task JSON 和准备器输出时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
-- 定位模块代码时优先使用 `search_symbols`、`list_project_files`、`search_text`。
-- 搜索不到刚生成或刚修改的文件时，先尝试 `list_project_files`，再重试一次。
-- 代码和文档定位、读取、取证必须使用 `AgentBridge` MCP；不得使用其他读取方式。
-- 写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
-- `AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+- 读取 task JSON 和准备器输出时，使用当前 AgentBridge 环境可用能力读取任务输入。
+- 定位模块代码时优先使用 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力`。
+- 搜索不到刚生成或刚修改的文件时，先尝试 `当前可用项目文件列表能力`，再重试一次。
+- 代码和文档定位、读取、取证使用当前 AgentBridge 环境可用能力；不得使用其他读取方式。
+- 写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
+- `AgentBridge` MCP 读写工具不可用时必须写入失败说明，不要在最终回答中粘贴完整报告替代写文件。
 - 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件或详细设计。
 
 ## 审查重点

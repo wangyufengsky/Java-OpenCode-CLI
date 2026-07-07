@@ -1,7 +1,7 @@
 package com.sonnet.wyf.gitreport.console;
 
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
@@ -16,7 +16,7 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
     private final WorkflowRunRepository repository;
     private final WorkflowEventSink eventSink;
     private final RunConfigWriter configWriter;
-    private final OpenCodeRunnerProperties runnerProperties;
+    private final AgentBridgeRunnerProperties runnerProperties;
     private final ExecutorService executorService;
 
     public WorkflowExecutionService(
@@ -24,7 +24,7 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
             WorkflowRunRepository repository,
             WorkflowEventSink eventSink,
             RunConfigWriter configWriter,
-            OpenCodeRunnerProperties runnerProperties
+            AgentBridgeRunnerProperties runnerProperties
     ) {
         this(chainCatalog, repository, eventSink, configWriter, runnerProperties,
                 Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "workflow-console-runner")));
@@ -35,7 +35,7 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
             WorkflowRunRepository repository,
             WorkflowEventSink eventSink,
             RunConfigWriter configWriter,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             ExecutorService executorService
     ) {
         this.chainCatalog = chainCatalog;
@@ -81,7 +81,7 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
                     submission.rerunType(),
                     submission.rerunId(),
                     submission.runDate(),
-                    submission.openCode() == null ? copy(runnerProperties.getOpencode()) : submission.openCode(),
+                    submission.agentBridge() == null ? copy(runnerProperties.getAgentbridge()) : submission.agentBridge(),
                     configDir.toString()
             ));
             repository.markSucceeded(runId);
@@ -101,7 +101,7 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
                 submission.rerunId(),
                 submission.runDate(),
                 ConsoleConfigNormalizer.normalize(submission.config()),
-                submission.openCode()
+                submission.agentBridge()
         );
     }
 
@@ -109,22 +109,19 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static OpenCodeSettings copy(OpenCodeSettings source) {
-        OpenCodeSettings target = new OpenCodeSettings();
-        target.setServerUrl(source.getServerUrl());
-        target.setManageServer(source.isManageServer());
-        target.setServerStartTimeoutSeconds(source.getServerStartTimeoutSeconds());
-        target.setCreateSessionTimeoutSeconds(source.getCreateSessionTimeoutSeconds());
-        target.setRequestTimeoutSeconds(source.getRequestTimeoutSeconds());
+    private static AgentBridgeSettings copy(AgentBridgeSettings source) {
+        AgentBridgeSettings target = new AgentBridgeSettings();
+        target.setWebBaseUrl(source.getWebBaseUrl());
+        target.setMcpUrl(source.getMcpUrl());
         target.setConcurrency(source.getConcurrency());
         target.setTimeoutMinutes(source.getTimeoutMinutes());
-        target.setOutputWaitSeconds(source.getOutputWaitSeconds());
+        target.setPollMillis(source.getPollMillis());
+        target.setValidationSettleSeconds(source.getValidationSettleSeconds());
         target.setValidationMaxCorrections(source.getValidationMaxCorrections());
         target.setMaxRetries(source.getMaxRetries());
         target.setMaxConcurrency(source.getMaxConcurrency());
-        target.setOpencodeBin(source.getOpencodeBin());
-        target.setSessionModel(source.getSessionModel());
-        target.setEnvironment(source.getEnvironment());
+        target.setTaskMessage(source.getTaskMessage());
+        target.setSynthesisTaskMessage(source.getSynthesisTaskMessage());
         return target;
     }
 

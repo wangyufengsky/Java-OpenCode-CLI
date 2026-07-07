@@ -1,6 +1,6 @@
 package com.sonnet.wyf.gitreport.console;
 
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -12,6 +12,6 @@ public record WorkflowRunSubmission(
         String rerunId,
         LocalDate runDate,
         Map<String, Object> config,
-        OpenCodeSettings openCode
+        AgentBridgeSettings agentBridge
 ) {
 }

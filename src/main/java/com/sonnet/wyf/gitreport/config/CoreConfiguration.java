@@ -2,7 +2,7 @@ package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
@@ -17,24 +17,24 @@ public class CoreConfiguration {
     }
 
     @Bean(destroyMethod = "shutdown")
-    ThreadPoolTaskScheduler openCodeTaskScheduler() {
+    ThreadPoolTaskScheduler agentBridgeTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setThreadNamePrefix("opencode-session-poll-");
+        scheduler.setThreadNamePrefix("agentbridge-task-poll-");
         scheduler.setPoolSize(4);
         scheduler.initialize();
         return scheduler;
     }
 
     @Bean
-    ScheduledProbeWaiter scheduledProbeWaiter(TaskScheduler openCodeTaskScheduler) {
-        return new ScheduledProbeWaiter(openCodeTaskScheduler);
+    ScheduledProbeWaiter scheduledProbeWaiter(TaskScheduler agentBridgeTaskScheduler) {
+        return new ScheduledProbeWaiter(agentBridgeTaskScheduler);
     }
 
     @Bean(destroyMethod = "shutdown")
-    ThreadPoolTaskExecutor authorTaskExecutor(OpenCodeRunnerProperties properties) {
+    ThreadPoolTaskExecutor authorTaskExecutor(AgentBridgeRunnerProperties properties) {
         int concurrency = Math.max(1, Math.min(
-                properties.getOpencode().getConcurrency(),
-                properties.getOpencode().getMaxConcurrency()
+                properties.getAgentbridge().getConcurrency(),
+                properties.getAgentbridge().getMaxConcurrency()
         ));
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setThreadNamePrefix("git-report-author-");

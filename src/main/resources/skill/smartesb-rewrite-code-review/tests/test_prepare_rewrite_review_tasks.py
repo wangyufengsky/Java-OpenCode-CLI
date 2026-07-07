@@ -131,8 +131,8 @@ class PrepareRewriteReviewTasksTest(unittest.TestCase):
 
             self.assertEqual(markers["findings_md"], "<!-- OPENCODE_APPEND:01-findings -->")
             self.assertEqual(markers["review_md"], "<!-- OPENCODE_APPEND:review -->")
-            self.assertIn("edit_text", task["skill"]["agentbridge_write_tools"])
-            self.assertIn("write_file", task["skill"]["agentbridge_write_tools"])
+            self.assertIn("当前可用写入能力", task["skill"]["write_hints"])
+            self.assertIn("当前可用写入能力", task["skill"]["write_hints"])
             self.assertNotIn("create_new_file", json.dumps(task["skill"]))
             self.assertNotIn("intellij-idea", json.dumps(task["skill"]))
             self.assertNotIn("intellij-index", json.dumps(task["skill"]))
@@ -175,11 +175,11 @@ class PrepareRewriteReviewTasksTest(unittest.TestCase):
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
 
-        self.assertNotIn("禁止调用 `write_file`", combined)
-        self.assertNotIn("不得调用 `write_file`", combined)
+        self.assertNotIn("禁止调用 当前可用写入能力", combined)
+        self.assertNotIn("不得调用 当前可用写入能力", combined)
         self.assertNotIn("刷新索引", combined)
         self.assertNotIn("索引疑似过期", combined)
-        self.assertIn("write_file", combined)
+        self.assertIn("当前可用写入能力", combined)
         self.assertIn("项目文件视图", combined)
 
 

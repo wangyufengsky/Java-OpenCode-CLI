@@ -5,8 +5,8 @@ import com.sonnet.wyf.gitreport.preparation.CommandExecutor;
 import com.sonnet.wyf.gitreport.preparation.CommentLineCounter;
 import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEngineeringReportWorkflowChain;
@@ -39,7 +39,7 @@ class WeeklyEngineeringReportWorkflowChainTest {
         writeChainConfig(repo, out);
         WeeklyEngineeringReportWorkflowChain chain = chain();
 
-        chain.run(new WorkflowRunRequest("full", "", "", LocalDate.of(2026, 6, 26), new OpenCodeSettings()));
+        chain.run(new WorkflowRunRequest("full", "", "", LocalDate.of(2026, 6, 26), new AgentBridgeSettings()));
 
         assertThat(out.resolve("weekly-git-evidence.json")).exists();
         assertThat(out.resolve("review-batches.json")).exists();
@@ -52,7 +52,7 @@ class WeeklyEngineeringReportWorkflowChainTest {
     }
 
     private WeeklyEngineeringReportWorkflowChain chain() {
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         runnerProperties.setConfigDir(tempDir.resolve("chains").toString());
         return new WeeklyEngineeringReportWorkflowChain(
                 new ChainConfigLoader(new DefaultResourceLoader()),

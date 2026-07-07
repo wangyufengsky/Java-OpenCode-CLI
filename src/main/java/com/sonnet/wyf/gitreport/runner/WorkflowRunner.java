@@ -14,10 +14,10 @@ import java.util.stream.Collectors;
 public class WorkflowRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(WorkflowRunner.class);
 
-    private final OpenCodeRunnerProperties properties;
+    private final AgentBridgeRunnerProperties properties;
     private final Map<String, WorkflowChain> chains;
 
-    public WorkflowRunner(OpenCodeRunnerProperties properties, List<WorkflowChain> chains) {
+    public WorkflowRunner(AgentBridgeRunnerProperties properties, List<WorkflowChain> chains) {
         this.properties = properties;
         this.chains = chains.stream().collect(Collectors.toMap(WorkflowChain::id, Function.identity()));
     }
@@ -25,20 +25,20 @@ public class WorkflowRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         if (!properties.isEnabled()) {
-            log.info("opencode-runner.enabled=false, skipped workflow orchestration.");
+            log.info("agentbridge-runner.enabled=false, skipped workflow orchestration.");
             return;
         }
         String chainId = normalize(properties.getActiveChain());
         WorkflowChain chain = chains.get(chainId);
         if (chain == null) {
-            throw new IllegalArgumentException("Unknown opencode-runner.active-chain: " + properties.getActiveChain() + ", available=" + chains.keySet());
+            throw new IllegalArgumentException("Unknown agentbridge-runner.active-chain: " + properties.getActiveChain() + ", available=" + chains.keySet());
         }
         WorkflowRunRequest request = new WorkflowRunRequest(
                 normalize(properties.getMode()),
                 normalize(properties.getRerun().getType()),
                 properties.getRerun().getId(),
                 properties.getRunDate(),
-                properties.getOpencode(),
+                properties.getAgentbridge(),
                 properties.getConfigDir()
         );
         log.info("Starting workflow chain: id={}, mode={}, rerunType={}, rerunId={}, runDate={}",

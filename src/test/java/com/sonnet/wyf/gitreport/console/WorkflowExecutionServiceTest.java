@@ -1,6 +1,6 @@
 package com.sonnet.wyf.gitreport.console;
 
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.junit.jupiter.api.Test;
@@ -52,7 +52,7 @@ class WorkflowExecutionServiceTest {
         Files.createDirectories(configDir);
         Path defaultYaml = configDir.resolve("demo-chain.yml");
         Files.writeString(defaultYaml, "value: default");
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         runnerProperties.setConfigDir(configDir.toString());
         CapturingChain chain = new CapturingChain(runnerProperties);
         Fixture fixture = fixture(List.of(chain), runnerProperties);
@@ -70,7 +70,7 @@ class WorkflowExecutionServiceTest {
         Path configDir = tempDir.resolve("defaults");
         Files.createDirectories(configDir);
         Files.writeString(configDir.resolve("demo-chain.yml"), "value: default");
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         runnerProperties.setConfigDir(configDir.toString());
         CapturingChain chain = new CapturingChain(runnerProperties);
         Fixture fixture = fixture(List.of(chain), runnerProperties);
@@ -92,7 +92,7 @@ class WorkflowExecutionServiceTest {
         Path configDir = tempDir.resolve("defaults");
         Files.createDirectories(configDir);
         Files.writeString(configDir.resolve("demo-chain.yml"), "value: default");
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         runnerProperties.setConfigDir(configDir.toString());
         CapturingChain chain = new CapturingChain(runnerProperties);
         Fixture fixture = fixture(List.of(chain), runnerProperties);
@@ -142,7 +142,7 @@ class WorkflowExecutionServiceTest {
         WorkflowRunRepository repository = new WorkflowRunRepository(jdbcTemplate);
         EventStreamService streamService = new EventStreamService();
         WorkflowEventSink eventSink = new WorkflowEventSink(repository, streamService);
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         TaskConsoleProperties consoleProperties = new TaskConsoleProperties();
         consoleProperties.setRunConfigDir(runConfigFile);
         WorkflowExecutionService service = new WorkflowExecutionService(
@@ -210,12 +210,12 @@ class WorkflowExecutionServiceTest {
     }
 
     private Fixture fixture(List<WorkflowChain> chains, String configDir) throws Exception {
-        OpenCodeRunnerProperties runnerProperties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
         runnerProperties.setConfigDir(configDir);
         return fixture(chains, runnerProperties);
     }
 
-    private Fixture fixture(List<WorkflowChain> chains, OpenCodeRunnerProperties runnerProperties) throws Exception {
+    private Fixture fixture(List<WorkflowChain> chains, AgentBridgeRunnerProperties runnerProperties) throws Exception {
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
@@ -247,7 +247,7 @@ class WorkflowExecutionServiceTest {
     private static class CapturingChain implements WorkflowChain {
         private String configDir;
 
-        private CapturingChain(OpenCodeRunnerProperties properties) {
+        private CapturingChain(AgentBridgeRunnerProperties properties) {
         }
 
         @Override

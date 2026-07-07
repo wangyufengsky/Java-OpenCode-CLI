@@ -61,6 +61,6 @@ class WeeklyEngineeringReportPropertiesTest {
         assertThat(properties.getReview().getGrouping().getMaxFilesPerTask()).isEqualTo(25);
         assertThat(properties.getReview().getGrouping().getMaxHunkCharsPerTask()).isEqualTo(80_000);
         assertThat(properties.getReview().getGrouping().getMaxCommitsPerTask()).isEqualTo(40);
-        assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
+        assertThat(properties.getAgentbridge().getTimeoutMinutes()).isEqualTo(40);
     }
 }

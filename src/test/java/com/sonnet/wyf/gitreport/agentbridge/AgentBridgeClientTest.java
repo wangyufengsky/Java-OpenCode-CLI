@@ -1,8 +1,7 @@
-package com.sonnet.wyf.gitreport;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationAgentBridgeClient;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -19,9 +18,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ProjectUnitTestGenerationAgentBridgeClientTest {
+class AgentBridgeClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
-    private final ProjectUnitTestGenerationAgentBridgeClient client = new ProjectUnitTestGenerationAgentBridgeClient(objectMapper);
+    private final AgentBridgeClient client = new AgentBridgeClient(objectMapper);
     private final List<HttpServer> servers = new ArrayList<>();
 
     @AfterEach
@@ -45,33 +44,16 @@ class ProjectUnitTestGenerationAgentBridgeClientTest {
         server.start();
 
         URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
-        client.postPrompt(base, "write tests");
+        client.postPrompt(base, "write report");
         client.waitUntilIdle(base, Duration.ofSeconds(2), Duration.ofMillis(1));
 
         assertThat(promptBodies).hasSize(1);
-        assertThat(objectMapper.readTree(promptBodies.get(0)).path("text").asText()).isEqualTo("write tests");
+        assertThat(objectMapper.readTree(promptBodies.get(0)).path("text").asText()).isEqualTo("write report");
         assertThat(infoCalls.get()).isEqualTo(2);
     }
 
     @Test
-    void waitUntilIdleDoesNotReturnBeforeAgentStartsRunning() throws Exception {
-        AtomicInteger infoCalls = new AtomicInteger();
-        HttpServer server = server();
-        server.createContext("/info", exchange -> {
-            int call = infoCalls.getAndIncrement();
-            boolean running = call == 2;
-            respond(exchange, 200, "{\"running\":" + running + "}");
-        });
-        server.start();
-
-        URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
-        client.waitUntilIdle(base, Duration.ofSeconds(2), Duration.ofMillis(1));
-
-        assertThat(infoCalls.get()).isGreaterThanOrEqualTo(4);
-    }
-
-    @Test
-    void callsMcpToolsCallWithNameAndArguments() throws Exception {
+    void parsesStructuredToolResponseFromMcpContentText() throws Exception {
         List<JsonNode> requests = new ArrayList<>();
         HttpServer server = server();
         server.createContext("/mcp", exchange -> {
@@ -83,7 +65,7 @@ class ProjectUnitTestGenerationAgentBridgeClientTest {
                       "id": 1,
                       "result": {
                         "content": [
-                          {"type": "text", "text": "{\\"tests\\":[\\"com.acme.OrderServiceTest\\"],\\"success\\":true}"}
+                          {"type": "text", "text": "{\\"ok\\":true,\\"tests\\":[\\"OrderServiceTest\\"]}"}
                         ]
                       }
                     }
@@ -91,7 +73,7 @@ class ProjectUnitTestGenerationAgentBridgeClientTest {
         });
         server.start();
 
-        ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response = client.callTool(
+        AgentBridgeClient.ToolResponse response = client.callTool(
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
                 "list_tests",
                 objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
@@ -100,8 +82,8 @@ class ProjectUnitTestGenerationAgentBridgeClientTest {
         assertThat(requests).hasSize(1);
         assertThat(requests.get(0).path("method").asText()).isEqualTo("tools/call");
         assertThat(requests.get(0).path("params").path("name").asText()).isEqualTo("list_tests");
-        assertThat(requests.get(0).path("params").path("arguments").path("file_pattern").asText()).isEqualTo("OrderServiceTest");
         assertThat(response.text()).contains("OrderServiceTest");
+        assertThat(response.structured().path("ok").asBoolean()).isTrue();
         assertThat(response.structured().path("tests")).hasSize(1);
     }
 

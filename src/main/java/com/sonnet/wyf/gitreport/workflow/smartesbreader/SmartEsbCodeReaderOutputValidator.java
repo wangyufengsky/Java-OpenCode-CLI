@@ -2,7 +2,7 @@ package com.sonnet.wyf.gitreport.workflow.smartesbreader;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

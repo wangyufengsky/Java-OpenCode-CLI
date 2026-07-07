@@ -1,4 +1,4 @@
-opencode-runner:
+agentbridge-runner:
   enabled: false
   active-chain: "git-code-contribution-report"
   mode: "full"
@@ -7,23 +7,17 @@ opencode-runner:
   rerun:
     type:
     id:
-  opencode:
-    server-url: "http://127.0.0.1:4096"
-    manage-server: true
-    server-start-timeout-seconds: 30
-    create-session-timeout-seconds: 10
-    request-timeout-seconds: 60
-    opencode-bin: "opencode"
-    session-model: "spdb-new-api/minimax-m2.7"
-    concurrency: 6
+  agentbridge:
+    web-base-url: "https://127.0.0.1:9642"
+    mcp-url: "http://127.0.0.1:8642/mcp"
+    concurrency: 1
+    max-concurrency: 1
     timeout-minutes: 40
-    output-wait-seconds: 30
+    poll-millis: 1000
+    validation-settle-seconds: 30
     validation-max-corrections: 2
     max-retries: 1
-    max-concurrency: 6
-    environment:
-      OPENCODE_DISABLE_MODELS_FETCH: "true"
 
 task-console:
-  database-path: "data/opencode-task-console.sqlite"
+  database-path: "data/agentbridge-task-console.sqlite"
   run-config-dir: "data/run-configs"

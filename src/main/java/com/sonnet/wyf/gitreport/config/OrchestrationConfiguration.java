@@ -2,8 +2,7 @@ package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -61,8 +60,7 @@ public class OrchestrationConfiguration {
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
             PromptBuilder promptBuilder,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             FinalReportValidator finalReportValidator,
             QualityScoresWriter qualityScoresWriter,
@@ -76,7 +74,6 @@ public class OrchestrationConfiguration {
                 preparation,
                 objectMapper,
                 promptBuilder,
-                serverManager,
                 taskRunner,
                 outputValidator,
                 finalReportValidator,

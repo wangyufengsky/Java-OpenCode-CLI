@@ -26,12 +26,10 @@ class GitReportPropertiesTest {
                         "git-report.git.since=2026-06-01",
                         "git-report.git.until=2026-06-15",
                         "git-report.git.exclude[0]=target/**",
-                        "git-report.opencode.server-url=http://127.0.0.1:4097",
-                        "git-report.opencode.manage-server=false",
-                        "git-report.opencode.server-start-timeout-seconds=12",
-                        "git-report.opencode.create-session-timeout-seconds=11",
-                        "git-report.opencode.request-timeout-seconds=90",
-                        "git-report.opencode.validation-max-corrections=3",
+                        "git-report.agentbridge.web-base-url=https://127.0.0.1:9642",
+                        "git-report.agentbridge.mcp-url=http://127.0.0.1:8642/mcp",
+                        "git-report.agentbridge.validation-settle-seconds=12",
+                        "git-report.agentbridge.validation-max-corrections=3",
                         "git-report.detail-input.top-files=7",
                         "git-report.detail-input.commits=12",
                         "git-report.synthesis-input.person-report-excerpt-chars=8192",
@@ -51,16 +49,14 @@ class GitReportPropertiesTest {
                     assertThat(properties.getGit().getUntil()).isEqualTo(LocalDate.of(2026, 6, 15));
                     assertThat(properties.getGit().getRevision()).isEqualTo("HEAD");
                     assertThat(properties.getGit().getExclude()).containsExactly("target/**");
-                    assertThat(properties.getOpencode().getServerUrl()).isEqualTo("http://127.0.0.1:4097");
-                    assertThat(properties.getOpencode().isManageServer()).isFalse();
-                    assertThat(properties.getOpencode().getServerStartTimeoutSeconds()).isEqualTo(12);
-                    assertThat(properties.getOpencode().getCreateSessionTimeoutSeconds()).isEqualTo(11);
-                    assertThat(properties.getOpencode().getRequestTimeoutSeconds()).isEqualTo(90);
-                    assertThat(properties.getOpencode().getValidationMaxCorrections()).isEqualTo(3);
-                    assertThat(properties.getOpencode().getConcurrency()).isEqualTo(6);
-                    assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
-                    assertThat(properties.getOpencode().getMaxRetries()).isEqualTo(1);
-                    assertThat(properties.getOpencode().getMaxConcurrency()).isEqualTo(6);
+                    assertThat(properties.getAgentbridge().getWebBaseUrl()).isEqualTo("https://127.0.0.1:9642");
+                    assertThat(properties.getAgentbridge().getMcpUrl()).isEqualTo("http://127.0.0.1:8642/mcp");
+                    assertThat(properties.getAgentbridge().getValidationSettleSeconds()).isEqualTo(12);
+                    assertThat(properties.getAgentbridge().getValidationMaxCorrections()).isEqualTo(3);
+                    assertThat(properties.getAgentbridge().getConcurrency()).isEqualTo(1);
+                    assertThat(properties.getAgentbridge().getTimeoutMinutes()).isEqualTo(40);
+                    assertThat(properties.getAgentbridge().getMaxRetries()).isEqualTo(1);
+                    assertThat(properties.getAgentbridge().getMaxConcurrency()).isEqualTo(1);
                     assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(7);
                     assertThat(properties.getDetailInput().getCommits()).isEqualTo(12);
                     assertThat(properties.getDetailInput().getChangedRegions()).isEqualTo(40);

@@ -16,7 +16,7 @@ class ArchitectureConventionsTest {
         assertThat(code).doesNotContain("@Bean");
         assertThat(code).doesNotContain("new GitReportPreparation");
         assertThat(code).doesNotContain("new GitReportOrchestrator");
-        assertThat(code).doesNotContain("new OpenCodeServerTaskRunner");
+        assertThat(code).doesNotContain("new AgentBridgeTaskRunner");
         assertThat(code).contains("SpringApplication.run(GitReportApplication.class, args)");
         assertThat(code).doesNotContain("SpringApplication.exit");
     }
@@ -24,7 +24,7 @@ class ArchitectureConventionsTest {
     @Test
     void orchestrationUsesSpringExecutorAndRunnerOwnsScheduledWaiter() throws Exception {
         String orchestrator = read("src/main/java/com/sonnet/wyf/gitreport/orchestration/GitReportOrchestrator.java");
-        String taskRunner = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerTaskRunner.java");
+        String taskRunner = read("src/main/java/com/sonnet/wyf/gitreport/agentbridge/AgentBridgeTaskRunner.java");
 
         assertThat(orchestrator).contains("ConcurrentWorkflowTaskRunner");
         assertThat(orchestrator).doesNotContain("Executors.");
@@ -34,32 +34,43 @@ class ArchitectureConventionsTest {
     }
 
     @Test
-    void serverStartupHealthCheckUsesScheduledWaiter() throws Exception {
-        String code = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerManager.java");
+    void runtimeCodeAndPromptsDoNotReferToOpenCodeServerContract() throws Exception {
+        List<String> roots = List.of(
+                "README.md",
+                "src/main/java/com/sonnet/wyf/gitreport",
+                "src/main/resources/chains",
+                "src/main/resources/git-report-prompt-pack",
+                "src/main/resources/smartesb-code-reader-prompt-pack",
+                "src/main/resources/smartesb-rewrite-code-review-prompt-pack",
+                "src/main/resources/skill"
+        );
+        List<String> forbidden = List.of(
+                "OpenCode",
+                "opencode",
+                "DONE",
+                "BLOCKED",
+                "read_file",
+                "edit_text",
+                "write_file",
+                "agentbridge_write_tools",
+                "agentbridge_read_tools",
+                "preferred_reader",
+                "preferred_writer",
+                "writer_preference",
+                "reader_preference"
+        );
 
-        assertThat(code).contains("ScheduledProbeWaiter");
-        assertThat(code).doesNotContain("TimeUnit.MILLISECONDS.sleep");
-    }
-
-    @Test
-    void openCodeClientUsesOpenCode117ApiContractOnly() throws Exception {
-        String client = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeServerClient.java");
-        String modelMapper = read("src/main/java/com/sonnet/wyf/gitreport/opencode/OpenCodeModelMapper.java");
-        String application = read("src/main/resources/application.yml");
-        String example = read("src/main/resources/application-example.yml");
-
-        assertThat(client).contains("/session");
-        assertThat(client).contains("X-OpenCode-Directory");
-        assertThat(client).contains("/prompt_async");
-        assertThat(client).contains("/message");
-        assertThat(client).doesNotContain("/api/session");
-        assertThat(client).doesNotContain("?directory=");
-        assertThat(client).contains("body.put(\"model\", sessionModelObject");
-        assertThat(modelMapper).contains("result.put(\"providerID\"");
-        assertThat(modelMapper).contains("result.put(\"id\"");
-        assertThat(modelMapper).contains("result.put(\"modelID\"");
-        assertThat(application).doesNotContain("\n    model:");
-        assertThat(example).doesNotContain("\n    model:");
+        for (String root : roots) {
+            Path path = Path.of(root);
+            if (Files.isRegularFile(path)) {
+                assertNoForbiddenResidue(path, forbidden);
+                continue;
+            }
+            try (var files = Files.walk(path)) {
+                files.filter(Files::isRegularFile)
+                        .forEach(file -> assertNoForbiddenResidue(file, forbidden));
+            }
+        }
     }
 
     @Test

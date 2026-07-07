@@ -9,11 +9,11 @@ public record WorkflowRunRequest(
         String rerunType,
         String rerunId,
         LocalDate runDate,
-        OpenCodeSettings openCode,
+        AgentBridgeSettings agentBridge,
         String configDir
 ) {
-    public WorkflowRunRequest(String mode, String rerunType, String rerunId, LocalDate runDate, OpenCodeSettings openCode) {
-        this(mode, rerunType, rerunId, runDate, openCode, "");
+    public WorkflowRunRequest(String mode, String rerunType, String rerunId, LocalDate runDate, AgentBridgeSettings agentBridge) {
+        this(mode, rerunType, rerunId, runDate, agentBridge, "");
     }
 
     public LocalDate effectiveRunDate() {

@@ -1,8 +1,8 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -10,7 +10,7 @@ import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.workflow.gitreport.GitReportWorkflowChain;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbDailyTransactionPlanLoader;
@@ -27,9 +27,8 @@ import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceBuilder;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEvidenceValidator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewOutputValidator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewRunner;
-import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyOpenCodeReviewRunner;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyAgentBridgeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyReportRenderer;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationAgentBridgeClient;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationBatchRunner;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
@@ -101,12 +100,11 @@ public class RunnerConfiguration {
     @Bean
     WeeklyCodeReviewRunner weeklyCodeReviewRunner(
             ObjectMapper objectMapper,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ConcurrentWorkflowTaskRunner concurrentTaskRunner,
             WeeklyCodeReviewOutputValidator outputValidator
     ) {
-        return new WeeklyOpenCodeReviewRunner(objectMapper, serverManager, taskRunner, concurrentTaskRunner, outputValidator);
+        return new WeeklyAgentBridgeReviewRunner(objectMapper, taskRunner, concurrentTaskRunner, outputValidator);
     }
 
     @Bean
@@ -130,20 +128,19 @@ public class RunnerConfiguration {
     }
 
     @Bean
-    WorkflowChain gitReportWorkflowChain(ChainConfigLoader chainConfigLoader, OpenCodeRunnerProperties runnerProperties, GitReportOrchestrator orchestrator) {
+    WorkflowChain gitReportWorkflowChain(ChainConfigLoader chainConfigLoader, AgentBridgeRunnerProperties runnerProperties, GitReportOrchestrator orchestrator) {
         return new GitReportWorkflowChain(chainConfigLoader, runnerProperties, orchestrator);
     }
 
     @Bean
     WorkflowChain smartEsbWorkflowChain(
             ChainConfigLoader chainConfigLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             SmartEsbDailyTransactionPlanLoader planLoader,
             SmartEsbReviewPreparation preparation,
             SmartEsbPromptBuilder promptBuilder,
             SmartEsbSummaryValidator summaryValidator,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ObjectMapper objectMapper,
             OutputCompletionGate outputCompletionGate,
             ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner,
@@ -156,7 +153,6 @@ public class RunnerConfiguration {
                 preparation,
                 promptBuilder,
                 summaryValidator,
-                serverManager,
                 taskRunner,
                 objectMapper,
                 outputCompletionGate,
@@ -168,12 +164,11 @@ public class RunnerConfiguration {
     @Bean
     WorkflowChain smartEsbCodeReaderWorkflowChain(
             ChainConfigLoader chainConfigLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             SmartEsbCodeReaderPreparation preparation,
             SmartEsbCodeReaderPromptBuilder promptBuilder,
             SmartEsbCodeReaderOutputValidator outputValidator,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ObjectMapper objectMapper,
             OutputCompletionGate outputCompletionGate,
             ConcurrentWorkflowTaskRunner concurrentWorkflowTaskRunner
@@ -184,7 +179,6 @@ public class RunnerConfiguration {
                 preparation,
                 promptBuilder,
                 outputValidator,
-                serverManager,
                 taskRunner,
                 objectMapper,
                 outputCompletionGate,
@@ -195,7 +189,7 @@ public class RunnerConfiguration {
     @Bean
     WorkflowChain weeklyEngineeringReportWorkflowChain(
             ChainConfigLoader chainConfigLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             WeeklyEvidenceBuilder evidenceBuilder,
             WeeklyEvidenceValidator evidenceValidator,
             WeeklyCodeReviewRunner codeReviewRunner,
@@ -214,7 +208,7 @@ public class RunnerConfiguration {
     @Bean
     WorkflowChain projectUnitTestGenerationWorkflowChain(
             ChainConfigLoader chainConfigLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             ProjectUnitTestGenerationPreparation preparation,
             ProjectUnitTestGenerationBatchRunner batchRunner,
             ProjectUnitTestGenerationReportRenderer reportRenderer,
@@ -231,13 +225,8 @@ public class RunnerConfiguration {
     }
 
     @Bean
-    ProjectUnitTestGenerationAgentBridgeClient projectUnitTestGenerationAgentBridgeClient(ObjectMapper objectMapper) {
-        return new ProjectUnitTestGenerationAgentBridgeClient(objectMapper);
-    }
-
-    @Bean
     ProjectUnitTestGenerationBatchRunner projectUnitTestGenerationBatchRunner(
-            ProjectUnitTestGenerationAgentBridgeClient client,
+            AgentBridgeClient client,
             ProjectUnitTestGenerationPromptBuilder promptBuilder,
             ObjectMapper objectMapper
     ) {

@@ -2,12 +2,10 @@ package com.sonnet.wyf.gitreport.workflow.smartesb;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
@@ -15,7 +13,7 @@ import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOut
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
 import com.sonnet.wyf.gitreport.orchestration.WorkflowTaskIndex;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
@@ -34,16 +32,14 @@ import java.util.stream.Collectors;
 public class SmartEsbWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-rewrite-code-review";
     private static final Logger log = LoggerFactory.getLogger(SmartEsbWorkflowChain.class);
-    private static final int OPENCODE_POLL_MILLIS = 10_000;
 
     private final ChainConfigLoader configLoader;
-    private final OpenCodeRunnerProperties runnerProperties;
+    private final AgentBridgeRunnerProperties runnerProperties;
     private final SmartEsbDailyTransactionPlanLoader planLoader;
     private final SmartEsbReviewPreparation preparation;
     private final SmartEsbPromptBuilder promptBuilder;
     private final SmartEsbSummaryValidator summaryValidator;
-    private final OpenCodeServerManager serverManager;
-    private final OpenCodeServerTaskRunner taskRunner;
+    private final AgentBridgeTaskRunner taskRunner;
     private final ObjectMapper objectMapper;
     private final OutputCompletionGate completionGate;
     private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
@@ -51,13 +47,12 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
 
     public SmartEsbWorkflowChain(
             ChainConfigLoader configLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             SmartEsbDailyTransactionPlanLoader planLoader,
             SmartEsbReviewPreparation preparation,
             SmartEsbPromptBuilder promptBuilder,
             SmartEsbSummaryValidator summaryValidator,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ObjectMapper objectMapper,
             OutputCompletionGate completionGate,
             ConcurrentWorkflowTaskRunner concurrentTaskRunner,
@@ -69,7 +64,6 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         this.preparation = preparation;
         this.promptBuilder = promptBuilder;
         this.summaryValidator = summaryValidator;
-        this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.objectMapper = objectMapper;
         this.completionGate = completionGate;
@@ -136,14 +130,13 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             boolean rerun
     ) throws Exception {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
-        OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
-        int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
+        int concurrency = Math.max(1, Math.min(request.agentBridge().getConcurrency(), request.agentBridge().getMaxConcurrency()));
         List<TaskRunResult> results = concurrentTaskRunner.run(
                 "SmartESB review",
                 items,
                 concurrency,
                 item -> item.kind() + ":" + item.name(),
-                item -> transactionCallable(properties, request, out, indexInputs, server, item, rerun)
+                item -> transactionCallable(properties, request, out, indexInputs, item, rerun)
         );
         List<String> failures = results.stream()
                 .filter(result -> !result.success())
@@ -160,22 +153,21 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             WorkflowRunRequest request,
             Path out,
             Map<String, Object> indexInputs,
-            OpenCodeServerHandle server,
             SmartEsbDailyTransactionPlan.ReviewItem item,
             boolean rerun
     ) {
         return () -> {
             Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()));
             try {
-                String failure = runReviewItem(properties, request, out, indexInputs, server, item, rerun);
+                String failure = runReviewItem(properties, request, out, indexInputs, item, rerun);
                 if (failure == null || failure.isBlank()) {
-                    return TaskRunResult.success(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"));
+                    return TaskRunResult.success(item.kind() + ":" + item.name(), item.name(), runDir.resolve("agent-status.json"));
                 }
-                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"), failure);
+                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("agent-status.json"), failure);
             } catch (Exception exception) {
                 log.warn("SmartESB review failed: kind={}, name={}, reason={}",
                         item.kind(), item.name(), exception.toString());
-                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("status.json"), exception.getMessage());
+                return TaskRunResult.failed(item.kind() + ":" + item.name(), item.name(), runDir.resolve("agent-status.json"), exception.getMessage());
             }
         };
     }
@@ -185,7 +177,6 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             WorkflowRunRequest request,
             Path out,
             Map<String, Object> indexInputs,
-            OpenCodeServerHandle server,
             SmartEsbDailyTransactionPlan.ReviewItem item,
             boolean rerun
     ) throws Exception {
@@ -197,26 +188,23 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Path summaryJson = localSummaryPath(out, item.name());
         String prompt = buildWorkerPrompt(item, task, summarySchema, rerun);
         Files.writeString(promptFile, prompt);
-        OpenCodeRunResult result = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                server,
+        AgentBridgeRunResult result = taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                 Path.of(properties.getNewProject()),
                 "smartesb-review-" + item.name(),
                 promptFile,
-                properties.getWorkerMessage(),
+                properties.getTaskMessage(),
                 runDir,
                 () -> summaryValidationCheck(summaryJson),
-                request.openCode().getSessionModel(),
-                request.openCode().getCreateSessionTimeoutSeconds(),
-                request.openCode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes(),
-                request.openCode().getOutputWaitSeconds(),
-                0
+                request.agentBridge().getPollMillis(),
+                request.agentBridge().getTimeoutMinutes(),
+                request.agentBridge().getValidationSettleSeconds(),
+                0,
+                java.net.URI.create(request.agentBridge().getWebBaseUrl())
         ));
         SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryJson);
         if (!validation.ok()) {
-            log.warn("SmartESB review session completed with incomplete output: kind={}, name={}, reason={}, sessionId={}, timedOut={}, correctionRounds={}",
-                    item.kind(), item.name(), validation.error(), result.sessionId(), result.timedOut(), result.correctionRounds());
+            log.warn("SmartESB review AgentBridge task completed with incomplete output: kind={}, name={}, reason={}, taskId={}, timedOut={}, correctionRounds={}",
+                    item.kind(), item.name(), validation.error(), result.taskId(), result.timedOut(), result.correctionRounds());
         }
         return validation.ok() ? "" : item.name() + ": " + validation.error();
     }
@@ -335,28 +323,24 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         if (!invalid.isEmpty()) {
             throw new IllegalStateException("SmartESB summaries invalid for index rerun: " + String.join("; ", invalid));
         }
-        OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
         Path runDir = out.resolve("runs").resolve("index");
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("synthesis-prompt.md");
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));
         Path indexMd = out.resolve("index.md");
         Path summaryMd = out.resolve("summary.md");
-        taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                server,
+        taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                 Path.of(properties.getNewProject()),
                 "smartesb-review-index",
                 promptFile,
-                properties.getSynthesisMessage(),
+                properties.getSynthesisTaskMessage(),
                 runDir,
                 () -> topLevelValidation(indexMd, summaryMd),
-                request.openCode().getSessionModel(),
-                request.openCode().getCreateSessionTimeoutSeconds(),
-                request.openCode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes(),
-                request.openCode().getOutputWaitSeconds(),
-                request.openCode().getValidationMaxCorrections()
+                request.agentBridge().getPollMillis(),
+                request.agentBridge().getTimeoutMinutes(),
+                request.agentBridge().getValidationSettleSeconds(),
+                request.agentBridge().getValidationMaxCorrections(),
+                java.net.URI.create(request.agentBridge().getWebBaseUrl())
         ));
         ValidationCheck validation = topLevelValidation(indexMd, summaryMd);
         if (!validation.ok()) {

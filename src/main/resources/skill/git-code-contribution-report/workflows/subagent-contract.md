@@ -1,6 +1,6 @@
 # Sub-Agent Dispatch Procedure
 
-主 agent 必须使用当前 OpenCode 客户端暴露的子 agent/Task 派发入口。若当前客户端没有可用子 agent 派发能力，停止并向用户报告“无法执行按人员拆分的代码提交量分析”，不要改成单 agent 串行读取所有个人 detail。
+主 agent 必须使用当前 AgentBridge 客户端暴露的子 agent/Task 派发入口。若当前客户端没有可用子 agent 派发能力，停止并向用户报告“无法执行按人员拆分的代码提交量分析”，不要改成单 agent 串行读取所有个人 detail。
 
 派发规则：
 
@@ -25,11 +25,11 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 - 子 agent 读取 `detail.execution_worklist` 后，必须按 `step` 升序逐项执行。
 - 不得把 worklist 作为最终响应，不得在生成 worklist 后停止。
 - `write_person_report`、`write_quality_summary`、`verify_outputs`、`final_response` 是必经步骤。
-- 如果 worklist 缺失、目标路径缺失、marker 不存在、写入失败或校验失败，最终只返回 `BLOCKED step=<step> action=<action> path=<path> reason=<reason>`。
+- 如果 worklist 缺失、目标路径缺失、marker 不存在、写入失败或校验失败，最终只返回 `无法完成 step=<step> action=<action> path=<path> reason=<reason>`。
 - 禁止在写文件前输出进度说明。不得以 `Let me write`、`Now I will write`、`我将写入` 这类文本结束。
 - 子 agent 分析完成后必须立即调用 MCP 写入工具，先写 `quality-summary.json`，再写 `person-report.md`。
-- 不要等待主会话继续提示；OpenCode 子 agent 结束后主会话无法继续提示它。
-- 只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `DONE` 或 `BLOCKED`。
+- 不要等待主会话继续提示；AgentBridge 子 agent 结束后主会话无法继续提示它。
+- 只有确认 `quality-summary.json` 和 `person-report.md` 都写入成功后，最终响应只能是 `完成` 或 `无法完成`。
 
 ## Sub-Agent Contract
 
@@ -50,7 +50,7 @@ person_report_template: <path-to-this-skill>\templates\person-code-contribution-
 - 不生成总报告。
 - 分析完成后不得只输出计划或摘要；必须立即调用 MCP 写入工具完成两个文件写入。
 
-如果 `person_report_md` 缺失，子 agent 返回 `BLOCKED` 并列出缺失路径；禁止调用文件创建工具或 shell 创建。
+如果 `person_report_md` 缺失，子 agent 返回 `无法完成` 并列出缺失路径；禁止调用文件创建工具或 shell 创建。
 
 ## Main-Agent Contract
 
