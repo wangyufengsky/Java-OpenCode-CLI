@@ -53,6 +53,7 @@ class ChainConfigLoaderTest {
         assertThat(properties.getProject().getRepo()).hasToString("CHANGE_ME_PROJECT_REPO");
         assertThat(properties.getPaths().getOut()).hasToString("project-unit-tests/example-project");
         assertThat(properties.getSource().getPackagePaths()).isEmpty();
-        assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
+        assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(90);
+        assertThat(properties.getAgentbridge().getMcpUrl()).isEqualTo("http://127.0.0.1:8642/mcp");
     }
 }

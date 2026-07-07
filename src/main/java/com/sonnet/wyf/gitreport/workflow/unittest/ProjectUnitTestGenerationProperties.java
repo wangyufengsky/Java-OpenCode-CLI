@@ -1,7 +1,6 @@
 package com.sonnet.wyf.gitreport.workflow.unittest;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.sonnet.wyf.gitreport.GitReportProperties;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -13,7 +12,7 @@ public class ProjectUnitTestGenerationProperties {
     private final Docs docs = new Docs();
     private final Source source = new Source();
     private final Test test = new Test();
-    private final GitReportProperties.OpenCode opencode = new GitReportProperties.OpenCode();
+    private final AgentBridge agentbridge = new AgentBridge();
 
     public Project getProject() {
         return project;
@@ -35,8 +34,8 @@ public class ProjectUnitTestGenerationProperties {
         return test;
     }
 
-    public GitReportProperties.OpenCode getOpencode() {
-        return opencode;
+    public AgentBridge getAgentbridge() {
+        return agentbridge;
     }
 
     public static class Project {
@@ -148,8 +147,7 @@ public class ProjectUnitTestGenerationProperties {
     }
 
     public static class Test {
-        private int coverageThresholdPercent = 80;
-        private List<String> verifyCommand = new ArrayList<>(List.of("./mvnw", "test"));
+        private int coverageThresholdPercent = 90;
 
         @JsonProperty("coverage-threshold-percent")
         public int getCoverageThresholdPercent() {
@@ -161,16 +159,52 @@ public class ProjectUnitTestGenerationProperties {
             this.coverageThresholdPercent = coverageThresholdPercent;
         }
 
-        @JsonProperty("verify-command")
-        public List<String> getVerifyCommand() {
-            return verifyCommand;
+    }
+
+    public static class AgentBridge {
+        private String webBaseUrl = "https://127.0.0.1:9642";
+        private String mcpUrl = "http://127.0.0.1:8642/mcp";
+        private int timeoutMinutes = 40;
+        private int maxAttempts = 5;
+
+        @JsonProperty("web-base-url")
+        public String getWebBaseUrl() {
+            return webBaseUrl;
         }
 
-        @JsonProperty("verify-command")
-        public void setVerifyCommand(List<String> verifyCommand) {
-            this.verifyCommand = verifyCommand == null || verifyCommand.isEmpty()
-                    ? new ArrayList<>(List.of("./mvnw", "test"))
-                    : new ArrayList<>(verifyCommand);
+        @JsonProperty("web-base-url")
+        public void setWebBaseUrl(String webBaseUrl) {
+            this.webBaseUrl = webBaseUrl == null || webBaseUrl.isBlank() ? "https://127.0.0.1:9642" : webBaseUrl;
+        }
+
+        @JsonProperty("mcp-url")
+        public String getMcpUrl() {
+            return mcpUrl;
+        }
+
+        @JsonProperty("mcp-url")
+        public void setMcpUrl(String mcpUrl) {
+            this.mcpUrl = mcpUrl == null || mcpUrl.isBlank() ? "http://127.0.0.1:8642/mcp" : mcpUrl;
+        }
+
+        @JsonProperty("timeout-minutes")
+        public int getTimeoutMinutes() {
+            return timeoutMinutes;
+        }
+
+        @JsonProperty("timeout-minutes")
+        public void setTimeoutMinutes(int timeoutMinutes) {
+            this.timeoutMinutes = timeoutMinutes;
+        }
+
+        @JsonProperty("max-attempts")
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        @JsonProperty("max-attempts")
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
         }
     }
 }

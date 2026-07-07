@@ -181,22 +181,33 @@ class PromptPackContractTest {
     }
 
     @Test
-    void projectUnitTestPromptUsesBatchRulesAsContractSource() throws Exception {
+    void projectUnitTestPromptOnlyDescribesGoalAndJavaValidationFeedback() throws Exception {
         Path promptPack = Path.of("src/main/resources/project-unit-test-generation-prompt-pack");
 
         String worker = Files.readString(promptPack.resolve("prompts/run-test-batch.md"));
 
         assertThat(worker).contains(
                 "batch_input_json:",
-                "严格执行 `batch_input_json.rules`",
-                "严格执行 `batch_input_json.coverage`",
-                "严格执行 `batch_input_json.allowed_write_globs`",
-                "严格执行 `batch_input_json.target_test_files`",
-                "\"status\": \"completed|partial|blocked\"",
-                "DONE",
-                "BLOCKED"
+                "上一轮 Java 验收失败摘要",
+                "只允许修改 `target_test_files` 或 `allowed_write_globs` 内的测试文件",
+                "不要修改生产代码、构建脚本、配置文件",
+                "不需要写 `summary_json`",
+                "最终只回复简短完成信息"
         );
         assertThat(worker).doesNotContain(
+                "MCP",
+                "read_file",
+                "write_file",
+                "edit_text",
+                "get_compilation_errors",
+                "run_tests",
+                "get_coverage",
+                "list_tests",
+                "tools/call",
+                "\"status\"",
+                "DONE",
+                "BLOCKED",
+                "严格执行 `batch_input_json.rules`",
                 "只允许创建或修改目标项目 src/test/** 下的测试文件",
                 "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具",
                 "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具",

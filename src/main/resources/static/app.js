@@ -76,7 +76,7 @@ const chainConfigDefinitions = {
     ]
   },
   'project-unit-test-generation': {
-    description: '默认全量扫描项目源码，也可按包路径串行生成 src/test 下的单元测试；每任务一个类，一个 agent 只写一个类。',
+    description: '默认全量扫描项目源码，也可按包路径串行生成单元测试；每任务一个类，一个 AgentBridge agent 只写一个类。',
     fields: [
       field('project.id', '项目标识', '写入任务和报告元信息的项目 ID。'),
       field('project.name', '项目名称', '写入任务和报告标题的项目名称。'),
@@ -88,9 +88,11 @@ const chainConfigDefinitions = {
       field('source.package-paths', '包路径', '每行一个包名或源码路径，留空表示全量。', 'list'),
       field('source.include', '包含路径', '可选；每行一个 include glob。', 'list'),
       field('source.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建产物或生成代码。', 'list'),
-      field('test.coverage-threshold-percent', '覆盖率阈值', '当前类达到该覆盖率百分比后，当前 agent 才能完成。', 'number'),
-      field('test.verify-command', '验证命令', '每行一个命令参数，例如 ./mvnw 和 test。', 'list'),
-      field('opencode.timeout-minutes', 'OpenCode 超时分钟数', '单个测试生成 session 的超时时间。', 'number')
+      field('test.coverage-threshold-percent', '覆盖率阈值', '当前目标源码类达到该覆盖率百分比后，当前 batch 才算达标。', 'number'),
+      field('agentbridge.web-base-url', 'AgentBridge Web URL', 'AgentBridge Web Access 地址，用于提交 prompt 并监听运行状态。'),
+      field('agentbridge.mcp-url', 'AgentBridge MCP URL', 'AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。'),
+      field('agentbridge.timeout-minutes', 'AgentBridge 超时分钟数', '单轮 agent 最大等待时间。', 'number'),
+      field('agentbridge.max-attempts', '最大尝试轮次', '当前 batch 未达标时最多重新启动 agent 的次数。', 'number')
     ]
   }
 };

@@ -26,10 +26,10 @@ source:
     - "**/generated/**"
 
 test:
-  coverage-threshold-percent: 80
-  verify-command:
-    - "./mvnw"
-    - "test"
+  coverage-threshold-percent: 90
 
-opencode:
+agentbridge:
+  web-base-url: "https://127.0.0.1:9642"
+  mcp-url: "http://127.0.0.1:8642/mcp"
   timeout-minutes: 40
+  max-attempts: 5

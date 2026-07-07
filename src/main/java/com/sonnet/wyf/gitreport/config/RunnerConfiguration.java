@@ -29,11 +29,11 @@ import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewOutputValidator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyOpenCodeReviewRunner;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyReportRenderer;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationAgentBridgeClient;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationBatchRunner;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationReportRenderer;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationVerifier;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationWorkflowChain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -122,16 +122,6 @@ public class RunnerConfiguration {
     @Bean
     ProjectUnitTestGenerationPromptBuilder projectUnitTestGenerationPromptBuilder(ResourceLoader resourceLoader) {
         return new ProjectUnitTestGenerationPromptBuilder(resourceLoader);
-    }
-
-    @Bean
-    ProjectUnitTestGenerationOutputValidator projectUnitTestGenerationOutputValidator(ObjectMapper objectMapper) {
-        return new ProjectUnitTestGenerationOutputValidator(objectMapper);
-    }
-
-    @Bean
-    ProjectUnitTestGenerationVerifier projectUnitTestGenerationVerifier(ObjectMapper objectMapper) {
-        return new ProjectUnitTestGenerationVerifier(objectMapper);
     }
 
     @Bean
@@ -226,28 +216,32 @@ public class RunnerConfiguration {
             ChainConfigLoader chainConfigLoader,
             OpenCodeRunnerProperties runnerProperties,
             ProjectUnitTestGenerationPreparation preparation,
-            ProjectUnitTestGenerationPromptBuilder promptBuilder,
-            ProjectUnitTestGenerationOutputValidator outputValidator,
-            ProjectUnitTestGenerationVerifier verifier,
+            ProjectUnitTestGenerationBatchRunner batchRunner,
             ProjectUnitTestGenerationReportRenderer reportRenderer,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
-            OutputCompletionGate outputCompletionGate,
             ObjectMapper objectMapper
     ) {
         return new ProjectUnitTestGenerationWorkflowChain(
                 chainConfigLoader,
                 runnerProperties,
                 preparation,
-                promptBuilder,
-                outputValidator,
-                verifier,
+                batchRunner,
                 reportRenderer,
-                serverManager,
-                taskRunner,
-                outputCompletionGate,
                 objectMapper
         );
+    }
+
+    @Bean
+    ProjectUnitTestGenerationAgentBridgeClient projectUnitTestGenerationAgentBridgeClient(ObjectMapper objectMapper) {
+        return new ProjectUnitTestGenerationAgentBridgeClient(objectMapper);
+    }
+
+    @Bean
+    ProjectUnitTestGenerationBatchRunner projectUnitTestGenerationBatchRunner(
+            ProjectUnitTestGenerationAgentBridgeClient client,
+            ProjectUnitTestGenerationPromptBuilder promptBuilder,
+            ObjectMapper objectMapper
+    ) {
+        return new ProjectUnitTestGenerationBatchRunner(client, promptBuilder, objectMapper);
     }
 
 }

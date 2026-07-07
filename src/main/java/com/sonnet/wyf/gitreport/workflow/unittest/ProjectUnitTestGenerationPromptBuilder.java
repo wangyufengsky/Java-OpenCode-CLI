@@ -17,11 +17,20 @@ public class ProjectUnitTestGenerationPromptBuilder {
     }
 
     public String buildBatchPrompt(Path repo, Path batchInputJson) {
+        return buildBatchPrompt(repo, batchInputJson, "");
+    }
+
+    public String buildBatchPrompt(Path repo, Path batchInputJson, String previousFailureSummary) {
         return readResource("project-unit-test-generation-prompt-pack/prompts/run-test-batch.md")
                 + "\n\n## 路径载荷\n\n```text\n"
                 + "repo: " + repo + "\n"
                 + "batch_input_json: " + batchInputJson + "\n"
-                + "```\n";
+                + "```\n"
+                + "\n## 上一轮 Java 验收失败摘要\n\n"
+                + (previousFailureSummary == null || previousFailureSummary.isBlank()
+                ? "无。"
+                : previousFailureSummary.strip())
+                + "\n";
     }
 
     private String readResource(String path) {

@@ -414,58 +414,17 @@ public class ProjectUnitTestGenerationPreparation {
                 .toList());
         batch.put("types", List.of(type));
         batch.put("docs", docs);
-        batch.put("skill", agentBridgeSkill());
         batch.put("coverage", coveragePolicy(properties));
-        batch.put("rules", agentBridgeRules(properties));
         batch.put("input_json", batchDir.resolve("input.json").toString());
-        batch.put("summary_json", batchDir.resolve("summary.json").toString());
         batch.put("allowed_write_globs", allowedWriteGlobs(listOfStrings(batch.get("target_test_files"))));
-        batch.put("status", "pending");
         return batch;
-    }
-
-    private Map<String, Object> agentBridgeSkill() {
-        return Map.of(
-                "preferred_reader", "AgentBridge",
-                "preferred_writer", "AgentBridge",
-                "preferred_diagnostics", "AgentBridge",
-                "file_tools", List.of("read_file", "edit_text", "write_file"),
-                "test_tools", List.of("list_tests", "run_tests", "get_coverage", "get_compilation_errors", "build_project")
-        );
     }
 
     private Map<String, Object> coveragePolicy(ProjectUnitTestGenerationProperties properties) {
         return Map.of(
                 "threshold_percent", clampPercent(properties.getTest().getCoverageThresholdPercent()),
-                "scope", "class",
-                "existing_test_action", "skip_when_existing_class_coverage_meets_threshold"
+                "scope", "class"
         );
-    }
-
-    private Map<String, Object> agentBridgeRules(ProjectUnitTestGenerationProperties properties) {
-        int threshold = clampPercent(properties.getTest().getCoverageThresholdPercent());
-        Map<String, Object> rules = new LinkedHashMap<>();
-        rules.put("agent_bridge_io", Map.of(
-                "read", "读取 batch_input_json、源码、已有测试和 batch_input_json.docs 指定文档时，必须使用 AgentBridge MCP 文件读取工具 read_file；文档缺失时按源码和已有测试继续。",
-                "write", "创建或修改测试文件、写入 summary_json 时，必须使用 AgentBridge MCP 文件编辑工具 edit_text 或 write_file。",
-                "diagnostics", "诊断、测试发现和覆盖率反馈必须优先使用 AgentBridge MCP 工具 get_compilation_errors、list_tests、run_tests、get_coverage。",
-                "unavailable", "AgentBridge 读写工具不可用时写 blocked 或返回 BLOCKED；诊断、测试或覆盖率工具不可用且无法确认成功时写 partial 或 blocked。"
-        ));
-        rules.put("write_scope", "只允许创建或修改 batch_input_json.allowed_write_globs 或 batch_input_json.target_test_files 限定范围内的测试文件；禁止修改生产代码、pom.xml、Gradle 文件、脚本、配置文件和 src/main/**。");
-        rules.put("execution", Map.of(
-                "style_review", "写测试前必须先查阅当前项目已有测试/已有单元测试，理解断言库、命名、Mock、Spring/JUnit 用法，并仿照现有代码风格。",
-                "diagnostics", "开始写代码前，先判断本 task 是新写测试、补充已有测试，还是已有测试已经满足覆盖率；已有单元测试存在时也必须先调用 get_compilation_errors。写完或修改测试文件后必须再次调用 get_compilation_errors；发现测试代码编译错误时继续修正并再次检查。",
-                "tests", "用 list_tests 查已有测试；写完后按 get_compilation_errors -> run_tests -> get_coverage 顺序校验当前批次相关测试和当前类覆盖率；run_tests 失败时，根据失败原因修改测试，修改结束后回到 get_compilation_errors，再执行 run_tests，再次循环。",
-                "coverage", "如果 types[].existing_test_files 非空，先用 get_coverage 检查该类覆盖率；覆盖率达到 " + threshold + "% 时跳过该类；覆盖率未达标时必须新增测试场景，只补充该类已有测试或目标测试文件，并重复 get_compilation_errors -> run_tests -> get_coverage。"
-        ));
-        rules.put("status_policy", Map.of(
-                "completed_requires", List.of("style_reviewed", "compilation", "tests", "coverage"),
-                "completed", "只有已查阅现有测试风格、get_compilation_errors 无当前测试编译错误、run_tests 当前批次相关测试通过、get_coverage 当前类覆盖率达到 batch_input_json.coverage.threshold_percent 时，才能写 completed。",
-                "partial", "已安全完成部分工作但无法确认编译、测试或覆盖率全部达标时写 partial，并在 summary_json.notes 说明原因。",
-                "blocked", "AgentBridge 读写工具不可用、依赖不足或无法安全生成时写 blocked 或返回 BLOCKED，并在 summary_json.notes 说明原因。",
-                "terminal_failures", List.of("partial", "blocked")
-        ));
-        return rules;
     }
 
     private int clampPercent(int value) {

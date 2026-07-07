@@ -24,9 +24,11 @@ class ProjectUnitTestGenerationPropertiesTest {
         assertThat(properties.getDocs().getReconstructedDesign()).hasToString("重构项目详细设计文档.md");
         assertThat(properties.getSource().getPackagePaths()).isEmpty();
         assertThat(properties.getSource().getExclude()).contains("target/**", "build/**", "generated/**");
-        assertThat(properties.getTest().getVerifyCommand()).containsExactly("./mvnw", "test");
-        assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(80);
-        assertThat(properties.getOpencode().getTimeoutMinutes()).isEqualTo(40);
+        assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(90);
+        assertThat(properties.getAgentbridge().getWebBaseUrl()).isEqualTo("https://127.0.0.1:9642");
+        assertThat(properties.getAgentbridge().getMcpUrl()).isEqualTo("http://127.0.0.1:8642/mcp");
+        assertThat(properties.getAgentbridge().getTimeoutMinutes()).isEqualTo(40);
+        assertThat(properties.getAgentbridge().getMaxAttempts()).isEqualTo(5);
     }
 
     @Test
@@ -35,6 +37,8 @@ class ProjectUnitTestGenerationPropertiesTest {
                 .map(method -> method.getName())
                 .collect(Collectors.toSet()))
                 .doesNotContain(
+                        "getVerifyCommand",
+                        "setVerifyCommand",
                         "getConcurrency",
                         "setConcurrency",
                         "getMaxTypesPerTask",

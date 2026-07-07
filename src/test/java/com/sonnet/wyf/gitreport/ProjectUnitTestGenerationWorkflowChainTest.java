@@ -1,22 +1,18 @@
 package com.sonnet.wyf.gitreport;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
-import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationAgentBridgeClient;
+import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationBatchRunner;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationProperties;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationReportRenderer;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationVerifier;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationWorkflowChain;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,6 +21,7 @@ import org.springframework.core.io.DefaultResourceLoader;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -40,97 +37,97 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     Path tempDir;
 
     @Test
-    void fullRunGeneratesBatchesRunsOpenCodeAndVerifies() throws Exception {
+    void fullRunUsesAgentBridgeSerialBatchesAndJavaSideValidation() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
-        CapturingTaskRunner taskRunner = new CapturingTaskRunner(properties);
+        FakeAgentBridgeClient client = new FakeAgentBridgeClient(properties);
 
-        chain(properties, taskRunner).run(request("full", "", ""));
+        chain(properties, client).run(request("full", "", ""));
 
-        assertThat(taskRunner.titles).containsExactly(
-                "project-unit-test-generation-test-batch-001-orderservice",
-                "project-unit-test-generation-test-batch-002-userhelper"
+        assertThat(client.prompts).hasSize(2);
+        assertThat(client.prompts.get(0))
+                .contains("batch_input_json:", "上一轮 Java 验收失败摘要", "测试类不存在")
+                .contains("不需要写 `summary_json`")
+                .doesNotContain("get_compilation_errors", "run_tests", "get_coverage", "list_tests", "MCP");
+        assertThat(client.toolNames).containsSubsequence(
+                "list_tests", "get_compilation_errors", "run_tests", "get_coverage"
         );
-        assertThat(taskRunner.prompts.get(0))
-                .contains("project-unit-test-generation 单元测试批次")
-                .contains("batch_input_json:")
-                .contains("一个 task 只包含一个 Java 顶层类型")
-                .contains("严格执行 `batch_input_json.rules`")
-                .contains("严格执行 `batch_input_json.coverage`")
-                .contains("严格执行 `batch_input_json.allowed_write_globs`")
-                .contains("严格执行 `batch_input_json.target_test_files`")
-                .contains("`summary_json`")
-                .doesNotContain(
-                        "只允许创建或修改目标项目 src/test/** 下的测试文件",
-                        "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具",
-                        "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具",
-                        "开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率",
-                        "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`",
-                        "run_tests 失败时，根据失败原因修改测试",
-                        "覆盖率未达标时必须新增测试场景",
-                        "回到 `get_compilation_errors` 继续循环",
-                        "Java 编排会把该 task",
-                        "未完成任务补跑",
-                        "并发执行多个批次"
-                )
-                .doesNotContain("OpenCode 原生文件")
-                .doesNotContain("intellij-index", "intellij-idea");
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/user/UserHelperTest.java")).exists();
-        assertThat(properties.getPaths().getOut().resolve("verification.json")).exists();
+        assertThat(properties.getPaths().getOut().resolve("verification.json")).doesNotExist();
+        assertThat(properties.getPaths().getOut().resolve("agentbridge-results.json")).exists();
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("project-unit-test-generation", "test-batch-001-orderservice", "test-batch-002-userhelper");
+                .contains("accepted: `2`", "failed: `0`");
     }
 
     @Test
-    void fullRunAllowsGeneratedTestsUnderModuleSrcTest() throws Exception {
+    void precheckPassSkipsPrompt() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
-        writeModuleSource(properties.getProject().getRepo());
-        CapturingTaskRunner taskRunner = new CapturingTaskRunner(properties);
+        writeSource(properties.getProject().getRepo());
+        Path existing = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java");
+        Files.createDirectories(existing.getParent());
+        Files.writeString(existing, "class OrderServiceTest {}\n");
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        FakeAgentBridgeClient client = new FakeAgentBridgeClient(properties);
 
-        chain(properties, taskRunner).run(request("full", "", ""));
+        chain(properties, client).run(request("full", "", ""));
 
-        assertThat(taskRunner.titles).containsExactly("project-unit-test-generation-test-batch-001-cupservice");
-        assertThat(properties.getProject().getRepo()
-                .resolve("upfs-cup/src/test/java/com/spdb/upfs/cup/CupServiceTest.java")).exists();
+        assertThat(client.prompts).isEmpty();
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("test-batch-001-orderservice", "accepted: `1`");
     }
 
     @Test
-    void fullRunAllowsWorkerGeneratedTargetArtifacts() throws Exception {
+    void postcheckFailureRetriesUntilAccepted() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
-        writeModuleSource(properties.getProject().getRepo());
-        TargetArtifactWritingTaskRunner taskRunner = new TargetArtifactWritingTaskRunner(properties);
+        writeSource(properties.getProject().getRepo());
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        RetrySecondPromptClient client = new RetrySecondPromptClient(properties);
 
-        chain(properties, taskRunner).run(request("full", "", ""));
+        chain(properties, client).run(request("full", "", ""));
 
-        assertThat(properties.getProject().getRepo()
-                .resolve("target/classes/com/spdb/upfs/cup/CupService.class")).exists();
-        assertThat(properties.getProject().getRepo()
-                .resolve("upfs-cup/target/classes/com/spdb/upfs/cup/CupService.class")).exists();
+        assertThat(client.prompts).hasSize(2);
+        assertThat(client.prompts.get(1)).contains("测试类不存在");
     }
 
     @Test
-    void fullRunAllowsWorkerGeneratedGradleAndBuildArtifacts() throws Exception {
+    void exceedingMaxAttemptsFailsWithLastReason() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
-        writeModuleSource(properties.getProject().getRepo());
-        GradleBuildArtifactWritingTaskRunner taskRunner = new GradleBuildArtifactWritingTaskRunner(properties);
+        properties.getAgentbridge().setMaxAttempts(2);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        NeverFixingClient client = new NeverFixingClient(properties);
 
-        chain(properties, taskRunner).run(request("full", "", ""));
-
-        assertThat(properties.getProject().getRepo()
-                .resolve(".gradle/8.8/executionHistory/executionHistory.bin")).exists();
-        assertThat(properties.getProject().getRepo()
-                .resolve("upfs-cup/build/classes/java/test/CupServiceTest.class")).exists();
-    }
-
-    @Test
-    void failsWhenWorkerCreatesTestOutsideCurrentBatchAllowedModule() throws Exception {
-        ProjectUnitTestGenerationProperties properties = properties();
-        writeModuleSource(properties.getProject().getRepo());
-
-        assertThatThrownBy(() -> chain(properties, new CrossModuleTestWritingTaskRunner(properties)).run(request("full", "", "")))
+        assertThatThrownBy(() -> chain(properties, client).run(request("full", "", "")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("protected file")
+                .hasMessageContaining("exceeded agentbridge.max-attempts")
+                .hasMessageContaining("测试类不存在");
+
+        assertThat(client.prompts).hasSize(2);
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("failed: `1`");
+    }
+
+    @Test
+    void failsWhenAgentCreatesProductionFile() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new ProductionWritingClient(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("created protected file")
+                .hasMessageContaining("src/main/java/com/acme/build/BuildInfo.java");
+    }
+
+    @Test
+    void failsWhenAgentCreatesTestOutsideCurrentBatchModule() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeModuleSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new CrossModuleTestWritingClient(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("created protected file")
                 .hasMessageContaining("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
     }
 
@@ -138,7 +135,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     void rerunRejectsUnknownBatchId() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
-        ProjectUnitTestGenerationWorkflowChain chain = chain(properties, new CapturingTaskRunner(properties));
+        ProjectUnitTestGenerationWorkflowChain chain = chain(properties, new FakeAgentBridgeClient(properties));
         chain.run(request("full", "", ""));
 
         assertThatThrownBy(() -> chain.run(request("rerun", "test-batch", "missing")))
@@ -146,85 +143,14 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .hasMessageContaining("unknown unit-test batch id");
     }
 
-    @Test
-    void deletesStaleSummaryBeforeRunningBatch() throws Exception {
-        ProjectUnitTestGenerationProperties properties = properties();
-        writeSource(properties.getProject().getRepo());
-        ProjectUnitTestGenerationPreparation preparation = new ProjectUnitTestGenerationPreparation(objectMapper);
-        preparation.prepare(properties, true);
-        Path staleSummary = properties.getPaths().getOut().resolve("test-batches/test-batch-001-orderservice/summary.json");
-        objectMapper.writerWithDefaultPrettyPrinter().writeValue(staleSummary.toFile(), Map.of(
-                "batch_id", "test-batch-001-orderservice",
-                "status", "completed",
-                "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
-                "test_files", List.of("src/test/java/com/acme/order/OrderServiceTest.java"),
-                "checks", passedChecks(),
-                "notes", List.of()
-        ));
-        Path testFile = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java");
-        Files.createDirectories(testFile.getParent());
-        Files.writeString(testFile, "class OrderServiceTest {}\n");
-
-        assertThatThrownBy(() -> chain(properties, new NoopTaskRunner()).run(request("rerun", "test-batch", "test-batch-001-orderservice")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("outputs incomplete");
-    }
-
-    @Test
-    void failsWhenWorkerModifiesProductionFiles() throws Exception {
-        ProjectUnitTestGenerationProperties properties = properties();
-        writeSource(properties.getProject().getRepo());
-
-        assertThatThrownBy(() -> chain(properties, new ProductionWritingTaskRunner(properties)).run(request("full", "", "")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("protected file");
-    }
-
-    @Test
-    void failsWhenWorkerCreatesProductionCodeUnderBuildNamedPackage() throws Exception {
-        ProjectUnitTestGenerationProperties properties = properties();
-        writeSource(properties.getProject().getRepo());
-
-        assertThatThrownBy(() -> chain(properties, new BuildPackageProductionWritingTaskRunner(properties)).run(request("full", "", "")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("protected file")
-                .hasMessageContaining("src/main/java/com/acme/build/BuildInfo.java");
-    }
-
-    @Test
-    void terminalBlockedBatchDoesNotRerunAndFailsAfterReport() throws Exception {
-        ProjectUnitTestGenerationProperties properties = properties();
-        writeSource(properties.getProject().getRepo());
-        BlockingThenCompletingTaskRunner taskRunner = new BlockingThenCompletingTaskRunner(properties);
-
-        assertThatThrownBy(() -> chain(properties, taskRunner).run(request("full", "", "")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("blocked or partial unit-test batches")
-                .hasMessageContaining("test-batch-001-orderservice status=blocked")
-                .hasMessageContaining("missing dependencies");
-
-        assertThat(taskRunner.titles).containsExactly(
-                "project-unit-test-generation-test-batch-001-orderservice",
-                "project-unit-test-generation-test-batch-002-userhelper"
-        );
-        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("completed: `1`")
-                .contains("blocked: `1`")
-                .contains("missing dependencies");
-    }
-
-    private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, OpenCodeServerTaskRunner taskRunner) {
+    private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, ProjectUnitTestGenerationAgentBridgeClient client) {
+        ProjectUnitTestGenerationPromptBuilder promptBuilder = new ProjectUnitTestGenerationPromptBuilder(new DefaultResourceLoader());
         return new ProjectUnitTestGenerationWorkflowChain(
                 new FixedChainConfigLoader(properties),
                 new OpenCodeRunnerProperties(),
                 new ProjectUnitTestGenerationPreparation(objectMapper),
-                new ProjectUnitTestGenerationPromptBuilder(new DefaultResourceLoader()),
-                new ProjectUnitTestGenerationOutputValidator(objectMapper),
-                new ProjectUnitTestGenerationVerifier(objectMapper),
+                new ProjectUnitTestGenerationBatchRunner(client, promptBuilder, objectMapper),
                 new ProjectUnitTestGenerationReportRenderer(objectMapper),
-                fakeServerManager(),
-                taskRunner,
-                new OutputCompletionGate(objectMapper, 1),
                 objectMapper
         );
     }
@@ -235,16 +161,15 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         properties.getProject().setName("Demo");
         properties.getProject().setRepo(tempDir.resolve("repo"));
         properties.getPaths().setOut(tempDir.resolve("out"));
-        properties.getTest().setVerifyCommand(List.of("sh", "-c", "printf ok"));
+        properties.getAgentbridge().setWebBaseUrl("http://127.0.0.1:9642");
+        properties.getAgentbridge().setMcpUrl("http://127.0.0.1:8642/mcp");
+        properties.getAgentbridge().setTimeoutMinutes(1);
         return properties;
     }
 
     private WorkflowRunRequest request(String mode, String rerunType, String rerunId) {
         OpenCodeSettings settings = new OpenCodeSettings();
-        settings.setConcurrency(1);
-        settings.setMaxConcurrency(1);
-        settings.setTimeoutMinutes(3);
-        return new WorkflowRunRequest(mode, rerunType, rerunId, LocalDate.of(2026, 7, 3), settings);
+        return new WorkflowRunRequest(mode, rerunType, rerunId, LocalDate.of(2026, 7, 7), settings);
     }
 
     private void writeSource(Path repo) throws Exception {
@@ -295,178 +220,145 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 """);
     }
 
-    private OpenCodeServerManager fakeServerManager() {
-        return new OpenCodeServerManager(null, null) {
-            @Override
-            public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) {
-                return new OpenCodeServerHandle(URI.create("http://127.0.0.1:1"), false);
-            }
-        };
-    }
-
-    private class CapturingTaskRunner extends OpenCodeServerTaskRunner {
+    private class FakeAgentBridgeClient extends ProjectUnitTestGenerationAgentBridgeClient {
         protected final ProjectUnitTestGenerationProperties properties;
-        protected final CopyOnWriteArrayList<String> titles = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> toolNames = new CopyOnWriteArrayList<>();
 
-        CapturingTaskRunner(ProjectUnitTestGenerationProperties properties) {
-            super(null, null);
+        FakeAgentBridgeClient(ProjectUnitTestGenerationProperties properties) {
+            super(objectMapper);
             this.properties = properties;
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            titles.add(spec.title());
-            prompts.add(Files.readString(spec.promptFile()));
-            Map<String, Object> batch = objectMapper.readValue(spec.runDir().resolve("input.json").toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
-            String batchId = batch.get("batch_id").toString();
-            List<String> sourceFiles = ((List<?>) batch.get("source_files")).stream().map(Object::toString).toList();
-            String testPath = ((List<?>) batch.get("target_test_files")).get(0).toString();
+        public void postPrompt(URI webBaseUrl, String prompt) {
+            prompts.add(prompt);
+            try {
+                createTargetTest(prompt);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        }
+
+        @Override
+        public void waitUntilIdle(URI webBaseUrl, Duration timeout, Duration pollInterval) {
+        }
+
+        @Override
+        public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) {
+            toolNames.add(name);
+            return switch (name) {
+                case "list_tests" -> listTests(arguments);
+                case "get_compilation_errors" -> json(Map.of("errors", List.of()), "No compilation errors");
+                case "run_tests" -> json(Map.of("success", testExists(arguments.path("target").asText())), "passed");
+                case "get_coverage" -> json(Map.of("percent", coverage(arguments.path("file").asText())), "coverage " + coverage(arguments.path("file").asText()) + "%");
+                default -> json(Map.of(), "");
+            };
+        }
+
+        protected ToolResponse listTests(JsonNode arguments) {
+            String fileName = arguments.path("file_pattern").asText();
+            boolean exists = findTest(fileName) != null;
+            return json(Map.of("tests", exists ? List.of(fileName) : List.of()), exists ? fileName : "no tests");
+        }
+
+        protected double coverage(String sourceClass) {
+            String testName = sourceClass.substring(sourceClass.lastIndexOf('.') + 1) + "Test.java";
+            return findTest(testName) == null ? -1 : 95;
+        }
+
+        protected boolean testExists(String target) {
+            String fileName = target.substring(target.lastIndexOf('.') + 1) + ".java";
+            return findTest(fileName) != null;
+        }
+
+        protected Path findTest(String fileName) {
+            try (var stream = Files.walk(properties.getProject().getRepo())) {
+                return stream.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().equals(fileName))
+                        .findFirst()
+                        .orElse(null);
+            } catch (Exception exception) {
+                return null;
+            }
+        }
+
+        protected void createTargetTest(String prompt) throws Exception {
+            Path input = batchInput(prompt);
+            JsonNode batch = objectMapper.readTree(input.toFile());
+            String testPath = batch.path("target_test_files").get(0).asText();
             Path testFile = properties.getProject().getRepo().resolve(testPath);
             Files.createDirectories(testFile.getParent());
             Files.writeString(testFile, "class " + testFile.getFileName().toString().replace(".java", "") + " {}\n");
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(
-                    "batch_id", batchId,
-                    "status", "completed",
-                    "source_files", sourceFiles,
-                    "test_files", List.of(testPath),
-                    "checks", passedChecks(),
-                    "notes", List.of()
-            ));
-            return null;
+        }
+
+        protected Path batchInput(String prompt) {
+            for (String line : prompt.split("\\R")) {
+                if (line.startsWith("batch_input_json:")) {
+                    return Path.of(line.substring("batch_input_json:".length()).trim());
+                }
+            }
+            throw new IllegalArgumentException("missing batch_input_json in prompt");
+        }
+
+        protected ToolResponse json(Map<String, ?> value, String text) {
+            JsonNode structured = objectMapper.valueToTree(value);
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.set("structuredContent", structured);
+            return new ToolResponse(raw, text, structured);
         }
     }
 
-    private static class NoopTaskRunner extends OpenCodeServerTaskRunner {
-        NoopTaskRunner() {
-            super(null, null);
-        }
-
-        @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) {
-            return null;
-        }
-    }
-
-    private class ProductionWritingTaskRunner extends CapturingTaskRunner {
-        ProductionWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+    private class RetrySecondPromptClient extends FakeAgentBridgeClient {
+        RetrySecondPromptClient(ProjectUnitTestGenerationProperties properties) {
             super(properties);
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            Files.writeString(properties.getProject().getRepo().resolve("pom.xml"), "<project/>\n");
-            return super.runUntilValidated(spec);
+        protected void createTargetTest(String prompt) throws Exception {
+            if (prompts.size() >= 2) {
+                super.createTargetTest(prompt);
+            }
         }
     }
 
-    private class TargetArtifactWritingTaskRunner extends CapturingTaskRunner {
-        TargetArtifactWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+    private class NeverFixingClient extends FakeAgentBridgeClient {
+        NeverFixingClient(ProjectUnitTestGenerationProperties properties) {
             super(properties);
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            Path rootArtifact = properties.getProject().getRepo()
-                    .resolve("target/classes/com/spdb/upfs/cup/CupService.class");
-            Path moduleArtifact = properties.getProject().getRepo()
-                    .resolve("upfs-cup/target/classes/com/spdb/upfs/cup/CupService.class");
-            Files.createDirectories(rootArtifact.getParent());
-            Files.createDirectories(moduleArtifact.getParent());
-            Files.writeString(rootArtifact, "compiled");
-            Files.writeString(moduleArtifact, "compiled");
-            return super.runUntilValidated(spec);
+        protected void createTargetTest(String prompt) {
         }
     }
 
-    private class BuildPackageProductionWritingTaskRunner extends CapturingTaskRunner {
-        BuildPackageProductionWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+    private class ProductionWritingClient extends FakeAgentBridgeClient {
+        ProductionWritingClient(ProjectUnitTestGenerationProperties properties) {
             super(properties);
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            Path productionFile = properties.getProject().getRepo()
-                    .resolve("src/main/java/com/acme/build/BuildInfo.java");
+        protected void createTargetTest(String prompt) throws Exception {
+            Path productionFile = properties.getProject().getRepo().resolve("src/main/java/com/acme/build/BuildInfo.java");
             Files.createDirectories(productionFile.getParent());
-            Files.writeString(productionFile, """
-                    package com.acme.build;
-                    class BuildInfo {}
-                    """);
-            return super.runUntilValidated(spec);
+            Files.writeString(productionFile, "package com.acme.build; class BuildInfo {}\n");
+            super.createTargetTest(prompt);
         }
     }
 
-    private class GradleBuildArtifactWritingTaskRunner extends CapturingTaskRunner {
-        GradleBuildArtifactWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
+    private class CrossModuleTestWritingClient extends FakeAgentBridgeClient {
+        CrossModuleTestWritingClient(ProjectUnitTestGenerationProperties properties) {
             super(properties);
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            Path gradleArtifact = properties.getProject().getRepo()
-                    .resolve(".gradle/8.8/executionHistory/executionHistory.bin");
-            Path buildArtifact = properties.getProject().getRepo()
-                    .resolve("upfs-cup/build/classes/java/test/CupServiceTest.class");
-            Files.createDirectories(gradleArtifact.getParent());
-            Files.createDirectories(buildArtifact.getParent());
-            Files.writeString(gradleArtifact, "history");
-            Files.writeString(buildArtifact, "compiled");
-            return super.runUntilValidated(spec);
-        }
-    }
-
-    private class CrossModuleTestWritingTaskRunner extends CapturingTaskRunner {
-        CrossModuleTestWritingTaskRunner(ProjectUnitTestGenerationProperties properties) {
-            super(properties);
-        }
-
-        @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+        protected void createTargetTest(String prompt) throws Exception {
             Path unrelatedTest = properties.getProject().getRepo()
                     .resolve("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
             Files.createDirectories(unrelatedTest.getParent());
             Files.writeString(unrelatedTest, "class CommonServiceTest {}\n");
-            return super.runUntilValidated(spec);
+            super.createTargetTest(prompt);
         }
-    }
-
-    private class BlockingThenCompletingTaskRunner extends CapturingTaskRunner {
-        private int orderServiceRuns;
-
-        BlockingThenCompletingTaskRunner(ProjectUnitTestGenerationProperties properties) {
-            super(properties);
-        }
-
-        @Override
-        public OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
-            if (!spec.title().endsWith("test-batch-001-orderservice")) {
-                return super.runUntilValidated(spec);
-            }
-            orderServiceRuns++;
-            if (orderServiceRuns > 1) {
-                return super.runUntilValidated(spec);
-            }
-            titles.add(spec.title());
-            prompts.add(Files.readString(spec.promptFile()));
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(spec.runDir().resolve("summary.json").toFile(), Map.of(
-                    "batch_id", "test-batch-001-orderservice",
-                    "status", "blocked",
-                    "source_files", List.of("src/main/java/com/acme/order/OrderService.java"),
-                    "test_files", List.of(),
-                    "notes", List.of("missing dependencies")
-            ));
-            return null;
-        }
-    }
-
-    private Map<String, Object> passedChecks() {
-        return Map.of(
-                "style_reviewed", true,
-                "compilation", Map.of("passed", true),
-                "tests", Map.of("passed", true),
-                "coverage", Map.of("percent", 80)
-        );
     }
 
     private static class FixedChainConfigLoader extends ChainConfigLoader {

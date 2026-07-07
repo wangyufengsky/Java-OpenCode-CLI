@@ -98,7 +98,9 @@ class ConsoleMvcTest {
                 .contains("project-unit-test-generation")
                 .contains("source.package-paths")
                 .contains("每任务一个类")
-                .contains("test.verify-command")
+                .contains("agentbridge.web-base-url")
+                .contains("agentbridge.mcp-url")
+                .contains("agentbridge.max-attempts")
                 .contains("git-code-contribution-report")
                 .contains("synthesis")
                 .contains("总报告重跑不需要编号")
@@ -138,8 +140,11 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['source.package-paths']").isArray())
                 .andExpect(jsonPath("$.defaults['test.concurrency']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['test.max-types-per-task']").doesNotExist())
-                .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(80))
-                .andExpect(jsonPath("$.defaults['test.verify-command'][0]").value("./mvnw"));
+                .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(90))
+                .andExpect(jsonPath("$.defaults['test.verify-command']").doesNotExist())
+                .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
+                .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
+                .andExpect(jsonPath("$.defaults['agentbridge.max-attempts']").value(5));
     }
 
     @Test
