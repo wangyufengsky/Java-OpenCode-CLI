@@ -50,8 +50,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .contains("只需修改当前批次允许范围内的测试文件")
                 .doesNotContain(
                         "get_compilation_errors",
-                        "run_tests",
-                        "get_coverage",
+                        "run_command",
                         "list_tests",
                         "MCP",
                         legacySummaryJsonField(),
@@ -60,8 +59,16 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                         oldChinesePhrase("额外", "产物")
                 );
         assertThat(client.toolNames).containsSubsequence(
-                "list_tests", "get_compilation_errors", "run_tests", "get_coverage"
+                "list_tests", "get_compilation_errors", "run_command"
         );
+        assertThat(client.toolNames).doesNotContain("run_tests", "get_coverage");
+        assertThat(client.commands).allSatisfy(command -> assertThat(command)
+                .contains("org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get")
+                .contains("org.jacoco:org.jacoco.agent:0.8.15:jar:runtime")
+                .contains("-Dsqlite.native.access.argument=--enable-native-access=ALL-UNNAMED -javaagent:")
+                .contains("target/jacoco.exec")
+                .contains("test")
+                .contains("org.jacoco:jacoco-maven-plugin:0.8.15:report"));
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/user/UserHelperTest.java")).exists();
         assertThat(properties.getPaths().getOut().resolve("verification.json")).doesNotExist();
@@ -128,6 +135,18 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("created protected file")
                 .hasMessageContaining("src/main/java/com/acme/build/BuildInfo.java");
+    }
+
+    @Test
+    void ignoresAgentBridgeLocalStateWhenProtectingProductionFiles() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new AgentBridgeStateWritingClient(properties)).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
     }
 
     @Test
@@ -205,6 +224,8 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         properties.getAgentbridge().setWebBaseUrl("http://127.0.0.1:9642");
         properties.getAgentbridge().setMcpUrl("http://127.0.0.1:8642/mcp");
         properties.getAgentbridge().setTimeoutMinutes(1);
+        properties.getTest().setJacocoJvmArgProperty("sqlite.native.access.argument");
+        properties.getTest().setJacocoJvmArgBase("--enable-native-access=ALL-UNNAMED");
         return properties;
     }
 
@@ -277,6 +298,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         protected final ProjectUnitTestGenerationProperties properties;
         protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> toolNames = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> commands = new CopyOnWriteArrayList<>();
 
         FakeAgentBridgeClient(ProjectUnitTestGenerationProperties properties) {
             super(objectMapper);
@@ -303,10 +325,21 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             return switch (name) {
                 case "list_tests" -> listTests(arguments);
                 case "get_compilation_errors" -> json(Map.of("errors", List.of()), "No compilation errors");
-                case "run_tests" -> json(Map.of("success", testExists(arguments.path("target").asText())), "passed");
-                case "get_coverage" -> json(Map.of("percent", coverage(arguments.path("file").asText())), "coverage " + coverage(arguments.path("file").asText()) + "%");
+                case "run_command" -> runCommand(arguments);
                 default -> json(Map.of(), "");
             };
+        }
+
+        protected ToolResponse runCommand(JsonNode arguments) {
+            String command = arguments.path("command").asText();
+            commands.add(command);
+            String testClass = command.contains("OrderServiceTest") ? "com.acme.order.OrderService" : "com.acme.user.UserHelper";
+            try {
+                writeJacocoReport(testClass, 95);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+            return json(Map.of("success", true), "Command succeeded");
         }
 
         protected ToolResponse listTests(JsonNode arguments) {
@@ -318,6 +351,27 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         protected double coverage(String sourceClass) {
             String testName = sourceClass.substring(sourceClass.lastIndexOf('.') + 1) + "Test.java";
             return findTest(testName) == null ? -1 : 95;
+        }
+
+        protected void writeJacocoReport(String sourceClass, int percent) throws Exception {
+            Path report = properties.getProject().getRepo().resolve("target/site/jacoco/jacoco.xml");
+            Files.createDirectories(report.getParent());
+            int covered = percent;
+            int missed = 100 - percent;
+            String classPath = sourceClass.replace('.', '/');
+            int slash = classPath.lastIndexOf('/');
+            String packageName = slash < 0 ? "" : classPath.substring(0, slash);
+            Files.writeString(report, """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd">
+                    <report name="demo">
+                      <package name="%s">
+                        <class name="%s">
+                          <counter type="LINE" missed="%d" covered="%d"/>
+                        </class>
+                      </package>
+                    </report>
+                    """.formatted(packageName, classPath, missed, covered));
         }
 
         protected boolean testExists(String target) {
@@ -395,6 +449,20 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             Path productionFile = properties.getProject().getRepo().resolve("src/main/java/com/acme/build/BuildInfo.java");
             Files.createDirectories(productionFile.getParent());
             Files.writeString(productionFile, "package com.acme.build; class BuildInfo {}\n");
+            super.createTargetTest(prompt);
+        }
+    }
+
+    private class AgentBridgeStateWritingClient extends FakeAgentBridgeClient {
+        AgentBridgeStateWritingClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            Path stateFile = properties.getProject().getRepo().resolve(".agentbridge/conversation.db-shm");
+            Files.createDirectories(stateFile.getParent());
+            Files.writeString(stateFile, "agentbridge local state\n");
             super.createTargetTest(prompt);
         }
     }

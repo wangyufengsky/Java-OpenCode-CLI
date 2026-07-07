@@ -49,8 +49,25 @@ class ProjectUnitTestGenerationAgentBridgeClientTest {
         client.waitUntilIdle(base, Duration.ofSeconds(2), Duration.ofMillis(1));
 
         assertThat(promptBodies).hasSize(1);
-        assertThat(objectMapper.readTree(promptBodies.get(0)).path("prompt").asText()).isEqualTo("write tests");
+        assertThat(objectMapper.readTree(promptBodies.get(0)).path("text").asText()).isEqualTo("write tests");
         assertThat(infoCalls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void waitUntilIdleDoesNotReturnBeforeAgentStartsRunning() throws Exception {
+        AtomicInteger infoCalls = new AtomicInteger();
+        HttpServer server = server();
+        server.createContext("/info", exchange -> {
+            int call = infoCalls.getAndIncrement();
+            boolean running = call == 2;
+            respond(exchange, 200, "{\"running\":" + running + "}");
+        });
+        server.start();
+
+        URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        client.waitUntilIdle(base, Duration.ofSeconds(2), Duration.ofMillis(1));
+
+        assertThat(infoCalls.get()).isGreaterThanOrEqualTo(4);
     }
 
     @Test

@@ -25,6 +25,9 @@ class ProjectUnitTestGenerationPropertiesTest {
         assertThat(properties.getSource().getPackagePaths()).isEmpty();
         assertThat(properties.getSource().getExclude()).contains("target/**", "build/**", "generated/**");
         assertThat(properties.getTest().getCoverageThresholdPercent()).isEqualTo(90);
+        assertThat(properties.getTest().getJacocoVersion()).isEqualTo("0.8.15");
+        assertThat(properties.getTest().getJacocoJvmArgProperty()).isEqualTo("sqlite.native.access.argument");
+        assertThat(properties.getTest().getJacocoJvmArgBase()).isEqualTo("--enable-native-access=ALL-UNNAMED");
         assertThat(properties.getAgentbridge().getWebBaseUrl()).isEqualTo("https://127.0.0.1:9642");
         assertThat(properties.getAgentbridge().getMcpUrl()).isEqualTo("http://127.0.0.1:8642/mcp");
         assertThat(properties.getAgentbridge().getTimeoutMinutes()).isEqualTo(40);
@@ -48,5 +51,13 @@ class ProjectUnitTestGenerationPropertiesTest {
                         "getMaxSourceCharsPerTask",
                         "setMaxSourceCharsPerTask"
                 );
+    }
+
+    @Test
+    void defaultJacocoJvmArgPropertyUsesStandardSurefireArgLine() {
+        ProjectUnitTestGenerationProperties properties = new ProjectUnitTestGenerationProperties();
+
+        assertThat(properties.getTest().getJacocoJvmArgProperty()).isEqualTo("argLine");
+        assertThat(properties.getTest().getJacocoJvmArgBase()).isEmpty();
     }
 }

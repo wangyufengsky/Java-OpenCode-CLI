@@ -34,15 +34,21 @@ public class ProjectUnitTestGenerationAgentBridgeClient {
 
     public void postPrompt(URI webBaseUrl, String prompt) throws IOException, InterruptedException {
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("prompt", prompt);
+        body.put("text", prompt);
         HttpResponse<String> response = sendJson(webBaseUrl.resolve("/prompt"), body);
         requireSuccess(response, "AgentBridge POST /prompt failed");
     }
 
     public void waitUntilIdle(URI webBaseUrl, Duration timeout, Duration pollInterval) throws Exception {
         long deadline = System.nanoTime() + timeout.toNanos();
+        long startupGraceNanos = Math.min(Duration.ofSeconds(30).toNanos(), timeout.toNanos());
+        long startedWaiting = System.nanoTime();
+        boolean observedRunning = false;
         while (true) {
-            if (!isRunning(webBaseUrl)) {
+            boolean running = isRunning(webBaseUrl);
+            if (running) {
+                observedRunning = true;
+            } else if (observedRunning || System.nanoTime() - startedWaiting >= startupGraceNanos) {
                 return;
             }
             if (System.nanoTime() >= deadline) {

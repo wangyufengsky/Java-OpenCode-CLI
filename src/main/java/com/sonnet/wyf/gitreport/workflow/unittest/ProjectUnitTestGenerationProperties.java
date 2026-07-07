@@ -148,6 +148,9 @@ public class ProjectUnitTestGenerationProperties {
 
     public static class Test {
         private int coverageThresholdPercent = 90;
+        private String jacocoVersion = "0.8.15";
+        private String jacocoJvmArgProperty = "argLine";
+        private String jacocoJvmArgBase = "";
 
         @JsonProperty("coverage-threshold-percent")
         public int getCoverageThresholdPercent() {
@@ -157,6 +160,38 @@ public class ProjectUnitTestGenerationProperties {
         @JsonProperty("coverage-threshold-percent")
         public void setCoverageThresholdPercent(int coverageThresholdPercent) {
             this.coverageThresholdPercent = coverageThresholdPercent;
+        }
+
+        @JsonProperty("jacoco-version")
+        public String getJacocoVersion() {
+            return jacocoVersion;
+        }
+
+        @JsonProperty("jacoco-version")
+        public void setJacocoVersion(String jacocoVersion) {
+            this.jacocoVersion = jacocoVersion == null || jacocoVersion.isBlank() ? "0.8.15" : jacocoVersion;
+        }
+
+        @JsonProperty("jacoco-jvm-arg-property")
+        public String getJacocoJvmArgProperty() {
+            return jacocoJvmArgProperty;
+        }
+
+        @JsonProperty("jacoco-jvm-arg-property")
+        public void setJacocoJvmArgProperty(String jacocoJvmArgProperty) {
+            this.jacocoJvmArgProperty = jacocoJvmArgProperty == null || jacocoJvmArgProperty.isBlank()
+                    ? "argLine"
+                    : jacocoJvmArgProperty;
+        }
+
+        @JsonProperty("jacoco-jvm-arg-base")
+        public String getJacocoJvmArgBase() {
+            return jacocoJvmArgBase;
+        }
+
+        @JsonProperty("jacoco-jvm-arg-base")
+        public void setJacocoJvmArgBase(String jacocoJvmArgBase) {
+            this.jacocoJvmArgBase = jacocoJvmArgBase == null ? "" : jacocoJvmArgBase;
         }
 
     }

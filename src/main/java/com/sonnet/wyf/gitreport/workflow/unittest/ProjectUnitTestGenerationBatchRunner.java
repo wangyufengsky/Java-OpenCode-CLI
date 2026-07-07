@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -18,12 +21,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 public class ProjectUnitTestGenerationBatchRunner {
     public static final String RESULTS_JSON = "agentbridge-results.json";
-    private static final Pattern PERCENT_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*%");
 
     private final ProjectUnitTestGenerationAgentBridgeClient client;
     private final ProjectUnitTestGenerationPromptBuilder promptBuilder;
@@ -145,19 +146,27 @@ public class ProjectUnitTestGenerationBatchRunner {
                 .put("path", targetTestFile)))) {
             failures.add("目标测试类存在编译错误: " + targetTestFile);
         }
-        ObjectNode runArguments = objectMapper.createObjectNode().put("target", testClass);
-        if (!module.isBlank()) {
-            runArguments.put("module", module);
-        }
-        if (!testsPassed(client.callTool(mcpUrl, "run_tests", runArguments))) {
-            failures.add("目标测试类运行失败: " + testClass);
-        }
-        Coverage coverage = coverage(client.callTool(mcpUrl, "get_coverage", objectMapper.createObjectNode()
-                .put("file", sourceClass)));
-        if (coverage.percent() < 0) {
-            failures.add("覆盖率无数据: " + sourceClass);
-        } else if (coverage.percent() < threshold) {
-            failures.add("覆盖率不足: " + sourceClass + " " + coverage.percent() + "% < " + threshold + "%");
+        Coverage coverage = new Coverage(-1);
+        if (failures.isEmpty()) {
+            Path coverageReport = coverageReportPath(properties.getProject().getRepo(), module);
+            Path coverageExec = coverageExecPath(properties.getProject().getRepo(), module);
+            Files.deleteIfExists(coverageReport);
+            Files.deleteIfExists(coverageExec);
+            ProjectUnitTestGenerationAgentBridgeClient.ToolResponse run = client.callTool(
+                    mcpUrl,
+                    "run_command",
+                    runCommandArguments(properties, testClass, module, coverageExec)
+            );
+            if (!commandSucceeded(run)) {
+                failures.add("目标测试类运行失败: " + testClass + " " + run.text());
+            } else {
+                coverage = jacocoCoverage(coverageReport, sourceClass);
+                if (coverage.percent() < 0) {
+                    failures.add("覆盖率无数据: " + sourceClass);
+                } else if (coverage.percent() < threshold) {
+                    failures.add("覆盖率不足: " + sourceClass + " " + coverage.percent() + "% < " + threshold + "%");
+                }
+            }
         }
         if (failures.isEmpty()) {
             return new Acceptance(true, "accepted: " + testClass + ", coverage=" + coverage.percent() + "%");
@@ -183,33 +192,106 @@ public class ProjectUnitTestGenerationBatchRunner {
         return text.contains("no compilation error") || text.contains("0 errors") || (!text.contains("error") && !text.isBlank());
     }
 
-    private boolean testsPassed(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
-        JsonNode structured = response.structured();
-        if (structured.has("success")) {
-            return structured.path("success").asBoolean(false);
+    private ObjectNode runCommandArguments(
+            ProjectUnitTestGenerationProperties properties,
+            String testClass,
+            String module,
+            Path coverageExec
+    ) {
+        String jacocoVersion = properties.getTest().getJacocoVersion();
+        Path agentJar = Path.of(System.getProperty("user.home"))
+                .resolve(".m2/repository/org/jacoco/org.jacoco.agent")
+                .resolve(jacocoVersion)
+                .resolve("org.jacoco.agent-" + jacocoVersion + "-runtime.jar");
+        String javaAgent = "-javaagent:" + agentJar.toAbsolutePath().normalize()
+                + "=destfile=" + coverageExec.toAbsolutePath().normalize();
+        String jvmArgBase = properties.getTest().getJacocoJvmArgBase().trim();
+        String jvmArgs = jvmArgBase.isBlank() ? javaAgent : jvmArgBase + " " + javaAgent;
+
+        StringBuilder command = new StringBuilder();
+        command.append("cd ").append(shellQuote(properties.getProject().getRepo().toAbsolutePath().normalize().toString()));
+        command.append(" && mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get");
+        command.append(" -Dartifact=").append(shellQuote("org.jacoco:org.jacoco.agent:" + jacocoVersion + ":jar:runtime"));
+        command.append(" && mvn -q");
+        if (!module.isBlank()) {
+            command.append(" -pl ").append(shellQuote(module)).append(" -am");
         }
-        if (structured.has("passed")) {
-            return structured.path("passed").asBoolean(false);
-        }
-        String text = response.text().toLowerCase(Locale.ROOT);
-        return !text.isBlank()
-                && (text.contains("pass") || text.contains("success"))
-                && !text.contains("fail")
-                && !text.contains("error");
+        command.append(" -Dtest=").append(shellQuote(simpleName(testClass)));
+        command.append(" ").append(shellQuote("-D" + properties.getTest().getJacocoJvmArgProperty() + "=" + jvmArgs));
+        command.append(" test");
+        command.append(" ").append(shellQuote("org.jacoco:jacoco-maven-plugin:" + jacocoVersion + ":report"));
+        int timeoutSeconds = Math.max(60, properties.getAgentbridge().getTimeoutMinutes() * 60);
+        return objectMapper.createObjectNode()
+                .put("command", command.toString())
+                .put("timeout", timeoutSeconds)
+                .put("max_chars", 12000)
+                .put("title", "Run unit test with JaCoCo");
     }
 
-    private Coverage coverage(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
-        JsonNode structured = response.structured();
-        for (String field : List.of("percent", "coverage", "lineCoverage", "classCoverage")) {
-            if (structured.has(field) && structured.path(field).isNumber()) {
-                return new Coverage(structured.path(field).asDouble());
-            }
+    private boolean commandSucceeded(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
+        if (response.structured().has("success")) {
+            return response.structured().path("success").asBoolean(false);
         }
-        Matcher matcher = PERCENT_PATTERN.matcher(response.text());
-        if (matcher.find()) {
-            return new Coverage(Double.parseDouble(matcher.group(1)));
+        String text = response.text().toLowerCase(Locale.ROOT);
+        return text.contains("command succeeded")
+                || text.contains("build success");
+    }
+
+    private Coverage jacocoCoverage(Path report, String sourceClass) throws Exception {
+        if (!Files.exists(report)) {
+            return new Coverage(-1);
+        }
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        factory.setExpandEntityReferences(false);
+        Document document = factory.newDocumentBuilder().parse(report.toFile());
+        String className = sourceClass.replace('.', '/');
+        NodeList classes = document.getElementsByTagName("class");
+        for (int classIndex = 0; classIndex < classes.getLength(); classIndex++) {
+            Element classElement = (Element) classes.item(classIndex);
+            if (!className.equals(classElement.getAttribute("name"))) {
+                continue;
+            }
+            NodeList counters = classElement.getElementsByTagName("counter");
+            for (int counterIndex = 0; counterIndex < counters.getLength(); counterIndex++) {
+                Element counter = (Element) counters.item(counterIndex);
+                if (!"LINE".equals(counter.getAttribute("type"))) {
+                    continue;
+                }
+                int missed = parseInt(counter.getAttribute("missed"));
+                int covered = parseInt(counter.getAttribute("covered"));
+                int total = missed + covered;
+                return total == 0 ? new Coverage(-1) : new Coverage(covered * 100.0 / total);
+            }
+            return new Coverage(-1);
         }
         return new Coverage(-1);
+    }
+
+    private Path coverageReportPath(Path repo, String module) {
+        Path root = repo.toAbsolutePath().normalize();
+        if (!module.isBlank()) {
+            root = root.resolve(module).normalize();
+        }
+        return root.resolve("target/site/jacoco/jacoco.xml");
+    }
+
+    private Path coverageExecPath(Path repo, String module) {
+        Path root = repo.toAbsolutePath().normalize();
+        if (!module.isBlank()) {
+            root = root.resolve(module).normalize();
+        }
+        return root.resolve("target/jacoco.exec");
+    }
+
+    private int parseInt(String value) {
+        return value == null || value.isBlank() ? 0 : Integer.parseInt(value);
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     private int threshold(Map<String, Object> batch, ProjectUnitTestGenerationProperties properties) {
@@ -238,6 +320,11 @@ public class ProjectUnitTestGenerationBatchRunner {
         int index = normalized.indexOf(marker);
         String classPath = index >= 0 ? normalized.substring(index + marker.length()) : normalized;
         return classPath.replaceAll("\\.java$", "").replace('/', '.');
+    }
+
+    private String simpleName(String qualifiedName) {
+        int index = qualifiedName.lastIndexOf('.');
+        return index < 0 ? qualifiedName : qualifiedName.substring(index + 1);
     }
 
     private String moduleName(String targetTestFile) {
@@ -407,9 +494,11 @@ public class ProjectUnitTestGenerationBatchRunner {
         private static boolean isAllowedWrite(Path repo, Path out, Path file, List<String> allowedWriteGlobs, List<String> targetTestFiles) {
             Path normalized = file.toAbsolutePath().normalize();
             Path gitRoot = repo.resolve(".git").normalize();
+            Path agentBridgeRoot = repo.resolve(".agentbridge").normalize();
             return ProjectUnitTestGenerationPaths.isAllowedBatchTestWrite(repo, normalized, allowedWriteGlobs, targetTestFiles)
                     || ProjectUnitTestGenerationPaths.isBuildArtifact(repo, normalized)
                     || normalized.startsWith(gitRoot)
+                    || normalized.startsWith(agentBridgeRoot)
                     || (out.startsWith(repo) && normalized.startsWith(out));
         }
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChatWebServerSettings">
+    <option name="vapidPrivateKey" value="7EcS5LWwQszBS23QzlbEvkILAmXB-dcTDTOpWuWjyQM" />
+    <option name="vapidPublicKey" value="BF8Xx8e2_heDG8nBKIrShCXEYmvxhlhaDaTq5YSoGghte-lqGDUvl0QiRp1VTnlH6wsBT7sybgRK2vFyO1JadDE" />
+  </component>
+</project>
