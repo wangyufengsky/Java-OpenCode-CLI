@@ -80,7 +80,7 @@ public class GitReportOrchestrator {
     public void run(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         validateRepositoryDirectory(properties);
-        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, agentbridgeWebBaseUrl={}, concurrency={}, timeoutMinutes={}, validationSettleSeconds={}, maxRetries={}",
+        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, agentbridgeWebBaseUrl={}, concurrency={}, timeoutMinutes={}, validationSettleSeconds={}",
                 properties.getProject().getId(),
                 properties.getProject().getName(),
                 properties.getProject().getRunId(),
@@ -89,8 +89,7 @@ public class GitReportOrchestrator {
                 properties.getAgentbridge().getWebBaseUrl(),
                 properties.getAgentbridge().getConcurrency(),
                 properties.getAgentbridge().getTimeoutMinutes(),
-                properties.getAgentbridge().getValidationSettleSeconds(),
-                properties.getAgentbridge().getMaxRetries());
+                properties.getAgentbridge().getValidationSettleSeconds());
         preparation.prepare(properties);
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));

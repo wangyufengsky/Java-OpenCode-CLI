@@ -14,8 +14,8 @@ const chainConfigDefinitions = {
       field('git.author-map', '作者映射', '可选；需要合并作者身份时填写映射配置。', 'textarea'),
       field('git.include', '包含路径', '可选；每行一个 include glob，留空表示不限制。', 'list'),
       field('git.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建产物或锁文件。', 'list'),
-      field('agentbridge.worker-message', '明细任务消息', '发送给个人明细 AgentBridge session 的附加执行消息。', 'textarea'),
-      field('agentbridge.synthesis-message', '汇总任务消息', '发送给汇总 AgentBridge session 的附加执行消息。', 'textarea'),
+      field('agentbridge.task-message', '明细任务消息', '发送给个人明细 AgentBridge task 的附加执行消息。', 'textarea'),
+      field('agentbridge.synthesis-task-message', '汇总任务消息', '发送给汇总 AgentBridge task 的附加执行消息。', 'textarea'),
       field('detail-input.top-files', '明细 Top 文件数', '每个作者明细输入保留的高影响文件数量。', 'number'),
       field('detail-input.commits', '明细提交数', '每个作者明细输入保留的提交数量。', 'number'),
       field('detail-input.changed-regions', '改动区域数', '每个作者明细输入保留的 changed_regions 数量。', 'number'),
@@ -32,13 +32,13 @@ const chainConfigDefinitions = {
       field('out', '逻辑输出目录', '报告中的逻辑输出目录，会在其下按运行日期创建子目录。'),
       field('local-out', '本机输出目录', '可选；本机实际落盘目录，留空时直接使用逻辑输出目录。'),
       field('transaction-plan-dir', '每日计划目录', '交易/模块计划根目录，运行日期下应存在 transactions.yml。'),
-      field('new-project', '新 JSON 项目根目录', '新项目根目录，也是 AgentBridge session directory。'),
+      field('new-project', '新 JSON 项目根目录', '新项目根目录，也是 AgentBridge task 工作目录。'),
       field('old-8583-doc', '老 8583 设计文档', '老 8583/老代码详细设计文档。'),
       field('doc-root', '文档根目录', 'mapping-doc 或 reconstructed-design 为空时用它拼默认文档路径。'),
       field('mapping-doc', '映射文档', '可选；8583 到 JSON 映射文档，留空使用默认路径。'),
       field('reconstructed-design', '重构设计文档', '可选；重构项目详细设计，留空使用默认路径。'),
-      field('worker-message', '单项任务消息', '发送给单项 AgentBridge session 的附加执行消息。', 'textarea'),
-      field('synthesis-message', '汇总任务消息', '发送给汇总 AgentBridge session 的附加执行消息。', 'textarea')
+      field('task-message', '单项任务消息', '发送给单项 AgentBridge task 的附加执行消息。', 'textarea'),
+      field('synthesis-task-message', '汇总任务消息', '发送给汇总 AgentBridge task 的附加执行消息。', 'textarea')
     ]
   },
   'smartesb-code-reader': {
@@ -49,10 +49,10 @@ const chainConfigDefinitions = {
       field('service-identify', 'serviceIdentify.xml', '一个或多个 serviceIdentify.xml，每行一个路径。', 'list'),
       field('xml-root', 'XML 根目录', '交易 XML 和 base XML 根目录。'),
       field('biz-root', '.biz 根目录', '可选；留空时等于 XML 根目录。'),
-      field('java-root', 'Java 源码根目录', 'Java 源码根目录，也是 AgentBridge session directory。'),
+      field('java-root', 'Java 源码根目录', 'Java 源码根目录，也是 AgentBridge task 工作目录。'),
       field('mode', 'Switch Mode', 'serviceIdentify.xml 中要读取的 switch mode。'),
-      field('worker-message', '阅读任务消息', '发送给模块/交易 AgentBridge session 的附加执行消息。', 'textarea'),
-      field('synthesis-message', '索引任务消息', '发送给索引 AgentBridge session 的附加执行消息。', 'textarea')
+      field('task-message', '阅读任务消息', '发送给模块/交易 AgentBridge task 的附加执行消息。', 'textarea'),
+      field('synthesis-task-message', '索引任务消息', '发送给索引 AgentBridge task 的附加执行消息。', 'textarea')
     ]
   },
   'weekly-engineering-report': {
@@ -72,7 +72,7 @@ const chainConfigDefinitions = {
       field('review.grouping.max-files-per-task', '每任务最大文件数', '单个 review unit 最多覆盖的文件数量。', 'number'),
       field('review.grouping.max-hunk-chars-per-task', '每任务最大 hunk 字符数', '单个 review unit 的 hunk 内容字符上限。', 'number'),
       field('review.grouping.max-commits-per-task', '每任务最大提交数', '单个 review unit 最多覆盖的 commit 数量。', 'number'),
-      field('agentbridge.timeout-minutes', 'AgentBridge 超时分钟数', '单个 AgentBridge session 的超时时间。', 'number')
+      field('agentbridge.timeout-minutes', 'AgentBridge 超时分钟数', '单个 AgentBridge task 的超时时间。', 'number')
     ]
   },
   'project-unit-test-generation': {

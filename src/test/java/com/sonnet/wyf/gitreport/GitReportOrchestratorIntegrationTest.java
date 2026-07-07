@@ -158,7 +158,6 @@ class GitReportOrchestratorIntegrationTest {
         properties.getPaths().setOut(out);
         properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
         properties.getAgentbridge().setValidationSettleSeconds(0);
-        properties.getAgentbridge().setMaxRetries(2);
         properties.getAgentbridge().setTimeoutMinutes(0);
         properties.getAgentbridge().setValidationSettleSeconds(0);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
@@ -199,7 +198,6 @@ class GitReportOrchestratorIntegrationTest {
         properties.getPaths().setOut(out);
         properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
         properties.getAgentbridge().setValidationSettleSeconds(0);
-        properties.getAgentbridge().setMaxRetries(2);
         properties.getAgentbridge().setValidationSettleSeconds(0);
         properties.getAgentbridge().setValidationMaxCorrections(2);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));

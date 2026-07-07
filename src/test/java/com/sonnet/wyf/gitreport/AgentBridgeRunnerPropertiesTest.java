@@ -63,12 +63,15 @@ class AgentBridgeRunnerPropertiesTest {
     @Test
     void keepsMainConfigurationFreeOfLegacyGitReportDetails() throws Exception {
         String application = java.nio.file.Files.readString(Path.of("src/main/resources/application.yml"));
+        String applicationExample = java.nio.file.Files.readString(Path.of("src/main/resources/application-example.yml"));
 
         assertThat(application).contains("agentbridge-runner:");
         assertThat(application).doesNotContain("git-report:");
         assertThat(application).doesNotContain("smartesb:");
         assertThat(application).doesNotContain("D:/workspace/upfs-production");
         assertThat(application).doesNotContain("D:\\upfs");
+        assertThat(application).doesNotContain("max-retries");
+        assertThat(applicationExample).doesNotContain("max-retries");
     }
 
     @Configuration(proxyBeanMethods = false)

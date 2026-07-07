@@ -118,7 +118,6 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
         target.setPollMillis(source.getPollMillis());
         target.setValidationSettleSeconds(source.getValidationSettleSeconds());
         target.setValidationMaxCorrections(source.getValidationMaxCorrections());
-        target.setMaxRetries(source.getMaxRetries());
         target.setMaxConcurrency(source.getMaxConcurrency());
         target.setTaskMessage(source.getTaskMessage());
         target.setSynthesisTaskMessage(source.getSynthesisTaskMessage());

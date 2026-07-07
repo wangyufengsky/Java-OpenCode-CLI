@@ -14,9 +14,6 @@ public final class AgentBridgeSettingsApplier {
         properties.getAgentbridge().setPollMillis(settings.getPollMillis());
         properties.getAgentbridge().setValidationSettleSeconds(settings.getValidationSettleSeconds());
         properties.getAgentbridge().setValidationMaxCorrections(settings.getValidationMaxCorrections());
-        properties.getAgentbridge().setMaxRetries(settings.getMaxRetries());
         properties.getAgentbridge().setMaxConcurrency(settings.getMaxConcurrency());
-        properties.getAgentbridge().setTaskMessage(settings.getTaskMessage());
-        properties.getAgentbridge().setSynthesisTaskMessage(settings.getSynthesisTaskMessage());
     }
 }

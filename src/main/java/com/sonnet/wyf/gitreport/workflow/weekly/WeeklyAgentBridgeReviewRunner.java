@@ -121,7 +121,6 @@ public class WeeklyAgentBridgeReviewRunner implements WeeklyCodeReviewRunner {
         settings.setPollMillis(properties.getAgentbridge().getPollMillis());
         settings.setValidationSettleSeconds(properties.getAgentbridge().getValidationSettleSeconds());
         settings.setValidationMaxCorrections(properties.getAgentbridge().getValidationMaxCorrections());
-        settings.setMaxRetries(properties.getAgentbridge().getMaxRetries());
         settings.setMaxConcurrency(properties.getAgentbridge().getMaxConcurrency());
         settings.setTaskMessage(firstNonBlank(properties.getAgentbridge().getTaskMessage(), requestSettings.getTaskMessage()));
         settings.setSynthesisTaskMessage(firstNonBlank(properties.getAgentbridge().getSynthesisTaskMessage(), requestSettings.getSynthesisTaskMessage()));

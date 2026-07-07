@@ -55,7 +55,6 @@ class GitReportPropertiesTest {
                     assertThat(properties.getAgentbridge().getValidationMaxCorrections()).isEqualTo(3);
                     assertThat(properties.getAgentbridge().getConcurrency()).isEqualTo(1);
                     assertThat(properties.getAgentbridge().getTimeoutMinutes()).isEqualTo(40);
-                    assertThat(properties.getAgentbridge().getMaxRetries()).isEqualTo(1);
                     assertThat(properties.getAgentbridge().getMaxConcurrency()).isEqualTo(1);
                     assertThat(properties.getDetailInput().getTopFiles()).isEqualTo(7);
                     assertThat(properties.getDetailInput().getCommits()).isEqualTo(12);

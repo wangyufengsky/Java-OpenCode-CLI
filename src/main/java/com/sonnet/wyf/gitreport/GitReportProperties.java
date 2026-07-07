@@ -166,7 +166,6 @@ public class GitReportProperties {
         private int pollMillis = 1000;
         private int validationSettleSeconds = 30;
         private int validationMaxCorrections = 2;
-        private int maxRetries = 1;
         private int maxConcurrency = 1;
         private String taskMessage = "严格执行附件 worker-prompt.md 中的任务，写入要求的文件；完成后回复简短完成信息即可，Java 会校验输出。";
         private String synthesisTaskMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告；完成后回复简短完成信息即可，Java 会校验输出。";
@@ -225,14 +224,6 @@ public class GitReportProperties {
 
         public void setValidationMaxCorrections(int validationMaxCorrections) {
             this.validationMaxCorrections = validationMaxCorrections;
-        }
-
-        public int getMaxRetries() {
-            return maxRetries;
-        }
-
-        public void setMaxRetries(int maxRetries) {
-            this.maxRetries = maxRetries;
         }
 
         public int getMaxConcurrency() {

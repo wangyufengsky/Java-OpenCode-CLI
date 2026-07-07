@@ -22,7 +22,6 @@ agentbridge-runner:
     poll-millis: 1000
     validation-settle-seconds: 30
     validation-max-corrections: 2
-    max-retries: 1
 
 task-console:
   database-path: "data/agentbridge-task-console.sqlite"
