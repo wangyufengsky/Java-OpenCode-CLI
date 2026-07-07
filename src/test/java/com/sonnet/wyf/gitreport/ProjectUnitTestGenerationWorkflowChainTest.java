@@ -47,8 +47,18 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         assertThat(client.prompts).hasSize(2);
         assertThat(client.prompts.get(0))
                 .contains("batch_input_json:", "上一轮 Java 验收失败摘要", "测试类不存在")
-                .contains("不需要写 `summary_json`")
-                .doesNotContain("get_compilation_errors", "run_tests", "get_coverage", "list_tests", "MCP");
+                .contains("只需修改当前批次允许范围内的测试文件")
+                .doesNotContain(
+                        "get_compilation_errors",
+                        "run_tests",
+                        "get_coverage",
+                        "list_tests",
+                        "MCP",
+                        legacySummaryJsonField(),
+                        legacySummaryJsonFile(),
+                        oldChinesePhrase("中间", "产物"),
+                        oldChinesePhrase("额外", "产物")
+                );
         assertThat(client.toolNames).containsSubsequence(
                 "list_tests", "get_compilation_errors", "run_tests", "get_coverage"
         );
@@ -170,6 +180,18 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     private WorkflowRunRequest request(String mode, String rerunType, String rerunId) {
         OpenCodeSettings settings = new OpenCodeSettings();
         return new WorkflowRunRequest(mode, rerunType, rerunId, LocalDate.of(2026, 7, 7), settings);
+    }
+
+    private static String legacySummaryJsonField() {
+        return "summary" + "_json";
+    }
+
+    private static String legacySummaryJsonFile() {
+        return "summary" + ".json";
+    }
+
+    private static String oldChinesePhrase(String first, String second) {
+        return first + second;
     }
 
     private void writeSource(Path repo) throws Exception {

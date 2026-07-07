@@ -87,7 +87,7 @@ const chainConfigDefinitions = {
       field('docs.reconstructed-design', '重构设计文档', '可选；相对项目仓库的重构项目详细设计文档路径。'),
       field('source.package-paths', '包路径', '每行一个包名或源码路径，留空表示全量。', 'list'),
       field('source.include', '包含路径', '可选；每行一个 include glob。', 'list'),
-      field('source.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建产物或生成代码。', 'list'),
+      field('source.exclude', '排除路径', '每行一个 exclude glob，用于过滤构建输出或生成代码。', 'list'),
       field('test.coverage-threshold-percent', '覆盖率阈值', '当前目标源码类达到该覆盖率百分比后，当前 batch 才算达标。', 'number'),
       field('agentbridge.web-base-url', 'AgentBridge Web URL', 'AgentBridge Web Access 地址，用于提交 prompt 并监听运行状态。'),
       field('agentbridge.mcp-url', 'AgentBridge MCP URL', 'AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。'),

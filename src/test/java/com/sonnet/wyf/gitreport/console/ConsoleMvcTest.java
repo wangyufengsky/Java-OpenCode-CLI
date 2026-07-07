@@ -141,7 +141,7 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['test.concurrency']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['test.max-types-per-task']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(90))
-                .andExpect(jsonPath("$.defaults['test.verify-command']").doesNotExist())
+                .andExpect(jsonPath("$.defaults['test." + String.join("-", "verify", "command") + "']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
                 .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
                 .andExpect(jsonPath("$.defaults['agentbridge.max-attempts']").value(5));

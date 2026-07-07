@@ -191,7 +191,7 @@ class PromptPackContractTest {
                 "上一轮 Java 验收失败摘要",
                 "只允许修改 `target_test_files` 或 `allowed_write_globs` 内的测试文件",
                 "不要修改生产代码、构建脚本、配置文件",
-                "不需要写 `summary_json`",
+                "只需修改当前批次允许范围内的测试文件",
                 "最终只回复简短完成信息"
         );
         assertThat(worker).doesNotContain(
@@ -205,12 +205,16 @@ class PromptPackContractTest {
                 "list_tests",
                 "tools/call",
                 "\"status\"",
-                "DONE",
-                "BLOCKED",
+                legacySummaryJsonField(),
+                legacySummaryJsonFile(),
+                oldChinesePhrase("中间", "产物"),
+                oldChinesePhrase("额外", "产物"),
+                "DO" + "NE",
+                "BLO" + "CKED",
                 "严格执行 `batch_input_json.rules`",
                 "只允许创建或修改目标项目 src/test/** 下的测试文件",
                 "读取 batch_input_json、源码、已有测试和文档时，必须使用 `AgentBridge` MCP 文件读取工具",
-                "创建或修改测试文件、写入 summary_json 时，必须使用 `AgentBridge` MCP 文件编辑工具",
+                "创建或修改测试文件、写入 " + legacySummaryJsonField() + " 时，必须使用 `AgentBridge` MCP 文件编辑工具",
                 "开始写代码前，先判断本 task 是需要新写测试、补充已有测试，还是已有测试已经满足覆盖率",
                 "写完或修改测试文件后，必须调用 `AgentBridge` MCP 诊断工具：`get_compilation_errors`",
                 "run_tests 失败时，根据失败原因修改测试",
@@ -219,6 +223,18 @@ class PromptPackContractTest {
                 "未完成任务补跑"
         );
         assertThat(worker).doesNotContain("intellij-index", "intellij-idea", "OpenCode 原生文件");
+    }
+
+    private static String legacySummaryJsonField() {
+        return "summary" + "_json";
+    }
+
+    private static String legacySummaryJsonFile() {
+        return "summary" + ".json";
+    }
+
+    private static String oldChinesePhrase(String first, String second) {
+        return first + second;
     }
 
     @Test

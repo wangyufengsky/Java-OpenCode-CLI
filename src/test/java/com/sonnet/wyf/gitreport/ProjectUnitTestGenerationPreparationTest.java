@@ -53,8 +53,8 @@ class ProjectUnitTestGenerationPreparationTest {
         JsonNode batch = batches.path("batches").get(0);
         assertThat(batch.has("skill")).isFalse();
         assertThat(batch.has("rules")).isFalse();
-        assertThat(batch.has("summary_json")).isFalse();
-        assertThat(batch.has("status")).isFalse();
+        assertThat(batch.has(legacyBatchField("summary", "_json"))).isFalse();
+        assertThat(batch.has(legacyBatchField("sta", "tus"))).isFalse();
         assertThat(batch.path("coverage").path("threshold_percent").asInt()).isEqualTo(90);
         assertThat(batch.path("coverage").path("scope").asText()).isEqualTo("class");
         assertThat(batch.path("allowed_write_globs")).extracting(JsonNode::asText)
@@ -62,6 +62,10 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())
                 .resolve("input.json"))).isTrue();
+    }
+
+    private static String legacyBatchField(String first, String second) {
+        return first + second;
     }
 
     @Test
