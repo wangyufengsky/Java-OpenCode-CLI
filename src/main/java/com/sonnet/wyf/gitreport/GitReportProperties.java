@@ -5,16 +5,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @ConfigurationProperties(prefix = "git-report")
 public class GitReportProperties {
     private final Project project = new Project();
     private final Paths paths = new Paths();
     private final Git git = new Git();
-    private final OpenCode opencode = new OpenCode();
+    private final AgentBridge agentbridge = new AgentBridge();
     private final DetailInput detailInput = new DetailInput();
     private final SynthesisInput synthesisInput = new SynthesisInput();
 
@@ -30,8 +28,8 @@ public class GitReportProperties {
         return git;
     }
 
-    public OpenCode getOpencode() {
-        return opencode;
+    public AgentBridge getAgentbridge() {
+        return agentbridge;
     }
 
     public DetailInput getDetailInput() {
@@ -75,7 +73,6 @@ public class GitReportProperties {
     public static class Paths {
         private Path repo = Path.of(".");
         private Path out = Path.of("git-report-output");
-        private String opencodeBin = "opencode";
 
         public Path getRepo() {
             return repo;
@@ -93,13 +90,6 @@ public class GitReportProperties {
             this.out = out;
         }
 
-        public String getOpencodeBin() {
-            return opencodeBin;
-        }
-
-        public void setOpencodeBin(String opencodeBin) {
-            this.opencodeBin = opencodeBin;
-        }
     }
 
     public static class Git {
@@ -168,67 +158,33 @@ public class GitReportProperties {
         }
     }
 
-    public static class OpenCode {
-        private String serverUrl = "http://127.0.0.1:4096";
-        private boolean manageServer = true;
-        private int serverStartTimeoutSeconds = 30;
-        private int createSessionTimeoutSeconds = 10;
-        private int requestTimeoutSeconds = 60;
-        private int concurrency = 6;
+    public static class AgentBridge {
+        private String webBaseUrl = "https://127.0.0.1:9642";
+        private String mcpUrl = "http://127.0.0.1:8642/mcp";
+        private int concurrency = 1;
         private int timeoutMinutes = 40;
-        private int outputWaitSeconds = 30;
+        private int pollMillis = 1000;
+        private int validationSettleSeconds = 30;
         private int validationMaxCorrections = 2;
         private int maxRetries = 1;
-        private int maxConcurrency = 6;
-        private String workerMessage = "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。";
-        private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。";
-        private String sessionModel = "";
-        private Map<String, String> environment = defaultEnvironment();
+        private int maxConcurrency = 1;
+        private String taskMessage = "严格执行附件 worker-prompt.md 中的任务，写入要求的文件；完成后回复简短完成信息即可，Java 会校验输出。";
+        private String synthesisTaskMessage = "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告；完成后回复简短完成信息即可，Java 会校验输出。";
 
-        private static Map<String, String> defaultEnvironment() {
-            Map<String, String> environment = new LinkedHashMap<>();
-            environment.put("OPENCODE_DISABLE_MODELS_FETCH", "true");
-            return environment;
+        public String getWebBaseUrl() {
+            return webBaseUrl;
         }
 
-        public String getServerUrl() {
-            return serverUrl;
+        public void setWebBaseUrl(String webBaseUrl) {
+            this.webBaseUrl = webBaseUrl;
         }
 
-        public void setServerUrl(String serverUrl) {
-            this.serverUrl = serverUrl;
+        public String getMcpUrl() {
+            return mcpUrl;
         }
 
-        public boolean isManageServer() {
-            return manageServer;
-        }
-
-        public void setManageServer(boolean manageServer) {
-            this.manageServer = manageServer;
-        }
-
-        public int getServerStartTimeoutSeconds() {
-            return serverStartTimeoutSeconds;
-        }
-
-        public void setServerStartTimeoutSeconds(int serverStartTimeoutSeconds) {
-            this.serverStartTimeoutSeconds = serverStartTimeoutSeconds;
-        }
-
-        public int getRequestTimeoutSeconds() {
-            return requestTimeoutSeconds;
-        }
-
-        public void setRequestTimeoutSeconds(int requestTimeoutSeconds) {
-            this.requestTimeoutSeconds = requestTimeoutSeconds;
-        }
-
-        public int getCreateSessionTimeoutSeconds() {
-            return createSessionTimeoutSeconds;
-        }
-
-        public void setCreateSessionTimeoutSeconds(int createSessionTimeoutSeconds) {
-            this.createSessionTimeoutSeconds = createSessionTimeoutSeconds;
+        public void setMcpUrl(String mcpUrl) {
+            this.mcpUrl = mcpUrl;
         }
 
         public int getConcurrency() {
@@ -247,12 +203,20 @@ public class GitReportProperties {
             this.timeoutMinutes = timeoutMinutes;
         }
 
-        public int getOutputWaitSeconds() {
-            return outputWaitSeconds;
+        public int getPollMillis() {
+            return pollMillis;
         }
 
-        public void setOutputWaitSeconds(int outputWaitSeconds) {
-            this.outputWaitSeconds = outputWaitSeconds;
+        public void setPollMillis(int pollMillis) {
+            this.pollMillis = pollMillis;
+        }
+
+        public int getValidationSettleSeconds() {
+            return validationSettleSeconds;
+        }
+
+        public void setValidationSettleSeconds(int validationSettleSeconds) {
+            this.validationSettleSeconds = validationSettleSeconds;
         }
 
         public int getValidationMaxCorrections() {
@@ -279,36 +243,20 @@ public class GitReportProperties {
             this.maxConcurrency = maxConcurrency;
         }
 
-        public String getSessionModel() {
-            return sessionModel;
+        public String getTaskMessage() {
+            return taskMessage;
         }
 
-        public void setSessionModel(String sessionModel) {
-            this.sessionModel = sessionModel;
+        public void setTaskMessage(String taskMessage) {
+            this.taskMessage = taskMessage;
         }
 
-        public Map<String, String> getEnvironment() {
-            return environment;
+        public String getSynthesisTaskMessage() {
+            return synthesisTaskMessage;
         }
 
-        public void setEnvironment(Map<String, String> environment) {
-            this.environment = environment == null ? new LinkedHashMap<>() : new LinkedHashMap<>(environment);
-        }
-
-        public String getWorkerMessage() {
-            return workerMessage;
-        }
-
-        public void setWorkerMessage(String workerMessage) {
-            this.workerMessage = workerMessage;
-        }
-
-        public String getSynthesisMessage() {
-            return synthesisMessage;
-        }
-
-        public void setSynthesisMessage(String synthesisMessage) {
-            this.synthesisMessage = synthesisMessage;
+        public void setSynthesisTaskMessage(String synthesisTaskMessage) {
+            this.synthesisTaskMessage = synthesisTaskMessage;
         }
     }
 

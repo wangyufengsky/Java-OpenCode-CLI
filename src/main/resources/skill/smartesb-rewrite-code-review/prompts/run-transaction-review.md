@@ -13,8 +13,8 @@
 - `output.code_standard_md`
 - `output_markers`
 - `skill.summary_schema`
-- `skill.preferred_writer`
-- `skill.agentbridge_write_tools`
+- `skill.writer_hint`
+- `skill.write_hints`
 - `rules.precreated_outputs`
 
 ## 严格边界
@@ -38,12 +38,12 @@
 
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
-| 定位重构项目代码 | `search_symbols`、`list_project_files`、`search_text` | 搜索不到时用 `list_directory_tree` 刷新项目文件视图后重试；仍失败再记录到 `unverified`。 |
-| 读取重构项目代码 | `read_file` | 不要优先用 `grep`、`cat`、`rg` 读源码。 |
-| 定位老项目代码 | `search_symbols`、`list_project_files`、`search_text` | 按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字扩大搜索。 |
-| 读取老项目代码 | `read_file` | MCP 不可用时该范围标记未验证；禁止使用 shell。 |
-| 刷新项目文件视图 | `list_project_files`、`list_directory_tree` | 搜索不到新增文件或文件视图疑似过期时先刷新，再重试一次。 |
-| 写 Markdown/JSON 报告 | `edit_text`、`write_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
+| 定位重构项目代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` | 搜索不到时用 `当前可用目录浏览能力` 刷新项目文件视图后重试；仍失败再记录到 `unverified`。 |
+| 读取重构项目代码 | 当前可用读取能力 | 不要优先用 `grep`、`cat`、`rg` 读源码。 |
+| 定位老项目代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` | 按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字扩大搜索。 |
+| 读取老项目代码 | 当前可用读取能力 | MCP 不可用时该范围标记未验证；不要扩大任务边界。 |
+| 刷新项目文件视图 | `当前可用项目文件列表能力`、`当前可用目录浏览能力` | 搜索不到新增文件或文件视图疑似过期时先刷新，再重试一次。 |
+| 写 Markdown/JSON 报告 | 当前可用写入能力、当前可用写入能力 | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；不要扩大任务边界 或本地脚本。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
 
 禁止把源码读取、报告写入、项目文件视图刷新、数据库证据获取交给 shell。
@@ -54,12 +54,12 @@
 
 - 每次写入不超过 `rules.markdown_max_chars_per_write` 字符，默认 6000。
 - 每次写入不超过 `rules.markdown_max_lines_per_write` 行，默认 120。
-- 只使用 `edit_text`、`write_file` 写入已存在文件，不要调用 shell。
+- 只使用 当前可用写入能力、当前可用写入能力 写入已存在文件，不要调用 shell。
 
 ### AgentBridge MCP 写入方式
 
 1. 先确认目标输出文件已经存在：`output.review_md`、`output.matrix_md`、`output.findings_md`、`output.code_chains_md`、`output.protocol_review_md`、`output.behavior_review_md`、`output.verification_md`、`output.code_standard_md`、`output.summary_json`。
-2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要用 `write_file` 或 shell 创建缺失输出。
+2. 如果任一目标文件缺失，立即返回 `无法完成` 和缺失路径；不要用 当前可用写入能力 或 shell 创建缺失输出。
 3. 每个 Markdown 文件初始内容必须包含一个唯一追加标记。不要猜标记；必须使用 task JSON 的 `output_markers`：
 
 - `output.review_md` 使用 `output_markers.review_md`
@@ -77,14 +77,14 @@
 <!-- OPENCODE_APPEND:01-findings -->
 ```
 
-4. 追加内容时，用 `edit_text` 替换对应文件的 exact marker：
+4. 追加内容时，用 当前可用写入能力 替换对应文件的 exact marker：
 
 ```text
 oldText: "<output_markers 中该文件的 marker>"
 newText: "<小块中文内容>\n\n<同一个 marker>"
 ```
 
-5. `summary_json` 初始内容为 `{}`，用 `write_file` 将整个 `{}` 替换为合法 JSON。
+5. `summary_json` 初始内容为 `{}`，用 当前可用写入能力 将整个 `{}` 替换为合法 JSON。
 6. `projectPath` 优先传 `new_project`。如果输出目录不在 `new_project` 下，先尝试传绝对路径；仍失败时停止写入并报告失败。
 
 ### 写入失败处理
@@ -99,16 +99,16 @@ AgentBridge MCP 写文件不可用、目标路径不可写或 MCP 返回无法�
 
 ## 审查顺序
 
-以下每一步默认按“`AgentBridge` 定位/读取，`AgentBridge` 写入，`intellij-db` 取数据库证据”的 MCP 顺序执行；MCP 不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
+以下每一步默认按“`AgentBridge` 定位/读取，`AgentBridge` 写入，`intellij-db` 取数据库证据”的 MCP 顺序执行；MCP 不可用时不要扩大任务边界，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
 
-1. 用 `search_symbols`、`list_project_files`、`search_text` 在 `new_project` 中定位重构交易代码。
-   - 优先 `search_symbols` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
-   - 用 `list_project_files` 按文件名、通配符、XML、Mapper、配置文件定位候选。
-   - 用 `read_file` 读取候选文件内容，读取时必须使用 AgentBridge 返回的相对路径原文。
-   - 需要一次查找多类关键文件时，用 `search_text`。
+1. 用 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 在 `new_project` 中定位重构交易代码。
+   - 优先 `当前可用搜索能力` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
+   - 用 `当前可用项目文件列表能力` 按文件名、通配符、XML、Mapper、配置文件定位候选。
+   - 用 当前可用读取能力 读取候选文件内容，读取时必须使用 AgentBridge 返回的相对路径原文。
+   - 需要一次查找多类关键文件时，用 `当前可用搜索能力`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
 2. 在 `documents.reconstructed_design` 中只检索当前交易和相关类名，提取重构架构依据。
-3. 用 `search_symbols`、`list_project_files`、`search_text` 在 `old_project` 中定位老 SmartESB 交易代码。
+3. 用 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 在 `old_project` 中定位老 SmartESB 交易代码。
    - 查询当前交易名、交易码、serviceId、类名、XML/biz 引用。
    - 建立老代码调用链和 8583 报文处理路径。
 4. 只针对当前交易检索：

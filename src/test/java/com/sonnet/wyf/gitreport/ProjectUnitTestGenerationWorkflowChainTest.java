@@ -3,11 +3,11 @@ package com.sonnet.wyf.gitreport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationAgentBridgeClient;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationBatchRunner;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
 import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
@@ -203,11 +203,11 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         assertThat(client.toolNames.size()).isGreaterThan(callsAfterFullRun);
     }
 
-    private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, ProjectUnitTestGenerationAgentBridgeClient client) {
+    private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, AgentBridgeClient client) {
         ProjectUnitTestGenerationPromptBuilder promptBuilder = new ProjectUnitTestGenerationPromptBuilder(new DefaultResourceLoader());
         return new ProjectUnitTestGenerationWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new ProjectUnitTestGenerationPreparation(objectMapper),
                 new ProjectUnitTestGenerationBatchRunner(client, promptBuilder, objectMapper),
                 new ProjectUnitTestGenerationReportRenderer(objectMapper),
@@ -230,7 +230,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     private WorkflowRunRequest request(String mode, String rerunType, String rerunId) {
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         return new WorkflowRunRequest(mode, rerunType, rerunId, LocalDate.of(2026, 7, 7), settings);
     }
 
@@ -294,7 +294,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 """);
     }
 
-    private class FakeAgentBridgeClient extends ProjectUnitTestGenerationAgentBridgeClient {
+    private class FakeAgentBridgeClient extends AgentBridgeClient {
         protected final ProjectUnitTestGenerationProperties properties;
         protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> toolNames = new CopyOnWriteArrayList<>();

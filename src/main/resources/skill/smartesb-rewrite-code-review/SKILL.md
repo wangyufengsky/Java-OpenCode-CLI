@@ -1,7 +1,7 @@
 ---
 name: smartesb-rewrite-code-review
-description: Use when reviewing SmartESB 8583-to-JSON rewrite equivalence for user-specified transactions in an OpenCode Windows IntelliJ environment.
-compatibility: opencode
+description: Use when reviewing SmartESB 8583-to-JSON rewrite equivalence for user-specified transactions in an AgentBridge Windows IntelliJ environment.
+compatibility: agentbridge
 metadata:
   environment: windows
   domain: smartesb
@@ -18,17 +18,17 @@ tools: AgentBridge,AgentBridge,intellij-db
 
 ## MCP 优先行为矩阵
 
-除任务准备脚本外，审查行为必须走 opencode MCP 工具。对应 MCP 未暴露、调用失败或目标路径不受支持时，禁止使用 shell 或本地脚本；必须停止该步骤，并在可写报告时把原因记录到 `unverified`，无法写报告时直接向用户报告失败。
+除任务准备脚本外，审查行为必须走 agentbridge MCP 工具。对应 MCP 未暴露、调用失败或目标路径不受支持时，不要扩大任务边界 或本地脚本；必须停止该步骤，并在可写报告时把原因记录到 `unverified`，无法写报告时直接向用户报告失败。
 
 任务准备脚本的 shell 权限只覆盖生成编排产物和预创建输出文件：`summary.json`、`index_inputs.json`、`index.md`、`summary.md`、`tasks\transaction-*.json`、`reports\<transaction>\review.md`、`reports\<transaction>\mapping-matrix.md`、`reports\<transaction>\sections\*.md` 和 `reports\<transaction>\summary.json`。脚本只能写空壳、追加标记或 `{}` 占位，不得生成正式审查结论、字段矩阵、交易级摘要内容或任何源码证据摘录。
 
 | 行为 | 优先 MCP | 规则 |
 | --- | --- | --- |
-| 定位重构项目代码 | `search_symbols`、`list_project_files`、`search_text` | 先在 `new_project` 找入口、Service、Handler、Mapper、DTO、配置和测试。 |
-| 读取源码和配置 | `read_file` | 禁止用 `grep`、`cat`、`rg` 读取源码；MCP 不可用时该范围标记未验证。 |
-| 定位老项目代码 | `search_symbols`、`list_project_files`、`search_text` | 先按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字搜索。 |
-| 刷新项目文件视图 | `list_project_files`、`list_directory_tree` | 搜索不到刚生成或刚修改的文件时先同步，再重试一次。 |
-| 写审查报告 | `edit_text`、`write_file` | 只写准备脚本已预创建的文件；Markdown 小块写入；不要一次写完整长报告。 |
+| 定位重构项目代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` | 先在 `new_project` 找入口、Service、Handler、Mapper、DTO、配置和测试。 |
+| 读取源码和配置 | 当前可用读取能力 | 禁止用 `grep`、`cat`、`rg` 读取源码；MCP 不可用时该范围标记未验证。 |
+| 定位老项目代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` | 先按交易名、交易码、8583 域、服务标识、XML/biz/process 关键字搜索。 |
+| 刷新项目文件视图 | `当前可用项目文件列表能力`、`当前可用目录浏览能力` | 搜索不到刚生成或刚修改的文件时先同步，再重试一次。 |
+| 写审查报告 | 当前可用写入能力、当前可用写入能力 | 只写准备脚本已预创建的文件；Markdown 小块写入；不要一次写完整长报告。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 需要表结构、SQL、数据字典证据时优先使用；未暴露时记录未验证，不用 shell 强行连库。 |
 | 运行准备脚本 | shell / PowerShell | 仅用于生成编排 JSON 和预创建报告/汇总占位文件；调用 shell 必须带中文 `description`。 |
 
@@ -64,7 +64,7 @@ python <path-to-this-skill>\scripts\prepare_rewrite_review_tasks.py `
   --transaction CaAcctInfoCheck=二三类账户信息验证
 ```
 
-`--out` 是写入 task JSON 的真实报告路径，必须是 Windows 绝对路径，禁止传 `/tmp/...`、`./review`、`..\review` 这类 POSIX 或相对路径。只有在非 Windows 环境做脚本测试时才允许额外传 `--local-out <local-dir>`；此时脚本把 JSON 文件写入本地镜像目录，但 JSON 内的 `task_path`、`output.review_md`、`output.summary_json` 仍然保持 `--out` 指定的 Windows 路径。真实 opencode 审查不得依赖 `--local-out`。
+`--out` 是写入 task JSON 的真实报告路径，必须是 Windows 绝对路径，禁止传 `/tmp/...`、`./review`、`..\review` 这类 POSIX 或相对路径。只有在非 Windows 环境做脚本测试时才允许额外传 `--local-out <local-dir>`；此时脚本把 JSON 文件写入本地镜像目录，但 JSON 内的 `task_path`、`output.review_md`、`output.summary_json` 仍然保持 `--out` 指定的 Windows 路径。真实 agentbridge 审查不得依赖 `--local-out`。
 
 默认项目链路：
 
@@ -80,7 +80,7 @@ reconstructed design: D:\upfs-nl-json\doc\docment\重构项目详细设计文档
 
 ## Sub-Agent Dispatch Procedure
 
-主 agent 必须使用当前 opencode 客户端暴露的子 agent/Task 派发入口。若当前客户端没有可用的子 agent 派发能力，停止并向用户报告“无法执行多子 agent 审查”，不要改成单 agent 串行审查，也不要用 shell、本地脚本或后台进程模拟并发。
+主 agent 必须使用当前 agentbridge 客户端暴露的子 agent/Task 派发入口。若当前客户端没有可用的子 agent 派发能力，停止并向用户报告“无法执行多子 agent 审查”，不要改成单 agent 串行审查，也不要用 shell、本地脚本或后台进程模拟并发。
 
 派发规则：
 
@@ -103,9 +103,9 @@ summary_schema: <index_inputs.schemas.transaction_summary>
 
 每个子 agent 只接收一个 task JSON，不接收全量任务列表。子 agent 必须：
 
-- 先通过 `search_symbols`、`list_project_files`、`search_text` 找重构项目交易代码。
+- 先通过 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 找重构项目交易代码。
 - 再根据 `重构项目详细设计文档.md` 理解重构架构。
-- 再通过 `search_symbols`、`list_project_files`、`search_text` 找老 SmartESB 交易代码。
+- 再通过 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 找老 SmartESB 交易代码。
 - 最后根据 `8583.md`、`json.md`、`8583 to json.md` 审查字段映射和处理逻辑。
 - 写交易入口到 `reports\<transaction>\review.md`，详细报告写入 `sections\*.md` 和 `mapping-matrix.md`。
 - 写机器可读摘要到 `reports\<transaction>\summary.json`。
@@ -148,13 +148,13 @@ summary.md
 
 - Markdown 文件已包含唯一追加标记；具体值以 task JSON 的 `output_markers` 为准。
 - 子 agent 必须读取 task JSON 的 `output_markers`，使用对应文件的 exact marker；禁止按示例自行猜 marker。
-- 用 `edit_text` 把对应 marker 替换为“小块内容 + 原 marker”，实现分块追加。
+- 用 当前可用写入能力 把对应 marker 替换为“小块内容 + 原 marker”，实现分块追加。
 - 每次追加仍然不超过 6000 字符和 120 行。
-- `summary.json` 初始内容为 `{}`；子 agent 用 `write_file` 把整个 `{}` 替换为合法 JSON。
+- `summary.json` 初始内容为 `{}`；子 agent 用 当前可用写入能力 把整个 `{}` 替换为合法 JSON。
 
-子 agent 不得创建、重命名、删除或移动输出文件。如果任一目标文件缺失，子 agent 返回 `BLOCKED` 并列出缺失路径；主 agent 重新运行准备脚本后再派发，不允许用 `write_file` 创建缺失输出。只有 AgentBridge MCP 替换文件内容不可用、输出目录不在 IDEA 项目内或 MCP 返回无法写入时，停止写入并报告失败；禁止使用 shell、本地脚本或临时重定向写报告。
+子 agent 不得创建、重命名、删除或移动输出文件。如果任一目标文件缺失，子 agent 返回 `无法完成` 并列出缺失路径；主 agent 重新运行准备脚本后再派发，不允许用 当前可用写入能力 创建缺失输出。只有 AgentBridge MCP 替换文件内容不可用、输出目录不在 IDEA 项目内或 MCP 返回无法写入时，停止写入并报告失败；不要扩大任务边界、本地脚本或临时重定向写报告。
 
-只有运行 `prepare_rewrite_review_tasks.py` 准备任务时允许调用 Shell/Bash/PowerShell。调用时必须同时提供中文 `description` 和实际 `command`；禁止只传命令，否则会报 `SchemaError: Missing key: description`。审查过程、报告写入和源码读取不得使用 shell。
+只有运行 `prepare_rewrite_review_tasks.py` 准备任务时允许调用 Shell/Bash/PowerShell。调用时必须同时提供中文 `description` 和实际 `command`；禁止只传命令，否则会报 `SchemaError: Missing key: description`。审查过程、报告写入和源码读取不要扩大任务边界。
 
 ## 输出语言
 

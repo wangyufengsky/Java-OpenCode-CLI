@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport.workflow.unittest;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,16 +18,16 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-public class ProjectUnitTestGenerationAgentBridgeClient {
+public class AgentBridgeClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong requestIds = new AtomicLong();
 
-    public ProjectUnitTestGenerationAgentBridgeClient(ObjectMapper objectMapper) {
+    public AgentBridgeClient(ObjectMapper objectMapper) {
         this(objectMapper, localAgentBridgeHttpClient());
     }
 
-    ProjectUnitTestGenerationAgentBridgeClient(ObjectMapper objectMapper, HttpClient httpClient) {
+    AgentBridgeClient(ObjectMapper objectMapper, HttpClient httpClient) {
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
     }

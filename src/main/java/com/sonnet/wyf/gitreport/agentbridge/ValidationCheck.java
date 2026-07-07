@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport.opencode;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 public record ValidationCheck(boolean ok, String error) {
     public static ValidationCheck success() {

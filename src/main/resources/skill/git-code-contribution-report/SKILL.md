@@ -1,7 +1,7 @@
 ---
 name: git-code-contribution-report
 description: Use when generating a Chinese Markdown report of developer code contribution volume from a Git repository for a user-provided start date and end date, including per-developer detail JSON files, per-developer sub-agent reports, changed file counts, comment-filtered line statistics, workload ranking, AI-authored analysis, and final report links.
-compatibility: opencode
+compatibility: agentbridge
 metadata:
   environment: windows
   python: "3.11"

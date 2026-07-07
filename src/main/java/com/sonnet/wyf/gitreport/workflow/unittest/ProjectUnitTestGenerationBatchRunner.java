@@ -3,7 +3,8 @@ package com.sonnet.wyf.gitreport.workflow.unittest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -26,13 +27,13 @@ import javax.xml.parsers.DocumentBuilderFactory;
 public class ProjectUnitTestGenerationBatchRunner {
     public static final String RESULTS_JSON = "agentbridge-results.json";
 
-    private final ProjectUnitTestGenerationAgentBridgeClient client;
+    private final AgentBridgeClient client;
     private final ProjectUnitTestGenerationPromptBuilder promptBuilder;
     private final ObjectMapper objectMapper;
     private final Duration pollInterval;
 
     public ProjectUnitTestGenerationBatchRunner(
-            ProjectUnitTestGenerationAgentBridgeClient client,
+            AgentBridgeClient client,
             ProjectUnitTestGenerationPromptBuilder promptBuilder,
             ObjectMapper objectMapper
     ) {
@@ -40,7 +41,7 @@ public class ProjectUnitTestGenerationBatchRunner {
     }
 
     ProjectUnitTestGenerationBatchRunner(
-            ProjectUnitTestGenerationAgentBridgeClient client,
+            AgentBridgeClient client,
             ProjectUnitTestGenerationPromptBuilder promptBuilder,
             ObjectMapper objectMapper,
             Duration pollInterval
@@ -152,7 +153,7 @@ public class ProjectUnitTestGenerationBatchRunner {
             Path coverageExec = coverageExecPath(properties.getProject().getRepo(), module);
             Files.deleteIfExists(coverageReport);
             Files.deleteIfExists(coverageExec);
-            ProjectUnitTestGenerationAgentBridgeClient.ToolResponse run = client.callTool(
+            AgentBridgeClient.ToolResponse run = client.callTool(
                     mcpUrl,
                     "run_command",
                     runCommandArguments(properties, testClass, module, coverageExec)
@@ -174,7 +175,7 @@ public class ProjectUnitTestGenerationBatchRunner {
         return new Acceptance(false, String.join("; ", failures));
     }
 
-    private boolean hasRecognizedTest(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
+    private boolean hasRecognizedTest(AgentBridgeClient.ToolResponse response) {
         JsonNode tests = response.structured().path("tests");
         if (tests.isArray() && !tests.isEmpty()) {
             return true;
@@ -183,7 +184,7 @@ public class ProjectUnitTestGenerationBatchRunner {
         return !text.isBlank() && !text.contains("no test") && !text.contains("not found") && !text.contains("missing");
     }
 
-    private boolean hasNoCompilationErrors(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
+    private boolean hasNoCompilationErrors(AgentBridgeClient.ToolResponse response) {
         JsonNode errors = response.structured().path("errors");
         if (errors.isArray()) {
             return errors.isEmpty();
@@ -228,7 +229,7 @@ public class ProjectUnitTestGenerationBatchRunner {
                 .put("title", "Run unit test with JaCoCo");
     }
 
-    private boolean commandSucceeded(ProjectUnitTestGenerationAgentBridgeClient.ToolResponse response) {
+    private boolean commandSucceeded(AgentBridgeClient.ToolResponse response) {
         if (response.structured().has("success")) {
             return response.structured().path("success").asBoolean(false);
         }

@@ -3,7 +3,7 @@ package com.sonnet.wyf.gitreport.console;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
@@ -22,10 +22,10 @@ public class ChainCatalog {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
     private final ResourceLoader resourceLoader;
-    private final OpenCodeRunnerProperties properties;
+    private final AgentBridgeRunnerProperties properties;
     private final Map<String, WorkflowChain> chains;
 
-    public ChainCatalog(ResourceLoader resourceLoader, OpenCodeRunnerProperties properties, List<WorkflowChain> chains) {
+    public ChainCatalog(ResourceLoader resourceLoader, AgentBridgeRunnerProperties properties, List<WorkflowChain> chains) {
         this.resourceLoader = resourceLoader;
         this.properties = properties;
         this.chains = chains.stream().collect(Collectors.toMap(WorkflowChain::id, Function.identity()));

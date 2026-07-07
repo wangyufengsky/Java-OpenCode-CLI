@@ -16,14 +16,14 @@ xml-root: "/home/wangyufeng/upfs-production"
 # 可选。.biz 根目录；为空时等于 xml-root。
 biz-root:
 
-# 必填。Java 源码根目录，也是 OpenCode session directory。
+# 必填。Java 源码根目录，也是 AgentBridge task directory。
 java-root: "/home/wangyufeng/upfs-production"
 
 # 必填。serviceIdentify.xml 中要读取的 switch mode。
 mode: "8583"
 
-# 必填。发送给模块/交易 OpenCode session 的附加执行消息。
-worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，只输出 DONE 或 BLOCKED。"
+# 必填。发送给模块/交易 AgentBridge task 的附加执行消息。
+task-message: "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，完成后回复简短完成信息即可，Java 会校验输出。"
 
-# 必填。发送给索引 OpenCode session 的附加执行消息。
-synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md。"
+# 必填。发送给索引 AgentBridge task 的附加执行消息。
+synthesis-task-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md。"

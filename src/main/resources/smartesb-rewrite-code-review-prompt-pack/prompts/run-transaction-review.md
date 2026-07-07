@@ -18,9 +18,8 @@
 - `output.code_standard_md`
 - `output_placeholders`
 - `skill.summary_schema`
-- `skill.preferred_reader`
-- `skill.preferred_writer`
-- `skill.file_tools`
+- `skill.reader_hint`
+- `skill.writer_hint`
 - `rules.precreated_outputs`
 
 ## 严格边界
@@ -32,7 +31,7 @@
 - 交易审查只使用 task JSON、准备器输出、new_project 新代码、映射文档、old-8583-doc 老代码详细设计、重构详细设计、配置、SQL 和数据库证据。
 - 不读取全量源码。
 - 不把大段代码粘进上下文。
-- 代码和文档定位、读取、取证必须使用 `AgentBridge` MCP；不得使用其他读取方式。
+- 代码和文档定位、读取、取证使用当前 AgentBridge 环境可用能力；不得使用其他读取方式。
 - 不创建、重命名、删除或移动任何输出文件；所有输出文件必须已经由准备脚本预创建。
 - 只能替换 task JSON 中 `output_placeholders` 列出的占位符，不删除、重命名或重排模板标题结构。
 - 先按小块替换 `review.md`、`sections/*.md` 和 `mapping-matrix.md` 的占位符，再写机器可读摘要。机器可读摘要必须按 `skill.summary_schema` 的字段和类型生成。
@@ -45,13 +44,13 @@
 
 ## 受控读写与取证规则
 
-读取 task JSON 和准备脚本输出时，必须使用 `AgentBridge` MCP 文件读取工具：`read_file`。
+读取 task JSON 和准备脚本输出时，使用当前 AgentBridge 环境可用能力读取任务输入。
 
-分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，必须使用 `AgentBridge` MCP：用 `search_symbols`、`list_project_files`、`search_text` 定位候选，再用 `read_file` 读取当前交易相关片段；不要读取完整文档、完整源码文件或大段摘录。
+分析映射文档、old-8583-doc、重构详细设计和 new_project 新代码时，使用当前 AgentBridge 环境可用能力：用 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 定位候选，再读取当前交易相关片段；不要读取完整文档、完整源码文件或大段摘录。
 
-写入 Markdown 和 JSON 报告时，必须使用 `AgentBridge` MCP 文件编辑工具：`edit_text` 或 `write_file`。
+写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
 
-`AgentBridge` MCP 读写工具不可用时必须返回 `BLOCKED`，不要在最终回答中粘贴完整报告替代写文件。
+`AgentBridge` MCP 读写工具不可用时必须写入失败说明，不要在最终回答中粘贴完整报告替代写文件。
 
 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、映射文档或详细设计。
 
@@ -59,11 +58,11 @@
 
 | 行为 | 优先工具 | 失败后的处理 |
 | --- | --- | --- |
-| 定位 new_project 新代码 | `search_symbols`、`list_project_files`、`search_text` | 搜索不到时用 `list_directory_tree` 刷新项目文件视图后重试；仍失败再记录到 `unverified`。 |
-| 分析 new_project 新代码 | `search_symbols`、`list_project_files`、`search_text` 定位，`read_file` 读取 | 只读取当前交易相关片段；不要把完整源码拉入主上下文。 |
-| 分析映射文档、old-8583-doc 和重构详细设计 | `list_project_files`、`search_text` 定位，`read_file` 读取 | 只读取当前交易相关片段；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
-| 刷新项目文件视图 | `list_project_files`、`list_directory_tree` | 搜索不到新增文件或文件视图疑似过期时先刷新，再重试一次。 |
-| 写 Markdown/JSON 报告 | `edit_text`、`write_file` | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；禁止使用 shell 或本地脚本。 |
+| 定位 new_project 新代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` | 搜索不到时用 `当前可用目录浏览能力` 刷新项目文件视图后重试；仍失败再记录到 `unverified`。 |
+| 分析 new_project 新代码 | `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 定位，当前可用读取能力 读取 | 只读取当前交易相关片段；不要把完整源码拉入主上下文。 |
+| 分析映射文档、old-8583-doc 和重构详细设计 | `当前可用项目文件列表能力`、`当前可用搜索能力` 定位，当前可用读取能力 读取 | 只读取当前交易相关片段；上下文不足时记录到 `unverified`，不要扩大到 old_project 源码。 |
+| 刷新项目文件视图 | `当前可用项目文件列表能力`、`当前可用目录浏览能力` | 搜索不到新增文件或文件视图疑似过期时先刷新，再重试一次。 |
+| 写 Markdown/JSON 报告 | 当前可用写入能力、当前可用写入能力 | 只替换准备脚本已预创建文件的内容；写入失败时停止并报告失败；不要扩大任务边界。 |
 | 数据库/SQL 证据 | 当前客户端暴露的 `intellij-db_*` 工具 | 未暴露时记录未验证，不要用 shell 强行连接数据库。 |
 
 禁止把源码读取、报告写入、项目文件视图刷新、数据库证据获取交给 shell。
@@ -74,12 +73,12 @@
 
 - 每次写入不超过 `rules.markdown_max_chars_per_write` 字符，默认 6000。
 - 每次写入不超过 `rules.markdown_max_lines_per_write` 行，默认 120。
-- 必须使用 `edit_text` 或 `write_file` 写入已存在文件，不要调用 shell。
+- 必须使写入已存在文件，不要调用 shell。
 
 ### 受控文件写入方式
 
 1. 先确认目标输出文件已经存在：`output.review_md`、`output.matrix_md`、`output.findings_md`、`output.code_chains_md`、`output.protocol_review_md`、`output.behavior_review_md`、`output.verification_md`、`output.code_standard_md`、`output.summary_json`。
-2. 如果任一目标文件缺失，立即返回 `BLOCKED` 和缺失路径；不要用 `write_file` 创建缺失输出，不要用 shell 创建。
+2. 如果任一目标文件缺失，立即写入失败说明 和缺失路径；不要用 当前可用写入能力 创建缺失输出，不要用 shell 创建。
 3. 每个 Markdown 文件初始内容必须是准备器写入的完整模板，并包含 task JSON 中 `output_placeholders` 列出的占位符。不要猜占位符，不要新增占位符：
 
 - `output.review_md` 只替换 `output_placeholders.review_md`
@@ -97,16 +96,16 @@
 {{FINDINGS_DETAIL}}
 ```
 
-4. 写入内容时，用 `edit_text` 或 `write_file` 替换对应文件的 exact placeholder：
+4. 写入内容时，用 当前可用写入能力 或 当前可用写入能力 替换对应文件的 exact placeholder：
 
 ```text
 oldText: "<output_placeholders 中该文件的 placeholder>"
 newText: "<小块中文内容>"
 ```
 
-5. `summary_json` 初始内容为 `{}`，用 `write_file` 将整个 `{}` 替换为合法 JSON。
+5. `summary_json` 初始内容为 `{}`，用 当前可用写入能力 将整个 `{}` 替换为合法 JSON。
 6. 使用 `AgentBridge` MCP 写入时，优先使用 task JSON 中的输出绝对路径或 AgentBridge 返回的 `file` 原文；需要限定项目时，使用当前 AgentBridge 客户端支持的项目或路径参数。仍失败时停止写入并报告失败。
-7. 写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符；发现残留必须立即继续替换或返回 `BLOCKED`。
+7. 写入完成后，所有 Markdown 报告不得残留 `{{...}}` 占位符；发现残留必须立即继续替换或写入失败说明。
 
 ### 写入失败处理
 
@@ -120,19 +119,19 @@ newText: "<小块中文内容>"
 
 ## 审查顺序
 
-以下每一步默认按“`AgentBridge` 的 `search_symbols`、`list_project_files`、`search_text` 定位，`read_file` 读取，`edit_text` 或 `write_file` 写报告，`intellij-db` 取数据库证据”的顺序执行；受控工具不可用时禁止使用 shell，能够继续的范围标记 `unverified`，无法继续时停止该交易审查。
+以下每一步默认按“`AgentBridge` 的 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 定位，当前可用读取能力 读取，当前可用写入能力 或 当前可用写入能力 写报告，`intellij-db` 取数据库证据”的顺序执行；受控工具不可用时不要扩大任务边界。
 
-1. 用 `search_symbols`、`list_project_files`、`search_text` 在 `new_project` 中定位重构交易代码。
-   - 优先 `search_symbols` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
-   - 用 `list_project_files` 按文件名、通配符、XML、Mapper、配置文件定位候选。
-   - 对候选文件内容用 `read_file` 读取当前交易相关片段。
-   - 需要一次查找多类关键文件时，用 `search_text`。
+1. 用 `当前可用搜索能力`、`当前可用项目文件列表能力`、`当前可用搜索能力` 在 `new_project` 中定位重构交易代码。
+   - 优先 `当前可用搜索能力` 按交易类、Service、Handler、DAO、DTO、Converter 名称定位候选。
+   - 用 `当前可用项目文件列表能力` 按文件名、通配符、XML、Mapper、配置文件定位候选。
+   - 对候选文件内容读取当前交易相关片段。
+   - 需要一次查找多类关键文件时，用 `当前可用搜索能力`。
    - 记录入口、handler/controller、service、converter/assembler、DAO、外部调用、响应和异常路径。
 2. 只读取当前交易相关的映射文档、old-8583-doc 和重构详细设计片段：
    - `documents.mapping_8583_to_json`
    - `documents.old_8583_doc`
    - `documents.reconstructed_design`
-   - 文档分析用 `list_project_files`、`search_text` 定位当前交易、8583 域、JSON path、类名相关片段，再用 `read_file` 读取。
+   - 文档分析用 `当前可用项目文件列表能力`、`当前可用搜索能力` 定位当前交易、8583 域、JSON path、类名相关片段，再读取。
 3. 只读取当前交易相关的新代码、配置、XML、Mapper、SQL 和必要数据库证据；不要读取或检索 old_project 下的老代码源码。
 4. 从映射文档、old-8583-doc、重构详细设计和 new_project 新代码证据中建立 8583 到 JSON 映射矩阵。
 5. 根据 new_project 新代码、映射文档、old-8583-doc、重构详细设计、配置、SQL 和数据库证据形成 findings；证据不足时写入 `unverified`，不要通过读取 old_project 源码补齐。
@@ -248,4 +247,4 @@ newText: "<小块中文内容>"
 `old_code_paths` 必须写空数组，因为本链路不读取或检索 old_project 下的老代码源码。
 `documents_checked` 只能填写实际读取过的 `mapping_8583_to_json`、`old_8583_doc` 和 `reconstructed_design` 路径。
 
-如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 `write_file` 覆盖修正，不要把不完整摘要留给汇总阶段。
+如果审查中断或上下文不足，仍然写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围。写入后再次按 `skill.summary_schema` 自检；发现不符合 schema 时必须立即用 当前可用写入能力 覆盖修正，不要把不完整摘要留给汇总阶段。

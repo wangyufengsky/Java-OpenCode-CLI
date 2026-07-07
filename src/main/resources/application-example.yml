@@ -1,4 +1,4 @@
-opencode-runner:
+agentbridge-runner:
   enabled: false
   # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader, weekly-engineering-report, project-unit-test-generation
   active-chain: "git-code-contribution-report"
@@ -11,34 +11,19 @@ opencode-runner:
     # weekly-engineering-report: review-batch | synthesis
     # project-unit-test-generation: test-batch | verification
     # 多个 author/transaction 用英文逗号放在同一个字符串中。
-    # 示例: id: "author-001-xxx, author-002-yyy"
-    # 示例: id: "CaCheckAcct, CaConsumeRev, CaTransferOuter"
-    # 示例: id: "BaseChnConvReqMsgSop, BaseOthCenterCtrl"
     type:
     id:
-  opencode:
-    # Java 会先检查 server-url；不可用且 manage-server=true 时自动执行:
-    #   opencode serve --port 4096
-    server-url: "http://127.0.0.1:4096"
-    manage-server: true
-    server-start-timeout-seconds: 30
-    # OpenCode 可能已创建 session 但 /session 响应不结束；短超时用于尽快进入 session 列表恢复。
-    create-session-timeout-seconds: 10
-    request-timeout-seconds: 60
-    opencode-bin: "opencode"
-    # 可选。OpenCode 1.17 的 /prompt_async 允许指定 model；格式 provider/model。
-    # 内网自定义 provider 建议显式配置，避免 OpenCode 提交 prompt 时解析默认模型。
-    session-model: "spdb-new-api/minimax-m2.7"
-    concurrency: 6
+  agentbridge:
+    web-base-url: "https://127.0.0.1:9642"
+    mcp-url: "http://127.0.0.1:8642/mcp"
+    concurrency: 1
+    max-concurrency: 1
     timeout-minutes: 40
-    output-wait-seconds: 30
+    poll-millis: 1000
+    validation-settle-seconds: 30
     validation-max-corrections: 2
     max-retries: 1
-    max-concurrency: 6
-    environment:
-      # 内网/离线环境避免 OpenCode 创建 session 时联网拉取 models.dev。
-      OPENCODE_DISABLE_MODELS_FETCH: "true"
 
 task-console:
-  database-path: "data/opencode-task-console.sqlite"
+  database-path: "data/agentbridge-task-console.sqlite"
   run-config-dir: "data/run-configs"

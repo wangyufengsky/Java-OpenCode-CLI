@@ -1,21 +1,23 @@
 package com.sonnet.wyf.gitreport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
+import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyCodeReviewOutputValidator;
 import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyEngineeringReportProperties;
-import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyOpenCodeReviewRunner;
+import com.sonnet.wyf.gitreport.workflow.weekly.WeeklyAgentBridgeReviewRunner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -25,22 +27,21 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class WeeklyOpenCodeReviewRunnerTest {
+class WeeklyAgentBridgeReviewRunnerTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @TempDir
     Path tempDir;
 
     @Test
-    void usesWeeklyYamlOpenCodeSettingsWhenRunningBatch() throws Exception {
+    void usesWeeklyYamlAgentBridgeSettingsWhenRunningBatch() throws Exception {
         WeeklyEngineeringReportProperties properties = properties();
-        properties.getOpencode().setTimeoutMinutes(7);
-        properties.getOpencode().setValidationMaxCorrections(4);
-        properties.getOpencode().setOutputWaitSeconds(5);
+        properties.getAgentbridge().setTimeoutMinutes(7);
+        properties.getAgentbridge().setValidationMaxCorrections(4);
+        properties.getAgentbridge().setValidationSettleSeconds(5);
         CapturingTaskRunner taskRunner = new CapturingTaskRunner();
-        WeeklyOpenCodeReviewRunner runner = new WeeklyOpenCodeReviewRunner(
+        WeeklyAgentBridgeReviewRunner runner = new WeeklyAgentBridgeReviewRunner(
                 objectMapper,
-                fakeServerManager(),
                 taskRunner,
                 directTaskRunner(),
                 new WeeklyCodeReviewOutputValidator(objectMapper)
@@ -57,9 +58,8 @@ class WeeklyOpenCodeReviewRunnerTest {
     @Test
     void writesReviewUnitPromptThatRequiresFullRegionCoverageAndTraceableFindings() throws Exception {
         CapturingTaskRunner taskRunner = new CapturingTaskRunner();
-        WeeklyOpenCodeReviewRunner runner = new WeeklyOpenCodeReviewRunner(
+        WeeklyAgentBridgeReviewRunner runner = new WeeklyAgentBridgeReviewRunner(
                 objectMapper,
-                fakeServerManager(),
                 taskRunner,
                 directTaskRunner(),
                 new WeeklyCodeReviewOutputValidator(objectMapper)
@@ -70,23 +70,22 @@ class WeeklyOpenCodeReviewRunnerTest {
         String prompt = Files.readString(taskRunner.spec.promptFile());
         assertThat(prompt)
                 .contains("review unit", "模块/作者", "多文件", "多 commit")
-                .contains("读取 input_json 时，必须使用 `AgentBridge` MCP 文件读取工具")
-                .contains("写入 summary_json 和 review_md 时，必须使用 `AgentBridge` MCP 文件编辑工具")
-                .contains("`AgentBridge` MCP 读写工具不可用时必须返回 BLOCKED")
+                .contains("读取 input_json，并按其中的 changed_regions 审查")
+                .contains("写入 summary_json 和 review_md 指定的文件")
+                .contains("不要求使用指定读写工具名")
                 .contains("reviewed_region_ids 必须覆盖 input_json.changed_regions 中的全部 region_id")
                 .contains("不得只挑重点审查，不得因为文件多而跳过低风险 region")
                 .contains("finding 必须绑定 region_id、author_key、commit、file、line_start、line_end")
                 .contains("code-review.md 必须按模块/文件分节")
                 .contains("unit_id: review-unit-001")
-                .doesNotContain("OpenCode 原生文件")
+                .doesNotContain("AgentBridge 原生文件")
                 .doesNotContain("intellij-index", "intellij-idea");
     }
 
     @Test
     void rejectsUnknownReviewBatchRerunId() throws Exception {
-        WeeklyOpenCodeReviewRunner runner = new WeeklyOpenCodeReviewRunner(
+        WeeklyAgentBridgeReviewRunner runner = new WeeklyAgentBridgeReviewRunner(
                 objectMapper,
-                fakeServerManager(),
                 new CapturingTaskRunner(),
                 directTaskRunner(),
                 new WeeklyCodeReviewOutputValidator(objectMapper)
@@ -104,10 +103,10 @@ class WeeklyOpenCodeReviewRunnerTest {
     }
 
     private WorkflowRunRequest request() {
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setTimeoutMinutes(99);
         settings.setValidationMaxCorrections(99);
-        settings.setOutputWaitSeconds(99);
+        settings.setValidationSettleSeconds(99);
         return new WorkflowRunRequest("full", "", "", LocalDate.of(2026, 6, 29), settings);
     }
 
@@ -146,15 +145,6 @@ class WeeklyOpenCodeReviewRunnerTest {
         return evidence;
     }
 
-    private OpenCodeServerManager fakeServerManager() throws Exception {
-        return new OpenCodeServerManager(null, null) {
-            @Override
-            public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) {
-                return new OpenCodeServerHandle(URI.create("http://127.0.0.1:1"), false);
-            }
-        };
-    }
-
     private ConcurrentWorkflowTaskRunner directTaskRunner() {
         return new ConcurrentWorkflowTaskRunner(Runnable::run) {
             @Override
@@ -168,15 +158,15 @@ class WeeklyOpenCodeReviewRunnerTest {
         };
     }
 
-    private static class CapturingTaskRunner extends OpenCodeServerTaskRunner {
-        private ValidatedOpenCodeTaskSpec spec;
+    private static class CapturingTaskRunner extends AgentBridgeTaskRunner {
+        private ValidatedAgentBridgeTaskSpec spec;
 
         private CapturingTaskRunner() throws Exception {
-            super(null, null);
+            super(new AgentBridgeClient(new ObjectMapper()), new ScheduledProbeWaiter(scheduler()), new WorkflowEventSink(), new ObjectMapper());
         }
 
         @Override
-        public com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult runUntilValidated(ValidatedOpenCodeTaskSpec spec) throws Exception {
+        public AgentBridgeRunResult runUntilValidated(ValidatedAgentBridgeTaskSpec spec) throws Exception {
             this.spec = spec;
             Files.writeString(Path.of(spec.runDir().getParent().getParent().toString(), "review-units", "review-unit-001", "code-review.md"), "# 批次代码审查\n");
             ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
@@ -193,7 +183,13 @@ class WeeklyOpenCodeReviewRunnerTest {
                     Map.entry("code_snippets", List.of()),
                     Map.entry("unverified", List.of())
             ));
-            return null;
+            return new AgentBridgeRunResult("task-1", spec.webBaseUrl().toString(), false, true, "idle", true, "", 0);
+        }
+
+        private static ThreadPoolTaskScheduler scheduler() {
+            ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+            scheduler.initialize();
+            return scheduler;
         }
     }
 }

@@ -14,8 +14,8 @@ public class SmartEsbCodeReaderProperties {
     private Path bizRoot;
     private Path javaRoot = Path.of("/home/wangyufeng/upfs-production");
     private String mode = "8583";
-    private String workerMessage = "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，只输出 DONE 或 BLOCKED。";
-    private String synthesisMessage = "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md。";
+    private String taskMessage = "严格执行附件 worker-prompt.md 中的 SmartESB code-reader 单项阅读任务，写入要求的文件；完成后回复简短完成信息即可，Java 会校验输出。";
+    private String synthesisTaskMessage = "严格执行附件 synthesis-prompt.md 中的 SmartESB code-reader 索引任务，生成中文 index.md；完成后回复简短完成信息即可，Java 会校验输出。";
 
     public String getOut() {
         return out;
@@ -78,21 +78,21 @@ public class SmartEsbCodeReaderProperties {
         this.mode = mode;
     }
 
-    public String getWorkerMessage() {
-        return workerMessage;
+    public String getTaskMessage() {
+        return taskMessage;
     }
 
-    @JsonProperty("worker-message")
-    public void setWorkerMessage(String workerMessage) {
-        this.workerMessage = workerMessage;
+    @JsonProperty("task-message")
+    public void setTaskMessage(String taskMessage) {
+        this.taskMessage = taskMessage;
     }
 
-    public String getSynthesisMessage() {
-        return synthesisMessage;
+    public String getSynthesisTaskMessage() {
+        return synthesisTaskMessage;
     }
 
-    @JsonProperty("synthesis-message")
-    public void setSynthesisMessage(String synthesisMessage) {
-        this.synthesisMessage = synthesisMessage;
+    @JsonProperty("synthesis-task-message")
+    public void setSynthesisTaskMessage(String synthesisTaskMessage) {
+        this.synthesisTaskMessage = synthesisTaskMessage;
     }
 }

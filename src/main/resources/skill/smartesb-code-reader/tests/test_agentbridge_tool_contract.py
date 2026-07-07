@@ -15,10 +15,10 @@ class AgentBridgeToolContractTest(unittest.TestCase):
 
         self.assertNotIn("AgentBridge_...", combined)
         self.assertNotIn("ide_find_file", combined)
-        self.assertNotIn("ide_read_file", combined)
+        self.assertNotIn("ide_当前可用读取能力", combined)
         self.assertNotIn("project_path", combined)
 
-        for tool_name in ("search_symbols", "list_project_files", "search_text", "read_file"):
+        for tool_name in ("当前可用搜索能力", "当前可用项目文件列表能力", "当前可用搜索能力", "当前可用读取能力"):
             self.assertIn(tool_name, combined)
 
 

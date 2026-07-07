@@ -6,7 +6,7 @@ import java.nio.file.Path;
 
 @ConfigurationProperties(prefix = "task-console")
 public class TaskConsoleProperties {
-    private Path databasePath = Path.of("data/opencode-task-console.sqlite");
+    private Path databasePath = Path.of("data/agentbridge-task-console.sqlite");
     private Path runConfigDir = Path.of("data/run-configs");
 
     public Path getDatabasePath() {

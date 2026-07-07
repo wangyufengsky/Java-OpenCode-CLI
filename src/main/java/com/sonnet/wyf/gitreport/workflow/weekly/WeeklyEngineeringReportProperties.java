@@ -18,7 +18,7 @@ public class WeeklyEngineeringReportProperties {
     private LocalDate endday;
     private final Git git = new Git();
     private final Review review = new Review();
-    private final GitReportProperties.OpenCode opencode = new GitReportProperties.OpenCode();
+    private final GitReportProperties.AgentBridge agentbridge = new GitReportProperties.AgentBridge();
 
     public Project getProject() {
         return project;
@@ -56,8 +56,8 @@ public class WeeklyEngineeringReportProperties {
         return review;
     }
 
-    public GitReportProperties.OpenCode getOpencode() {
-        return opencode;
+    public GitReportProperties.AgentBridge getAgentbridge() {
+        return agentbridge;
     }
 
     public LocalDate effectiveWeekStart(LocalDate runDate) {

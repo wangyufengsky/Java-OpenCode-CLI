@@ -18,9 +18,9 @@ git:
     - "target/**"
     - "*.lock"
 
-opencode:
-  worker-message: "严格执行附件 worker-prompt.md 中的任务，只输出 DONE 或 BLOCKED。"
-  synthesis-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
+agentbridge:
+  task-message: "严格执行附件 worker-prompt.md 中的任务，完成后回复简短完成信息即可，Java 会校验输出。"
+  synthesis-task-message: "严格执行附件 synthesis-prompt.md 中的任务，生成最终中文总报告。"
 
 detail-input:
   top-files: 10

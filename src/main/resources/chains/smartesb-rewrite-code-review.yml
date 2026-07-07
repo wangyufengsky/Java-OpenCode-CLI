@@ -10,7 +10,7 @@ local-out:
 # 必填。每日交易计划目录。
 transaction-plan-dir: "src/main/resources/smartesb-transactions"
 
-# 必填。新 JSON 项目根目录，也是 OpenCode session directory。
+# 必填。新 JSON 项目根目录，也是 AgentBridge task directory。
 new-project: "/home/wangyufeng/upfs-nl-json"
 
 # 必填。老 8583/老代码详细设计文档；允许通过 explore 读取当前交易相关片段，但禁止读取 old_project 源码。
@@ -25,8 +25,8 @@ mapping-doc:
 # 可选。重构项目详细设计；为空时默认 doc-root/重构项目详细设计文档.md。
 reconstructed-design:
 
-# 必填。发送给单项 OpenCode session 的附加执行消息。
-worker-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单项审查任务，只输出 DONE 或 BLOCKED。"
+# 必填。发送给单项 AgentBridge task 的附加执行消息。
+task-message: "严格执行附件 worker-prompt.md 中的 SmartESB 单项审查任务，完成后回复简短完成信息即可，Java 会校验输出。"
 
-# 必填。发送给汇总 OpenCode session 的附加执行消息。
-synthesis-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。"
+# 必填。发送给汇总 AgentBridge task 的附加执行消息。
+synthesis-task-message: "严格执行附件 synthesis-prompt.md 中的 SmartESB 汇总任务，生成中文 index.md 和 summary.md。"

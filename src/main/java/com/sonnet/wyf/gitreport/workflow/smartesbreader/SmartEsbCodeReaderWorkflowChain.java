@@ -2,16 +2,14 @@ package com.sonnet.wyf.gitreport.workflow.smartesbreader;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.slf4j.Logger;
@@ -31,27 +29,24 @@ import java.util.stream.Stream;
 public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
     public static final String ID = "smartesb-code-reader";
     private static final Logger log = LoggerFactory.getLogger(SmartEsbCodeReaderWorkflowChain.class);
-    private static final int OPENCODE_POLL_MILLIS = 10_000;
 
     private final ChainConfigLoader configLoader;
-    private final OpenCodeRunnerProperties runnerProperties;
+    private final AgentBridgeRunnerProperties runnerProperties;
     private final SmartEsbCodeReaderPreparation preparation;
     private final SmartEsbCodeReaderPromptBuilder promptBuilder;
     private final SmartEsbCodeReaderOutputValidator outputValidator;
-    private final OpenCodeServerManager serverManager;
-    private final OpenCodeServerTaskRunner taskRunner;
+    private final AgentBridgeTaskRunner taskRunner;
     private final ObjectMapper objectMapper;
     private final OutputCompletionGate completionGate;
     private final ConcurrentWorkflowTaskRunner concurrentTaskRunner;
 
     public SmartEsbCodeReaderWorkflowChain(
             ChainConfigLoader configLoader,
-            OpenCodeRunnerProperties runnerProperties,
+            AgentBridgeRunnerProperties runnerProperties,
             SmartEsbCodeReaderPreparation preparation,
             SmartEsbCodeReaderPromptBuilder promptBuilder,
             SmartEsbCodeReaderOutputValidator outputValidator,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             ObjectMapper objectMapper,
             OutputCompletionGate completionGate,
             ConcurrentWorkflowTaskRunner concurrentTaskRunner
@@ -61,7 +56,6 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
         this.preparation = preparation;
         this.promptBuilder = promptBuilder;
         this.outputValidator = outputValidator;
-        this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.objectMapper = objectMapper;
         this.completionGate = completionGate;
@@ -121,14 +115,13 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
             List<Map<String, Object>> tasks,
             boolean rerun
     ) throws Exception {
-        OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
-        int concurrency = Math.max(1, Math.min(request.openCode().getConcurrency(), request.openCode().getMaxConcurrency()));
+        int concurrency = Math.max(1, Math.min(request.agentBridge().getConcurrency(), request.agentBridge().getMaxConcurrency()));
         List<TaskRunResult> results = concurrentTaskRunner.run(
                 "SmartESB code-reader",
                 tasks,
                 concurrency,
                 this::taskKey,
-                task -> taskCallable(properties, request, out, server, task, rerun)
+                task -> taskCallable(properties, request, out, task, rerun)
         );
         List<String> failures = results.stream()
                 .filter(result -> !result.success())
@@ -144,7 +137,6 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
             SmartEsbCodeReaderProperties properties,
             WorkflowRunRequest request,
             Path out,
-            OpenCodeServerHandle server,
             Map<String, Object> task,
             boolean rerun
     ) {
@@ -156,29 +148,26 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
                 Files.createDirectories(runDir);
                 Path promptFile = runDir.resolve("worker-prompt.md");
                 Files.writeString(promptFile, buildPrompt(task, rerun));
-                taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                        server,
+                taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                         properties.getJavaRoot(),
                         "smartesb-reader-" + type + "-" + name,
                         promptFile,
-                        properties.getWorkerMessage(),
+                        properties.getTaskMessage(),
                         runDir,
                         () -> outputValidator.validateTaskOutput(type, name, localDocumentPath(out, task), localSummaryPath(out, task)),
-                        request.openCode().getSessionModel(),
-                        request.openCode().getCreateSessionTimeoutSeconds(),
-                        request.openCode().getRequestTimeoutSeconds(),
-                        OPENCODE_POLL_MILLIS,
-                        request.openCode().getTimeoutMinutes(),
-                        request.openCode().getOutputWaitSeconds(),
-                        0
+                        request.agentBridge().getPollMillis(),
+                        request.agentBridge().getTimeoutMinutes(),
+                        request.agentBridge().getValidationSettleSeconds(),
+                        0,
+                        java.net.URI.create(request.agentBridge().getWebBaseUrl())
                 ));
                 var validation = outputValidator.validateTaskOutput(type, name, localDocumentPath(out, task), localSummaryPath(out, task));
                 if (validation.ok()) {
-                    return TaskRunResult.success(type + ":" + name, name, runDir.resolve("status.json"));
+                    return TaskRunResult.success(type + ":" + name, name, runDir.resolve("agent-status.json"));
                 }
-                return TaskRunResult.failed(type + ":" + name, name, runDir.resolve("status.json"), validation.error());
+                return TaskRunResult.failed(type + ":" + name, name, runDir.resolve("agent-status.json"), validation.error());
             } catch (Exception exception) {
-                return TaskRunResult.failed(type + ":" + name, name, runDir.resolve("status.json"), exception.getMessage());
+                return TaskRunResult.failed(type + ":" + name, name, runDir.resolve("agent-status.json"), exception.getMessage());
             }
         };
     }
@@ -217,26 +206,22 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
     }
 
     private void runIndex(SmartEsbCodeReaderProperties properties, WorkflowRunRequest request, Path out) throws Exception {
-        OpenCodeServerHandle server = serverManager.ensureReady(request.openCode(), out);
         Path runDir = out.resolve("runs").resolve("index");
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("synthesis-prompt.md");
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));
-        taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                server,
+        taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                 properties.getJavaRoot(),
                 "smartesb-reader-index",
                 promptFile,
-                properties.getSynthesisMessage(),
+                properties.getSynthesisTaskMessage(),
                 runDir,
                 () -> outputValidator.validateIndex(out.resolve("index.md")),
-                request.openCode().getSessionModel(),
-                request.openCode().getCreateSessionTimeoutSeconds(),
-                request.openCode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                request.openCode().getTimeoutMinutes(),
-                request.openCode().getOutputWaitSeconds(),
-                request.openCode().getValidationMaxCorrections()
+                request.agentBridge().getPollMillis(),
+                request.agentBridge().getTimeoutMinutes(),
+                request.agentBridge().getValidationSettleSeconds(),
+                request.agentBridge().getValidationMaxCorrections(),
+                java.net.URI.create(request.agentBridge().getWebBaseUrl())
         ));
         var validation = outputValidator.validateIndex(out.resolve("index.md"));
         if (!validation.ok()) {

@@ -10,8 +10,8 @@ Skill目录：{skill_dir}
 2. 使用任务中的 base_xml_summary、base_xml_candidates、biz_summary、biz_candidates、java_candidates 定位模块。
 3. 如果没有直接匹配到模块 Java，但存在同名或同 id 的 .biz 文件，必须把该 .biz 视为该 base 模块的小流程配置；.biz 中每个 adapter 的 id 通常对应一个 base Java 文件。
 4. 如果 .biz 中某个 adapter/id 等于该 .biz 自身的 id、name、nickName 或当前 serviceId，这是自引用占位或默认节点，不要把它当作 Java 候选，也不要因此递归分析同一个 biz。
-5. 分析 Java 时必须使用 AgentBridge MCP 工具取证，工具名使用裸名形式。需要限定项目时，使用当前客户端支持的项目或路径参数。优先用 `search_symbols` 按类名定位候选，用 `list_project_files` 按文件名、通配符或 XML 文件定位候选，再用 `read_file` 读取候选文件内容；需要一次查找多种关键文件时使用 `search_text`。
-6. 调用 `read_file` 时，`file` 必须使用 AgentBridge 工具返回的相对路径原文，不能删掉最前面的模块目录。例如工具返回 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须传 `file="upfs-cloud-xc/ECIS/src/.../BaseX.java"`，不能传 `ECIS/src/.../BaseX.java`。如果第一次读取失败，先用 `list_project_files` 或 `search_text` 重新定位，再把返回的 `file` 字段原样传给 `read_file`。
+5. 分析 Java 时使用当前 AgentBridge 环境可用能力 工具取证，工具名使用裸名形式。需要限定项目时，使用当前客户端支持的项目或路径参数。优先用 `当前可用搜索能力` 按类名定位候选，用 `当前可用项目文件列表能力` 按文件名、通配符或 XML 文件定位候选，再用 当前可用读取能力 读取候选文件内容；需要一次查找多种关键文件时使用 `当前可用搜索能力`。
+6. 调用 当前可用读取能力 时，`file` 必须使用 AgentBridge 工具返回的相对路径原文，不能删掉最前面的模块目录。例如工具返回 `upfs-cloud-xc/ECIS/src/.../BaseX.java`，读取时必须传 `file="upfs-cloud-xc/ECIS/src/.../BaseX.java"`，不能传 `ECIS/src/.../BaseX.java`。如果第一次读取失败，先用 `当前可用项目文件列表能力` 或 `当前可用搜索能力` 重新定位，再把返回的 `file` 字段原样传给 当前可用读取能力。
 7. 不要依赖准备脚本生成源码切片；不要优先用 shell/grep/rg 读取 Java 源码。只有 AgentBridge MCP 工具不可用、候选缺失或返回内容不足时，才把原因写入风险，并用最小范围文件读取补证。
 8. 如果有多个 Java 候选，结合 base XML、biz 小流程、类名、包名和 AgentBridge MCP 返回的源码证据判断；无法唯一确定时，在文档中说明歧义。
 9. 必须按 {skill_dir}/templates/module.md 的完整结构写该任务 JSON 中的 document_path；不能只写概述、流程图和总结。

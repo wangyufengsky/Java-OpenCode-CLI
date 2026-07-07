@@ -27,5 +27,5 @@ review:
     max-hunk-chars-per-task: 80000
     max-commits-per-task: 40
 
-opencode:
+agentbridge:
   timeout-minutes: 40

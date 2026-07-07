@@ -1,4 +1,4 @@
-package com.sonnet.wyf.gitreport.opencode;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 @FunctionalInterface
 public interface ValidationProbe {

@@ -1,6 +1,6 @@
 package com.sonnet.wyf.gitreport.console;
 
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.junit.jupiter.api.Test;
@@ -199,7 +199,7 @@ class WorkflowScheduleServiceTest {
         new WorkflowRunSchema(jdbcTemplate).initialize();
         WorkflowScheduleRepository repository = new WorkflowScheduleRepository(jdbcTemplate);
         CapturingSubmitter submitter = new CapturingSubmitter();
-        OpenCodeRunnerProperties properties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties properties = new AgentBridgeRunnerProperties();
         properties.setConfigDir("classpath:chains");
         ChainCatalog chainCatalog = new ChainCatalog(new DefaultResourceLoader(), properties, List.of(new DemoChain()));
         WorkflowScheduleService service = new WorkflowScheduleService(

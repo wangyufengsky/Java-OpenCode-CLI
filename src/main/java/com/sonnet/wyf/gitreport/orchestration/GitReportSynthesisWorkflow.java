@@ -3,11 +3,10 @@ package com.sonnet.wyf.gitreport.orchestration;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import org.slf4j.Logger;
@@ -25,12 +24,11 @@ import java.util.Map;
 
 final class GitReportSynthesisWorkflow {
     private static final Logger log = LoggerFactory.getLogger(GitReportSynthesisWorkflow.class);
-    private static final int OPENCODE_POLL_MILLIS = 10_000;
     private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
 
     private final ObjectMapper objectMapper;
     private final PromptBuilder promptBuilder;
-    private final OpenCodeServerTaskRunner taskRunner;
+    private final AgentBridgeTaskRunner taskRunner;
     private final FinalReportValidator finalReportValidator;
     private final SynthesisInputWriter synthesisInputWriter;
     private final RunStatusRepository statusRepository;
@@ -38,7 +36,7 @@ final class GitReportSynthesisWorkflow {
     GitReportSynthesisWorkflow(
             ObjectMapper objectMapper,
             PromptBuilder promptBuilder,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             FinalReportValidator finalReportValidator,
             SynthesisInputWriter synthesisInputWriter,
             RunStatusRepository statusRepository
@@ -51,7 +49,7 @@ final class GitReportSynthesisWorkflow {
         this.statusRepository = statusRepository;
     }
 
-    void run(GitReportProperties properties, Path out, Path qualityScores, OpenCodeServerHandle server) throws Exception {
+    void run(GitReportProperties properties, Path out, Path qualityScores) throws Exception {
         Path runDir = out.resolve("runs").resolve("synthesis");
         Files.createDirectories(runDir);
         Path finalReport = out.resolve("code-contribution-report.md");
@@ -74,41 +72,36 @@ final class GitReportSynthesisWorkflow {
                 synthesisInputs,
                 qualityScores,
                 out.resolve("code-contribution-report.md"));
-        OpenCodeRunResult result = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                server,
+        AgentBridgeRunResult result = taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                 properties.getPaths().getRepo(),
                 "git-report-synthesis",
                 promptFile,
-                properties.getOpencode().getSynthesisMessage(),
+                properties.getAgentbridge().getSynthesisTaskMessage(),
                 runDir,
                 () -> finalReportValidationCheck(finalReport),
-                properties.getOpencode().getSessionModel(),
-                properties.getOpencode().getCreateSessionTimeoutSeconds(),
-                properties.getOpencode().getRequestTimeoutSeconds(),
-                OPENCODE_POLL_MILLIS,
-                properties.getOpencode().getTimeoutMinutes(),
-                properties.getOpencode().getOutputWaitSeconds(),
-                properties.getOpencode().getValidationMaxCorrections()
+                properties.getAgentbridge().getPollMillis(),
+                properties.getAgentbridge().getTimeoutMinutes(),
+                properties.getAgentbridge().getValidationSettleSeconds(),
+                properties.getAgentbridge().getValidationMaxCorrections(),
+                java.net.URI.create(properties.getAgentbridge().getWebBaseUrl())
         ));
         FinalReportValidator.Validation finalReportValidation = finalReportValidator.validate(finalReport);
         boolean ok = finalReportValidation.ok();
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("state", ok ? "completed" : "failed");
-        status.put("sessionId", result.sessionId());
-        status.put("serverUrl", result.serverUrl());
-        status.put("serverOwnedByJava", result.serverOwnedByJava());
+        status.put("taskId", result.taskId());
+        status.put("agentbridgeWebBaseUrl", result.webBaseUrl());
         status.put("timedOut", result.timedOut());
         status.put("completedByOutput", result.completedByOutput());
-        status.put("aborted", result.aborted());
-        status.put("serverState", result.serverState());
+        status.put("agentState", result.agentState());
         status.put("finalReportOk", ok);
         status.put("finalReportError", finalReportValidation.error());
         status.put("synthesisInputs", synthesisInputs.toString());
         status.put("finishedAt", OffsetDateTime.now().toString());
         statusRepository.write(runDir.resolve("status.json"), status);
         if (!ok) {
-            log.error("Synthesis failed: sessionId={}, timedOut={}, finalReportOk={}, error=\"{}\", status={}",
-                    result.sessionId(),
+            log.error("Synthesis failed: taskId={}, timedOut={}, finalReportOk={}, error=\"{}\", status={}",
+                    result.taskId(),
                     result.timedOut(),
                     ok,
                     finalReportValidation.error(),

@@ -1,12 +1,16 @@
-package com.sonnet.wyf.gitreport.opencode;
+package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.OpenCodeSettings;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderOutputValidator;
 import com.sonnet.wyf.gitreport.workflow.smartesbreader.SmartEsbCodeReaderPreparation;
@@ -21,7 +25,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -55,7 +58,7 @@ class SmartEsbCodeReaderWorkflowChainTest {
         writeSampleProject(properties);
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         SmartEsbCodeReaderWorkflowChain chain = chain(properties, taskRunner);
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
 
@@ -86,7 +89,7 @@ class SmartEsbCodeReaderWorkflowChainTest {
         writeCompletedTaskOutput(properties.getLocalOut().resolve("transactions/CaConsume"), "transaction", "CaConsume");
         TrackingTaskRunner taskRunner = new TrackingTaskRunner();
         SmartEsbCodeReaderWorkflowChain chain = chain(properties, taskRunner);
-        OpenCodeSettings settings = new OpenCodeSettings();
+        AgentBridgeSettings settings = new AgentBridgeSettings();
         settings.setConcurrency(2);
         settings.setMaxConcurrency(2);
 
@@ -99,11 +102,10 @@ class SmartEsbCodeReaderWorkflowChainTest {
     private SmartEsbCodeReaderWorkflowChain chain(SmartEsbCodeReaderProperties properties, TrackingTaskRunner taskRunner) {
         return new SmartEsbCodeReaderWorkflowChain(
                 new FixedChainConfigLoader(properties),
-                new OpenCodeRunnerProperties(),
+                new AgentBridgeRunnerProperties(),
                 new SmartEsbCodeReaderPreparation(objectMapper),
                 new SmartEsbCodeReaderPromptBuilder(new DefaultResourceLoader()),
                 new SmartEsbCodeReaderOutputValidator(objectMapper),
-                new HealthyServerManager(),
                 taskRunner,
                 objectMapper,
                 new OutputCompletionGate(objectMapper),
@@ -154,44 +156,29 @@ class SmartEsbCodeReaderWorkflowChainTest {
         return new ScheduledProbeWaiter(scheduler);
     }
 
-    private class TrackingTaskRunner extends OpenCodeServerTaskRunner {
+    private class TrackingTaskRunner extends AgentBridgeTaskRunner {
         private final CopyOnWriteArrayList<String> titles = new CopyOnWriteArrayList<>();
         private final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
 
         TrackingTaskRunner() {
-            super(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
+            super(new AgentBridgeClient(objectMapper), scheduledProbeWaiter());
         }
 
         @Override
-        public OpenCodeRunResult runUntilValidated(
-                OpenCodeServerHandle server,
-                Path repo,
-                String title,
-                Path promptFile,
-                String message,
-                Path runDir,
-                ValidationProbe validationProbe,
-                String sessionModel,
-                int createSessionTimeoutSeconds,
-                int requestTimeoutSeconds,
-                int pollMillis,
-                int timeoutMinutes,
-                int validationSettleSeconds,
-                int validationMaxCorrections
-        ) throws Exception {
-            titles.add(title);
-            prompts.add(Files.readString(promptFile));
-            if (title.endsWith("-index")) {
-                Files.writeString(runDir.getParent().getParent().resolve("index.md"), "# 索引\n完成\n");
+        public AgentBridgeRunResult runUntilValidated(ValidatedAgentBridgeTaskSpec spec) throws Exception {
+            titles.add(spec.title());
+            prompts.add(Files.readString(spec.promptFile()));
+            if (spec.title().endsWith("-index")) {
+                Files.writeString(spec.runDir().getParent().getParent().resolve("index.md"), "# 索引\n完成\n");
             } else {
-                String prompt = Files.readString(promptFile);
+                String prompt = Files.readString(spec.promptFile());
                 if (prompt.contains("review_type: module")) {
-                    writeCompletedTaskOutput(runDir.getParent().getParent().resolve("modules/BaseConvert8583CUPS"), "module", "BaseConvert8583CUPS");
+                    writeCompletedTaskOutput(spec.runDir().getParent().getParent().resolve("modules/BaseConvert8583CUPS"), "module", "BaseConvert8583CUPS");
                 } else {
-                    writeCompletedTaskOutput(runDir.getParent().getParent().resolve("transactions/CaConsume"), "transaction", "CaConsume");
+                    writeCompletedTaskOutput(spec.runDir().getParent().getParent().resolve("transactions/CaConsume"), "transaction", "CaConsume");
                 }
             }
-            return new OpenCodeRunResult("session-" + title, server.serverUrl().toString(), false, false, true, false, "idle");
+            return new AgentBridgeRunResult("task-" + spec.title(), spec.webBaseUrl().toString(), false, true, "idle", true, "", 0);
         }
     }
 
@@ -203,17 +190,6 @@ class SmartEsbCodeReaderWorkflowChainTest {
         summary.put("status", "completed");
         summary.put("risks_or_uncertainties", List.of());
         objectMapper.writeValue(dir.resolve("summary.json").toFile(), summary);
-    }
-
-    private class HealthyServerManager extends OpenCodeServerManager {
-        HealthyServerManager() {
-            super(new OpenCodeServerClient(objectMapper), scheduledProbeWaiter());
-        }
-
-        @Override
-        public synchronized OpenCodeServerHandle ensureReady(OpenCodeSettings settings, Path out) {
-            return new OpenCodeServerHandle(URI.create(settings.getServerUrl()), false);
-        }
     }
 
     private static class FixedChainConfigLoader extends ChainConfigLoader {

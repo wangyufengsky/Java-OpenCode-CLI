@@ -183,7 +183,7 @@ public class ReportPreparationWriter {
                 step(7, "draft_person_report", reportMd),
                 stepWithPlaceholders(8, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
                 Map.of("step", 9, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
-                Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"), "status", "pending")
+                Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("简短完成信息；Java 会校验输出文件", "简短失败说明；Java 会根据校验结果决定是否纠正"), "status", "pending")
         );
     }
 

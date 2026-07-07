@@ -88,7 +88,7 @@ def main() -> int:
         default=None,
         help=(
             "Optional local mirror directory for tests or packaging when the script is executed outside Windows. "
-            "Do not use for real opencode review unless it maps to --out."
+            "Do not use for real agentbridge review unless it maps to --out."
         ),
     )
     parser.add_argument("--old-project", default=r"D:\upfs\qianzhi\upfs-cloud-xc")
@@ -204,20 +204,20 @@ def main() -> int:
                 "prompt": str(skill_dir / "prompts" / "run-transaction-review.md"),
                 "transaction_template": str(skill_dir / "templates" / "transaction-review.md"),
                 "summary_schema": path_string(summary_schema),
-                "preferred_writer": "agentbridge",
-                "agentbridge_write_tools": [
-                    "edit_text",
-                    "write_file",
+                "writer_hint": "agentbridge",
+                "write_hints": [
+                    "当前可用写入能力",
+                    "当前可用写入能力",
                 ],
                 "agentbridge_code_tools": [
-                    "search_symbols",
-                    "list_project_files",
-                    "search_text",
-                    "read_file",
+                    "当前可用搜索能力",
+                    "当前可用项目文件列表能力",
+                    "当前可用搜索能力",
+                    "当前可用读取能力",
                 ],
                 "agentbridge_refresh_tools": [
-                    "list_project_files",
-                    "list_directory_tree",
+                    "当前可用项目文件列表能力",
+                    "当前可用目录浏览能力",
                 ],
                 "db_mcp_tool_prefix": "intellij-db_*",
             },
@@ -236,14 +236,14 @@ def main() -> int:
             },
             "output_markers": TRANSACTION_OUTPUT_MARKERS,
             "rules": {
-                "code_lookup": "必须使用 AgentBridge MCP 定位和读取代码；MCP 不可用时标记未验证或停止审查，禁止使用 shell。",
-                "agentbridge_refresh": "搜索不到刚生成或刚修改的文件时，先用 list_project_files 或 list_directory_tree 刷新项目文件视图，再重试一次。",
+                "code_lookup": "使用当前 AgentBridge 环境可用能力 定位和读取代码；MCP 不可用时标记未验证或停止审查，不要扩大任务边界。",
+                "agentbridge_refresh": "搜索不到刚生成或刚修改的文件时，先用 当前可用项目文件列表能力 或 当前可用目录浏览能力 刷新项目文件视图，再重试一次。",
                 "db_lookup": "需要数据库/SQL 证据时，优先使用当前客户端暴露的 intellij-db_* 工具；未暴露时记录未验证，不用 shell 强行连库。",
                 "scope": "只审查当前交易。",
                 "protocol_focus": "重点审查 8583 到 JSON 的字段映射和处理等价性。",
                 "output_language": "所有 Markdown 报告必须全中文；代码标识符、路径、协议域号和 JSON path 可保留原文。",
                 "precreated_outputs": "准备脚本已预创建 review.md、mapping-matrix.md、sections/*.md 和 summary.json；子 agent 只能替换这些已存在文件的内容，禁止创建新文件。",
-                "writer_preference": "必须使用 edit_text 或 write_file 写入已存在文件；子 agent 禁止创建准备脚本未预创建的输出文件。AgentBridge MCP 不可用或输出路径不可写时停止并报告失败，禁止使用 shell。",
+                "write_expectation": "必须使用 当前可用写入能力 或 当前可用写入能力 写入已存在文件；子 agent 禁止创建准备脚本未预创建的输出文件。AgentBridge MCP 不可用或输出路径不可写时停止并报告失败，不要扩大任务边界。",
                 "markdown_write": "Markdown 必须分块写入，不要一次生成很大的 MD 文件。",
                 "markdown_max_chars_per_write": 6000,
                 "markdown_max_lines_per_write": 120,

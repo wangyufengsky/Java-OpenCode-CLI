@@ -3,9 +3,9 @@ package com.sonnet.wyf.gitreport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerClient;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -76,7 +76,7 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     @Test
-    void orchestratesPreparationAuthorWorkerQualityScoresAndSynthesisWithFakeOpenCodeServer() throws Exception {
+    void orchestratesPreparationAuthorWorkerQualityScoresAndSynthesisWithFakeAgentBridgeServer() throws Exception {
         Path repo = tempDir.resolve("repo");
         Path out = tempDir.resolve("out");
         Files.createDirectories(repo);
@@ -86,13 +86,13 @@ class GitReportOrchestratorIntegrationTest {
         Files.writeString(repo.resolve("Demo.java"), "class Demo {\n  int a = 1;\n}\n");
         GitTestSupport.run(repo, "git", "add", "Demo.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
-        startFakeOpenCodeServer();
+        startFakeAgentBridgeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
@@ -102,18 +102,17 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(Files.readString(out.resolve("code-contribution-report.md"))).contains("# 代码提交量统计报告");
         JsonNode qualityScores = objectMapper.readTree(out.resolve("quality-scores.json").toFile());
         assertThat(qualityScores.get("rankings")).hasSize(1);
-        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
-        assertThat(authorStatus.path("sessionId").asText()).isNotBlank();
-        assertThat(authorStatus.path("serverUrl").asText()).isEqualTo(serverUrl());
-        assertThat(authorStatus.path("serverOwnedByJava").asBoolean()).isFalse();
+        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/agent-status.json").toFile());
+        assertThat(authorStatus.path("taskId").asText()).isNotBlank();
+        assertThat(authorStatus.path("agentbridgeWebBaseUrl").asText()).isEqualTo(agentbridgeWebBaseUrl());
         JsonNode synthesisStatus = objectMapper.readTree(out.resolve("runs/synthesis/status.json").toFile());
-        assertThat(synthesisStatus.path("sessionId").asText()).isNotBlank();
+        assertThat(synthesisStatus.path("taskId").asText()).isNotBlank();
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("detail_json:"));
         assertThat(prompts).anySatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
     }
 
     @Test
-    void synthesisRerunRejectsMissingRepositoryBeforeOpenCodeSessionCreation() {
+    void synthesisRerunRejectsMissingRepositoryBeforeAgentBridgeTaskStart() {
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(tempDir.resolve("missing-repo"));
         properties.getPaths().setOut(tempDir.resolve("out-missing-repo"));
@@ -125,7 +124,7 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     @Test
-    void synthesisRerunRequiresExistingPreparationOutputsBeforeOpenCodeSessionCreation() throws Exception {
+    void synthesisRerunRequiresExistingPreparationOutputsBeforeAgentBridgeTaskStart() throws Exception {
         Path repo = tempDir.resolve("repo-missing-preparation");
         Path out = tempDir.resolve("out-missing-preparation");
         Files.createDirectories(repo);
@@ -152,16 +151,16 @@ class GitReportOrchestratorIntegrationTest {
         GitTestSupport.run(repo, "git", "add", "Demo.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
 
-        AtomicInteger sessions = startFakeOpenCodeServerWithoutOutputs();
+        AtomicInteger sessions = startFakeAgentBridgeServerWithoutOutputs();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
-        properties.getOpencode().setMaxRetries(2);
-        properties.getOpencode().setTimeoutMinutes(0);
-        properties.getOpencode().setOutputWaitSeconds(0);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
+        properties.getAgentbridge().setMaxRetries(2);
+        properties.getAgentbridge().setTimeoutMinutes(0);
+        properties.getAgentbridge().setValidationSettleSeconds(0);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
@@ -193,16 +192,16 @@ class GitReportOrchestratorIntegrationTest {
         GitTestSupport.run(repo, "git", "add", "Demo.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add demo");
 
-        AtomicInteger sessions = startFakeOpenCodeServerWithInvalidAuthorThenFreshRerun();
+        AtomicInteger sessions = startFakeAgentBridgeServerWithInvalidAuthorThenFreshRerun();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
-        properties.getOpencode().setMaxRetries(2);
-        properties.getOpencode().setOutputWaitSeconds(0);
-        properties.getOpencode().setValidationMaxCorrections(2);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
+        properties.getAgentbridge().setMaxRetries(2);
+        properties.getAgentbridge().setValidationSettleSeconds(0);
+        properties.getAgentbridge().setValidationMaxCorrections(2);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
@@ -215,13 +214,13 @@ class GitReportOrchestratorIntegrationTest {
         assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
                 .contains("\"state\" : \"completed\"")
                 .contains("\"rerunRounds\" : 1");
-        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/status.json").toFile());
+        JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/agent-status.json").toFile());
         assertThat(authorStatus.path("attempt").asInt()).isEqualTo(1);
-        assertThat(authorStatus.path("sessionId").asText()).isEqualTo("session-2");
+        assertThat(authorStatus.path("taskId").asText()).startsWith("git-report-author-001-alice-alice-example-com-");
     }
 
     @Test
-    void authorConcurrencyLimitsActiveOpenCodeSessionsUntilOutputsComplete() throws Exception {
+    void authorConcurrencyLimitsActiveAgentBridgeTasksUntilOutputsComplete() throws Exception {
         Path repo = tempDir.resolve("repo-concurrency");
         Path out = tempDir.resolve("out-concurrency");
         Files.createDirectories(repo);
@@ -237,24 +236,24 @@ class GitReportOrchestratorIntegrationTest {
         GitTestSupport.run(repo, "git", "add", "Bob.java");
         GitTestSupport.run(repo, "git", "commit", "-q", "-m", "add bob");
 
-        AtomicInteger maxActiveOpenCodeTasks = startFakeOpenCodeServerWithDelayedOutputs(250);
+        AtomicInteger maxActiveAgentBridgeTasks = startFakeAgentBridgeServerWithDelayedOutputs(250);
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
-        properties.getOpencode().setConcurrency(1);
-        properties.getOpencode().setMaxConcurrency(1);
-        properties.getOpencode().setTimeoutMinutes(1);
-        properties.getOpencode().setOutputWaitSeconds(2);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
+        properties.getAgentbridge().setConcurrency(1);
+        properties.getAgentbridge().setMaxConcurrency(1);
+        properties.getAgentbridge().setTimeoutMinutes(1);
+        properties.getAgentbridge().setValidationSettleSeconds(2);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
         orchestrator().run(properties);
 
         assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(2);
-        assertThat(maxActiveOpenCodeTasks).hasValue(1);
+        assertThat(maxActiveAgentBridgeTasks).hasValue(1);
     }
 
     @Test
@@ -297,13 +296,13 @@ class GitReportOrchestratorIntegrationTest {
                 ))
         ));
         Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
-        startFakeOpenCodeServer();
+        startFakeAgentBridgeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
         GitReportPreparation preparation = new GitReportPreparation(null, null) {
             @Override
             public void prepare(GitReportProperties ignored) {
@@ -371,13 +370,13 @@ class GitReportOrchestratorIntegrationTest {
                 )
         ));
         Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
-        startFakeOpenCodeServer();
+        startFakeAgentBridgeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
         GitReportPreparation preparation = new GitReportPreparation(null, null) {
             @Override
             public void prepare(GitReportProperties ignored) {
@@ -438,13 +437,13 @@ class GitReportOrchestratorIntegrationTest {
                 )
         ));
         Files.writeString(out.resolve("code-contribution-report.md"), "# 代码提交量统计报告\n\n{{RANKING_ROWS}}\n");
-        startFakeOpenCodeServer();
+        startFakeAgentBridgeServer();
 
         GitReportProperties properties = new GitReportProperties();
         properties.getPaths().setRepo(repo);
         properties.getPaths().setOut(out);
-        properties.getOpencode().setServerUrl(serverUrl());
-        properties.getOpencode().setManageServer(false);
+        properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
+        properties.getAgentbridge().setValidationSettleSeconds(0);
         GitReportPreparation preparation = new GitReportPreparation(null, null) {
             @Override
             public void prepare(GitReportProperties ignored) {
@@ -469,14 +468,13 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     private GitReportOrchestrator orchestrator(GitReportPreparation preparation) {
-        OpenCodeServerClient client = new OpenCodeServerClient(objectMapper);
+        AgentBridgeClient client = new AgentBridgeClient(objectMapper);
         ScheduledProbeWaiter scheduledProbeWaiter = scheduledProbeWaiter();
         return new GitReportOrchestrator(
                 preparation,
                 objectMapper,
                 new PromptBuilder(new DefaultResourceLoader()),
-                new OpenCodeServerManager(client, scheduledProbeWaiter),
-                new OpenCodeServerTaskRunner(client, scheduledProbeWaiter),
+                new AgentBridgeTaskRunner(client, scheduledProbeWaiter, new WorkflowEventSink(), objectMapper),
                 new AuthorOutputValidator(objectMapper),
                 new FinalReportValidator(),
                 new QualityScoresWriter(objectMapper, new QualityScoreCalculator(), new WorkloadScoreCalculator()),
@@ -493,7 +491,7 @@ class GitReportOrchestratorIntegrationTest {
             return taskScheduler;
         }
         taskScheduler = new ThreadPoolTaskScheduler();
-        taskScheduler.setThreadNamePrefix("test-opencode-session-poll-");
+        taskScheduler.setThreadNamePrefix("test-agentbridge-task-poll-");
         taskScheduler.setPoolSize(2);
         taskScheduler.initialize();
         return taskScheduler;
@@ -515,16 +513,30 @@ class GitReportOrchestratorIntegrationTest {
         return authorTaskExecutor;
     }
 
-    private void startFakeOpenCodeServer() throws IOException {
+    private void startFakeAgentBridgeServer() throws IOException {
         AtomicInteger ids = new AtomicInteger();
+        AtomicInteger runningPolls = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":" + consumeRunningPoll(runningPolls) + "}"));
+        server.createContext("/prompt", exchange -> {
+            try {
+                String prompt = promptFromBody(exchange);
+                ids.incrementAndGet();
+                runningPolls.set(1);
+                prompts.add(prompt);
+                writeFakeAgentBridgeOutput(prompt);
+                respond(exchange, 200, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
         server.createContext("/session", exchange -> {
             if ("GET".equals(exchange.getRequestMethod())) {
                 respond(exchange, 200, "[]");
                 return;
             }
-            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+            respond(exchange, 200, "{\"id\":\"task-" + ids.incrementAndGet() + "\"}");
         });
         server.createContext("/session/", exchange -> {
             try {
@@ -533,7 +545,7 @@ class GitReportOrchestratorIntegrationTest {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                     String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
                     prompts.add(prompt);
-                    writeFakeOpenCodeOutput(prompt);
+                    writeFakeAgentBridgeOutput(prompt);
                     respond(exchange, 204, "");
                     return;
                 }
@@ -554,16 +566,28 @@ class GitReportOrchestratorIntegrationTest {
         server.start();
     }
 
-    private AtomicInteger startFakeOpenCodeServerWithoutOutputs() throws IOException {
+    private AtomicInteger startFakeAgentBridgeServerWithoutOutputs() throws IOException {
         AtomicInteger ids = new AtomicInteger();
+        AtomicInteger runningPolls = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":" + consumeRunningPoll(runningPolls) + "}"));
+        server.createContext("/prompt", exchange -> {
+            try {
+                prompts.add(promptFromBody(exchange));
+                ids.incrementAndGet();
+                runningPolls.set(1);
+                respond(exchange, 200, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
         server.createContext("/session", exchange -> {
             if ("GET".equals(exchange.getRequestMethod())) {
                 respond(exchange, 200, "[]");
                 return;
             }
-            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+            respond(exchange, 200, "{\"id\":\"task-" + ids.incrementAndGet() + "\"}");
         });
         server.createContext("/session/", exchange -> {
             try {
@@ -591,19 +615,44 @@ class GitReportOrchestratorIntegrationTest {
         return ids;
     }
 
-    private AtomicInteger startFakeOpenCodeServerWithDelayedOutputs(long delayMillis) throws IOException {
+    private AtomicInteger startFakeAgentBridgeServerWithDelayedOutputs(long delayMillis) throws IOException {
         AtomicInteger ids = new AtomicInteger();
-        AtomicInteger activeOpenCodeTasks = new AtomicInteger();
-        AtomicInteger maxActiveOpenCodeTasks = new AtomicInteger();
+        AtomicInteger activeAgentBridgeTasks = new AtomicInteger();
+        AtomicInteger maxActiveAgentBridgeTasks = new AtomicInteger();
+        AtomicInteger runningPolls = new AtomicInteger();
         delayedOutputExecutor = Executors.newCachedThreadPool();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":" + consumeRunningPoll(runningPolls) + "}"));
+        server.createContext("/prompt", exchange -> {
+            try {
+                String prompt = promptFromBody(exchange);
+                ids.incrementAndGet();
+                runningPolls.set(1);
+                prompts.add(prompt);
+                int active = activeAgentBridgeTasks.incrementAndGet();
+                maxActiveAgentBridgeTasks.accumulateAndGet(active, Math::max);
+                delayedOutputExecutor.submit(() -> {
+                    try {
+                        Thread.sleep(delayMillis);
+                        writeFakeAgentBridgeOutput(prompt);
+                    } catch (Exception exception) {
+                        throw new IllegalStateException(exception);
+                    } finally {
+                        activeAgentBridgeTasks.decrementAndGet();
+                    }
+                });
+                respond(exchange, 200, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
         server.createContext("/session", exchange -> {
             if ("GET".equals(exchange.getRequestMethod())) {
                 respond(exchange, 200, "[]");
                 return;
             }
-            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+            respond(exchange, 200, "{\"id\":\"task-" + ids.incrementAndGet() + "\"}");
         });
         server.createContext("/session/", exchange -> {
             try {
@@ -612,16 +661,16 @@ class GitReportOrchestratorIntegrationTest {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                     String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
                     prompts.add(prompt);
-                    int active = activeOpenCodeTasks.incrementAndGet();
-                    maxActiveOpenCodeTasks.accumulateAndGet(active, Math::max);
+                    int active = activeAgentBridgeTasks.incrementAndGet();
+                    maxActiveAgentBridgeTasks.accumulateAndGet(active, Math::max);
                     delayedOutputExecutor.submit(() -> {
                         try {
                             Thread.sleep(delayMillis);
-                            writeFakeOpenCodeOutput(prompt);
+                            writeFakeAgentBridgeOutput(prompt);
                         } catch (Exception exception) {
                             throw new IllegalStateException(exception);
                         } finally {
-                            activeOpenCodeTasks.decrementAndGet();
+                            activeAgentBridgeTasks.decrementAndGet();
                         }
                     });
                     respond(exchange, 204, "");
@@ -641,20 +690,43 @@ class GitReportOrchestratorIntegrationTest {
             }
         });
         server.start();
-        return maxActiveOpenCodeTasks;
+        return maxActiveAgentBridgeTasks;
     }
 
-    private AtomicInteger startFakeOpenCodeServerWithInvalidAuthorThenFreshRerun() throws IOException {
+    private AtomicInteger startFakeAgentBridgeServerWithInvalidAuthorThenFreshRerun() throws IOException {
         AtomicInteger ids = new AtomicInteger();
         AtomicInteger authorRuns = new AtomicInteger();
+        AtomicInteger runningPolls = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/global/health", exchange -> respond(exchange, 200, "{\"ok\":true}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":" + consumeRunningPoll(runningPolls) + "}"));
+        server.createContext("/prompt", exchange -> {
+            try {
+                String prompt = promptFromBody(exchange);
+                ids.incrementAndGet();
+                runningPolls.set(1);
+                prompts.add(prompt);
+                if (prompt.contains("detail_json:")) {
+                    Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
+                    if (authorRuns.incrementAndGet() == 1) {
+                        writeInvalidAuthorOutput(detailPath);
+                    } else {
+                        writeValidAuthorOutput(detailPath);
+                    }
+                } else if (prompt.contains("synthesis_inputs_json:")) {
+                    writeFakeAgentBridgeOutput(prompt);
+                }
+                respond(exchange, 200, "{}");
+            } catch (Exception exception) {
+                respond(exchange, 500, "{\"error\":\"" + exception.getClass().getName() + ": " + exception.getMessage().replace("\"", "'") + "\"}");
+            }
+        });
         server.createContext("/session", exchange -> {
             if ("GET".equals(exchange.getRequestMethod())) {
                 respond(exchange, 200, "[]");
                 return;
             }
-            respond(exchange, 200, "{\"id\":\"session-" + ids.incrementAndGet() + "\"}");
+            respond(exchange, 200, "{\"id\":\"task-" + ids.incrementAndGet() + "\"}");
         });
         server.createContext("/session/", exchange -> {
             try {
@@ -671,7 +743,7 @@ class GitReportOrchestratorIntegrationTest {
                             writeValidAuthorOutput(detailPath);
                         }
                     } else if (prompt.contains("synthesis_inputs_json:")) {
-                        writeFakeOpenCodeOutput(prompt);
+                        writeFakeAgentBridgeOutput(prompt);
                     }
                     respond(exchange, 204, "");
                     return;
@@ -694,7 +766,7 @@ class GitReportOrchestratorIntegrationTest {
         return ids;
     }
 
-    private void writeFakeOpenCodeOutput(String prompt) throws IOException {
+    private void writeFakeAgentBridgeOutput(String prompt) throws IOException {
         if (prompt.contains("detail_json:")) {
             Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
             writeValidAuthorOutput(detailPath);
@@ -817,7 +889,16 @@ class GitReportOrchestratorIntegrationTest {
         return matches.get(matches.size() - 1);
     }
 
-    private String serverUrl() {
+    private String promptFromBody(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        return objectMapper.readTree(body).path("text").asText();
+    }
+
+    private boolean consumeRunningPoll(AtomicInteger runningPolls) {
+        return runningPolls.getAndUpdate(value -> Math.max(0, value - 1)) > 0;
+    }
+
+    private String agentbridgeWebBaseUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 

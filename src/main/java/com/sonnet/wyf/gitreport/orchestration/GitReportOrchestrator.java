@@ -3,12 +3,10 @@ package com.sonnet.wyf.gitreport.orchestration;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeRunResult;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerHandle;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerManager;
-import com.sonnet.wyf.gitreport.opencode.OpenCodeServerTaskRunner;
-import com.sonnet.wyf.gitreport.opencode.ValidationCheck;
-import com.sonnet.wyf.gitreport.opencode.ValidatedOpenCodeTaskSpec;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
+import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
@@ -32,13 +30,11 @@ import java.util.concurrent.Callable;
 
 public class GitReportOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(GitReportOrchestrator.class);
-    private static final int OPENCODE_POLL_MILLIS = 10_000;
 
     private final GitReportPreparation preparation;
     private final ObjectMapper objectMapper;
     private final PromptBuilder promptBuilder;
-    private final OpenCodeServerManager serverManager;
-    private final OpenCodeServerTaskRunner taskRunner;
+    private final AgentBridgeTaskRunner taskRunner;
     private final AuthorOutputValidator outputValidator;
     private final QualityScoresWriter qualityScoresWriter;
     private final RunStatusRepository statusRepository;
@@ -51,8 +47,7 @@ public class GitReportOrchestrator {
             GitReportPreparation preparation,
             ObjectMapper objectMapper,
             PromptBuilder promptBuilder,
-            OpenCodeServerManager serverManager,
-            OpenCodeServerTaskRunner taskRunner,
+            AgentBridgeTaskRunner taskRunner,
             AuthorOutputValidator outputValidator,
             FinalReportValidator finalReportValidator,
             QualityScoresWriter qualityScoresWriter,
@@ -65,7 +60,6 @@ public class GitReportOrchestrator {
         this.preparation = preparation;
         this.objectMapper = objectMapper;
         this.promptBuilder = promptBuilder;
-        this.serverManager = serverManager;
         this.taskRunner = taskRunner;
         this.outputValidator = outputValidator;
         this.qualityScoresWriter = qualityScoresWriter;
@@ -86,19 +80,17 @@ public class GitReportOrchestrator {
     public void run(GitReportProperties properties) throws Exception {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         validateRepositoryDirectory(properties);
-        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
-        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}, concurrency={}, timeoutMinutes={}, outputWaitSeconds={}, maxRetries={}",
+        log.info("Git report orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, agentbridgeWebBaseUrl={}, concurrency={}, timeoutMinutes={}, validationSettleSeconds={}, maxRetries={}",
                 properties.getProject().getId(),
                 properties.getProject().getName(),
                 properties.getProject().getRunId(),
                 properties.getPaths().getRepo().toAbsolutePath().normalize(),
                 out,
-                server.serverUrl(),
-                server.ownedByJava(),
-                properties.getOpencode().getConcurrency(),
-                properties.getOpencode().getTimeoutMinutes(),
-                properties.getOpencode().getOutputWaitSeconds(),
-                properties.getOpencode().getMaxRetries());
+                properties.getAgentbridge().getWebBaseUrl(),
+                properties.getAgentbridge().getConcurrency(),
+                properties.getAgentbridge().getTimeoutMinutes(),
+                properties.getAgentbridge().getValidationSettleSeconds(),
+                properties.getAgentbridge().getMaxRetries());
         preparation.prepare(properties);
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
@@ -106,10 +98,10 @@ public class GitReportOrchestrator {
                 out.resolve("summary.json"),
                 out.resolve("index_inputs.json"),
                 listOfMaps(indexInputs.get("tasks")).size());
-        runAuthorTasks(properties, out, indexInputs, server);
-        ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
+        runAuthorTasks(properties, out, indexInputs);
+        ensureAllAuthorOutputsReady(properties, out, indexInputs);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        synthesisWorkflow.run(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores);
         log.info("Git report orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
@@ -117,20 +109,18 @@ public class GitReportOrchestrator {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         validateRepositoryDirectory(properties);
         validatePreparedGitReportOutputs(out);
-        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
-        log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, serverUrl={}, serverOwnedByJava={}",
+        log.info("Git report synthesis-only orchestration started: projectId={}, projectName={}, runId={}, repo={}, out={}, agentbridgeWebBaseUrl={}",
                 properties.getProject().getId(),
                 properties.getProject().getName(),
                 properties.getProject().getRunId(),
                 properties.getPaths().getRepo().toAbsolutePath().normalize(),
                 out,
-                server.serverUrl(),
-                server.ownedByJava());
+                properties.getAgentbridge().getWebBaseUrl());
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
-        ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
+        ensureAllAuthorOutputsReady(properties, out, indexInputs);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        synthesisWorkflow.run(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores);
         log.info("Git report synthesis-only orchestration completed: finalReport={}", out.resolve("code-contribution-report.md"));
     }
 
@@ -143,7 +133,6 @@ public class GitReportOrchestrator {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         validateRepositoryDirectory(properties);
         validatePreparedGitReportOutputs(out);
-        OpenCodeServerHandle server = serverManager.ensureReady(properties, out);
         Map<String, Object> summary = readMap(out.resolve("summary.json"));
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         List<Map<String, Object>> targets = requestedAuthorKeys.stream()
@@ -155,10 +144,10 @@ public class GitReportOrchestrator {
                 properties.getPaths().getRepo().toAbsolutePath().normalize());
         Map<String, Object> selectedIndexInputs = new LinkedHashMap<>(indexInputs);
         selectedIndexInputs.put("tasks", targets);
-        runAuthorTasks(properties, out, selectedIndexInputs, server);
-        ensureAllAuthorOutputsReady(properties, out, indexInputs, server);
+        runAuthorTasks(properties, out, selectedIndexInputs);
+        ensureAllAuthorOutputsReady(properties, out, indexInputs);
         Path qualityScores = qualityScoresWriter.write(out.resolve("quality-scores.json"), summary, indexInputs);
-        synthesisWorkflow.run(properties, out, qualityScores, server);
+        synthesisWorkflow.run(properties, out, qualityScores);
         log.info("Git report author rerun completed: authorKeys={}, finalReport={}", requestedAuthorKeys, out.resolve("code-contribution-report.md"));
     }
 
@@ -198,8 +187,7 @@ public class GitReportOrchestrator {
     private void ensureAllAuthorOutputsReady(
             GitReportProperties properties,
             Path out,
-            Map<String, Object> indexInputs,
-            OpenCodeServerHandle server
+            Map<String, Object> indexInputs
     ) throws Exception {
         completionGate.ensureComplete(
                 "git-report author",
@@ -220,7 +208,7 @@ public class GitReportOrchestrator {
                             incomplete.stream().map(IncompleteOutput::summary).reduce((left, right) -> left + "; " + right).orElse(""));
                     Map<String, Object> selectedIndexInputs = new LinkedHashMap<>(indexInputs);
                     selectedIndexInputs.put("tasks", targets);
-                    runAuthorTasks(properties, out, selectedIndexInputs, server);
+                    runAuthorTasks(properties, out, selectedIndexInputs);
                 }
         );
     }
@@ -259,24 +247,24 @@ public class GitReportOrchestrator {
         return incomplete;
     }
 
-    private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs, OpenCodeServerHandle server) throws Exception {
+    private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs) throws Exception {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
-        int concurrency = Math.max(1, Math.min(properties.getOpencode().getConcurrency(), properties.getOpencode().getMaxConcurrency()));
+        int concurrency = Math.max(1, Math.min(properties.getAgentbridge().getConcurrency(), properties.getAgentbridge().getMaxConcurrency()));
         concurrentTaskRunner.run(
                 "git-report author",
                 tasks,
                 concurrency,
                 task -> task.get("author_key").toString(),
-                task -> authorCallable(properties, out, task, server)
+                task -> authorCallable(properties, out, task)
         );
     }
 
-    private Callable<TaskRunResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task, OpenCodeServerHandle server) {
+    private Callable<TaskRunResult> authorCallable(GitReportProperties properties, Path out, Map<String, Object> task) {
         return () -> {
             String authorKey = task.get("author_key").toString();
             String author = task.get("author").toString();
             Path runDir = out.resolve("runs").resolve(authorKey);
-            Path statusPath = runDir.resolve("status.json");
+            Path statusPath = runDir.resolve("agent-status.json");
             int attempts = 1;
             int attemptsRun = 0;
             String lastError = "";
@@ -286,7 +274,7 @@ public class GitReportOrchestrator {
                 String state = "failed";
                 String error = "";
                 boolean timedOut = false;
-                OpenCodeRunResult runResult = null;
+                AgentBridgeRunResult runResult = null;
                 try {
                     Files.createDirectories(runDir);
                     Path promptFile = runDir.resolve("worker-prompt.md");
@@ -294,35 +282,32 @@ public class GitReportOrchestrator {
                     Files.writeString(promptFile, prompt);
                     Path reportMd = Path.of(task.get("report_md").toString());
                     Path qualitySummaryJson = Path.of(task.get("quality_summary_json").toString());
-                    runResult = taskRunner.runUntilValidated(new ValidatedOpenCodeTaskSpec(
-                            server,
+                    runResult = taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
                             properties.getPaths().getRepo(),
                             "git-report-" + authorKey,
                             promptFile,
-                            properties.getOpencode().getWorkerMessage(),
+                            properties.getAgentbridge().getTaskMessage(),
                             runDir,
                             () -> authorValidationCheck(reportMd, qualitySummaryJson),
-                            properties.getOpencode().getSessionModel(),
-                            properties.getOpencode().getCreateSessionTimeoutSeconds(),
-                            properties.getOpencode().getRequestTimeoutSeconds(),
-                            OPENCODE_POLL_MILLIS,
-                            properties.getOpencode().getTimeoutMinutes(),
-                            properties.getOpencode().getOutputWaitSeconds(),
-                            0
+                            properties.getAgentbridge().getPollMillis(),
+                            properties.getAgentbridge().getTimeoutMinutes(),
+                            properties.getAgentbridge().getValidationSettleSeconds(),
+                            0,
+                            java.net.URI.create(properties.getAgentbridge().getWebBaseUrl())
                     ));
                     timedOut = runResult.timedOut();
                     AuthorValidationResult validation = outputValidator.validate(reportMd, qualitySummaryJson);
                     if (validation.ok()) {
                         state = "completed";
                         writeAuthorStatus(statusPath, task, attempt, state, timedOut, runResult, "");
-                        log.info("Author task completed: authorKey={}, author={}, attempt={}, sessionId={}, timedOut={}, completedByOutput={}, serverState={}, report={}, qualitySummary={}",
+                        log.info("Author task completed: authorKey={}, author={}, attempt={}, taskId={}, timedOut={}, completedByOutput={}, agentState={}, report={}, qualitySummary={}",
                                 authorKey,
                                 author,
                                 attempt,
-                                runResult.sessionId(),
+                                runResult.taskId(),
                                 timedOut,
                                 runResult.completedByOutput(),
-                                runResult.serverState(),
+                                runResult.agentState(),
                                 task.get("report_md"),
                                 task.get("quality_summary_json"));
                         return TaskRunResult.success(authorKey, author, statusPath);
@@ -333,7 +318,7 @@ public class GitReportOrchestrator {
                         log.warn("AUTHOR_VALIDATION_FAILED reason=\"{}\" authorKey={} author={} attempt={}", error, authorKey, author, attempt);
                     }
                 } catch (Exception exception) {
-                    error = sanitizeOpenCodeError(exception);
+                    error = sanitizeAgentBridgeError(exception);
                     log.warn("AUTHOR_ATTEMPT_EXCEPTION reason=\"{}\" authorKey={} author={} attempt={}",
                             error, authorKey, author, attempt, exception);
                 }
@@ -347,7 +332,7 @@ public class GitReportOrchestrator {
         };
     }
 
-    private String sanitizeOpenCodeError(Exception exception) {
+    private String sanitizeAgentBridgeError(Exception exception) {
         return exception.getClass().getName() + ": " + (exception.getMessage() == null ? "" : exception.getMessage());
     }
 
@@ -356,19 +341,17 @@ public class GitReportOrchestrator {
         return validation.ok() ? ValidationCheck.success() : ValidationCheck.failed(validation.error());
     }
 
-    private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, OpenCodeRunResult runResult, String error) throws IOException {
+    private void writeAuthorStatus(Path statusPath, Map<String, Object> task, int attempt, String state, boolean timedOut, AgentBridgeRunResult runResult, String error) throws IOException {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("authorKey", task.get("author_key"));
         status.put("author", task.get("author"));
         status.put("attempt", attempt);
         status.put("state", state);
-        status.put("sessionId", runResult == null ? "" : runResult.sessionId());
-        status.put("serverUrl", runResult == null ? "" : runResult.serverUrl());
-        status.put("serverOwnedByJava", runResult != null && runResult.serverOwnedByJava());
+        status.put("taskId", runResult == null ? "" : runResult.taskId());
+        status.put("agentbridgeWebBaseUrl", runResult == null ? "" : runResult.webBaseUrl());
         status.put("timedOut", timedOut);
         status.put("completedByOutput", runResult != null && runResult.completedByOutput());
-        status.put("aborted", runResult != null && runResult.aborted());
-        status.put("serverState", runResult == null ? "unknown" : runResult.serverState());
+        status.put("agentState", runResult == null ? "unknown" : runResult.agentState());
         status.put("finishedAt", OffsetDateTime.now().toString());
         status.put("error", error == null ? "" : error);
         statusRepository.write(statusPath, status);

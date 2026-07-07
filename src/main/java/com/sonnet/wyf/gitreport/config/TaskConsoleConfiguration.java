@@ -10,7 +10,7 @@ import com.sonnet.wyf.gitreport.console.WorkflowScheduleRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowScheduleService;
 import com.sonnet.wyf.gitreport.console.WorkflowRunRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowRunSchema;
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import org.sqlite.SQLiteDataSource;
 import org.springframework.context.annotation.Bean;
@@ -58,7 +58,7 @@ public class TaskConsoleConfiguration {
     }
 
     @Bean
-    ChainCatalog chainCatalog(ResourceLoader resourceLoader, OpenCodeRunnerProperties properties, List<WorkflowChain> chains) {
+    ChainCatalog chainCatalog(ResourceLoader resourceLoader, AgentBridgeRunnerProperties properties, List<WorkflowChain> chains) {
         return new ChainCatalog(resourceLoader, properties, chains);
     }
 
@@ -83,7 +83,7 @@ public class TaskConsoleConfiguration {
             WorkflowRunRepository repository,
             WorkflowEventSink eventSink,
             RunConfigWriter configWriter,
-            OpenCodeRunnerProperties runnerProperties
+            AgentBridgeRunnerProperties runnerProperties
     ) {
         return new WorkflowExecutionService(chainCatalog, repository, eventSink, configWriter, runnerProperties);
     }

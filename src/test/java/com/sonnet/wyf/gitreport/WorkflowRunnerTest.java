@@ -1,6 +1,6 @@
 package com.sonnet.wyf.gitreport;
 
-import com.sonnet.wyf.gitreport.runner.OpenCodeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunner;
@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class WorkflowRunnerTest {
     @Test
     void dispatchesSelectedWorkflowChainWithRunnerRequest() throws Exception {
-        OpenCodeRunnerProperties properties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties properties = new AgentBridgeRunnerProperties();
         properties.setEnabled(true);
         properties.setActiveChain("demo-chain");
         properties.setMode("rerun");
@@ -48,7 +48,7 @@ class WorkflowRunnerTest {
                 "transaction",
                 "\"CaCheckAcct\", \"CaConsumeRev\", \"CaTransferOuter\"",
                 null,
-                new com.sonnet.wyf.gitreport.runner.OpenCodeSettings()
+                new com.sonnet.wyf.gitreport.runner.AgentBridgeSettings()
         );
 
         assertThat(request.rerunIds()).containsExactly("CaCheckAcct", "CaConsumeRev", "CaTransferOuter");
@@ -56,13 +56,13 @@ class WorkflowRunnerTest {
 
     @Test
     void failsClearlyWhenActiveChainIsUnknown() {
-        OpenCodeRunnerProperties properties = new OpenCodeRunnerProperties();
+        AgentBridgeRunnerProperties properties = new AgentBridgeRunnerProperties();
         properties.setEnabled(true);
         properties.setActiveChain("missing-chain");
 
         assertThatThrownBy(() -> new WorkflowRunner(properties, List.of()).run(new DefaultApplicationArguments()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unknown opencode-runner.active-chain")
+                .hasMessageContaining("Unknown agentbridge-runner.active-chain")
                 .hasMessageContaining("missing-chain");
     }
 }

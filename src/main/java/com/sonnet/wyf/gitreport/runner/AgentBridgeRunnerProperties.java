@@ -4,15 +4,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.LocalDate;
 
-@ConfigurationProperties(prefix = "opencode-runner")
-public class OpenCodeRunnerProperties {
+@ConfigurationProperties(prefix = "agentbridge-runner")
+public class AgentBridgeRunnerProperties {
     private boolean enabled = false;
     private String activeChain = "git-code-contribution-report";
     private String mode = "full";
     private LocalDate runDate;
     private String configDir = "classpath:chains";
     private final Rerun rerun = new Rerun();
-    private final OpenCodeSettings opencode = new OpenCodeSettings();
+    private final AgentBridgeSettings agentbridge = new AgentBridgeSettings();
 
     public boolean isEnabled() {
         return enabled;
@@ -58,8 +58,8 @@ public class OpenCodeRunnerProperties {
         return rerun;
     }
 
-    public OpenCodeSettings getOpencode() {
-        return opencode;
+    public AgentBridgeSettings getAgentbridge() {
+        return agentbridge;
     }
 
     public static class Rerun {

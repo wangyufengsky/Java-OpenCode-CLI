@@ -894,7 +894,7 @@ def build_execution_worklist(detail_json: Path, report_md: Path, quality_summary
             "step": 10,
             "action": "final_response",
             "required": True,
-            "allowed": ["DONE person_report_md=<path> quality_summary_json=<path>", "BLOCKED step=<step> action=<action> path=<path> reason=<reason>"],
+            "allowed": ["完成 person_report_md=<path> quality_summary_json=<path>", "无法完成 step=<step> action=<action> path=<path> reason=<reason>"],
             "status": "pending",
         },
     ]

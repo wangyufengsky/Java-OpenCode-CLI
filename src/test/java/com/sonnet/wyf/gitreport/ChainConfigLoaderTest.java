@@ -41,7 +41,7 @@ class ChainConfigLoaderTest {
         assertThat(properties.getMode()).isEqualTo("8583");
         assertThat(properties.getServiceIdentify()).isNotEmpty();
         assertThat(properties.getXmlRoot()).hasToString("/home/wangyufeng/upfs-production");
-        assertThat(properties.getWorkerMessage()).contains("SmartESB code-reader");
+        assertThat(properties.getTaskMessage()).contains("SmartESB code-reader");
     }
 
     @Test
