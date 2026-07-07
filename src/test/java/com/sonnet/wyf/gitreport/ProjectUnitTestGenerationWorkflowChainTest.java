@@ -153,6 +153,37 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .hasMessageContaining("unknown unit-test batch id");
     }
 
+    @Test
+    void rerunSingleBatchPreservesOtherBatchResults() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeSource(properties.getProject().getRepo());
+        ProjectUnitTestGenerationWorkflowChain chain = chain(properties, new FakeAgentBridgeClient(properties));
+        chain.run(request("full", "", ""));
+
+        chain.run(request("rerun", "test-batch", "test-batch-001-orderservice"));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("test-batch-001-orderservice", "test-batch-002-userhelper")
+                .contains("accepted: `2`", "failed: `0`");
+    }
+
+    @Test
+    void verificationRerunRefreshesAgentBridgeValidation() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        writeSource(properties.getProject().getRepo());
+        FakeAgentBridgeClient client = new FakeAgentBridgeClient(properties);
+        ProjectUnitTestGenerationWorkflowChain chain = chain(properties, client);
+        chain.run(request("full", "", ""));
+        Files.delete(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java"));
+        int callsAfterFullRun = client.toolNames.size();
+
+        assertThatThrownBy(() -> chain.run(request("rerun", "verification", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("测试类不存在");
+
+        assertThat(client.toolNames.size()).isGreaterThan(callsAfterFullRun);
+    }
+
     private ProjectUnitTestGenerationWorkflowChain chain(ProjectUnitTestGenerationProperties properties, ProjectUnitTestGenerationAgentBridgeClient client) {
         ProjectUnitTestGenerationPromptBuilder promptBuilder = new ProjectUnitTestGenerationPromptBuilder(new DefaultResourceLoader());
         return new ProjectUnitTestGenerationWorkflowChain(

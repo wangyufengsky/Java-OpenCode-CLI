@@ -54,6 +54,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         if ("full".equals(mode)) {
             preparation.prepare(properties, true);
+            Files.deleteIfExists(out.resolve(ProjectUnitTestGenerationBatchRunner.RESULTS_JSON));
             finish(batchRunner.runBatches(properties, out, loadBatches(out)), out);
             return;
         }
@@ -66,7 +67,7 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         if ("test-batch".equals(request.rerunType())) {
             finish(batchRunner.runBatches(properties, out, batchesByIds(out, request.rerunIds())), out);
         } else if ("verification".equals(request.rerunType())) {
-            reportRenderer.render(out);
+            finish(batchRunner.verifyBatches(properties, out, loadBatches(out)), out);
         } else {
             throw new IllegalArgumentException("project-unit-test-generation rerun.type must be one of: test-batch, verification");
         }

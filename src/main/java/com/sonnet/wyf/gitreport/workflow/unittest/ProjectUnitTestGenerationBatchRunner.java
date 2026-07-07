@@ -51,16 +51,37 @@ public class ProjectUnitTestGenerationBatchRunner {
     }
 
     public List<BatchResult> runBatches(ProjectUnitTestGenerationProperties properties, Path out, List<Map<String, Object>> batches) throws Exception {
-        List<BatchResult> results = new ArrayList<>();
+        Map<String, BatchResult> allResults = readExistingResults(out);
+        List<BatchResult> selectedResults = new ArrayList<>();
         for (Map<String, Object> batch : batches) {
             BatchResult result = runBatch(properties, out, batch);
-            results.add(result);
-            writeResults(out, results);
+            selectedResults.add(result);
+            allResults.put(result.batchId(), result);
+            writeResults(out, new ArrayList<>(allResults.values()));
             if (!result.accepted()) {
                 break;
             }
         }
-        return results;
+        return selectedResults;
+    }
+
+    public List<BatchResult> verifyBatches(ProjectUnitTestGenerationProperties properties, Path out, List<Map<String, Object>> batches) throws Exception {
+        Map<String, BatchResult> allResults = readExistingResults(out);
+        List<BatchResult> selectedResults = new ArrayList<>();
+        for (Map<String, Object> batch : batches) {
+            String batchId = string(batch.get("batch_id"));
+            Acceptance acceptance = validate(properties, batch);
+            BatchResult result = new BatchResult(
+                    batchId,
+                    acceptance.accepted(),
+                    acceptance.summary(),
+                    List.of(new AttemptRecord(0, "verification", acceptance.accepted(), acceptance.summary()))
+            );
+            selectedResults.add(result);
+            allResults.put(result.batchId(), result);
+            writeResults(out, new ArrayList<>(allResults.values()));
+        }
+        return selectedResults;
     }
 
     BatchResult runBatch(ProjectUnitTestGenerationProperties properties, Path out, Map<String, Object> batch) throws Exception {
@@ -241,6 +262,44 @@ public class ProjectUnitTestGenerationBatchRunner {
                 "generated_at", OffsetDateTime.now().toString(),
                 "batches", rows
         ));
+    }
+
+    private Map<String, BatchResult> readExistingResults(Path out) throws Exception {
+        Path path = out.resolve(RESULTS_JSON);
+        if (!Files.exists(path)) {
+            return new LinkedHashMap<>();
+        }
+        Map<String, BatchResult> results = new LinkedHashMap<>();
+        JsonNode root = objectMapper.readTree(path.toFile());
+        for (JsonNode row : root.path("batches")) {
+            String batchId = row.path("batch_id").asText("");
+            if (batchId.isBlank()) {
+                continue;
+            }
+            results.put(batchId, new BatchResult(
+                    batchId,
+                    row.path("accepted").asBoolean(false),
+                    row.path("failure_summary").asText(""),
+                    attempts(row.path("attempts"))
+            ));
+        }
+        return results;
+    }
+
+    private List<AttemptRecord> attempts(JsonNode rows) {
+        if (!rows.isArray()) {
+            return List.of();
+        }
+        List<AttemptRecord> attempts = new ArrayList<>();
+        for (JsonNode row : rows) {
+            attempts.add(new AttemptRecord(
+                    row.path("attempt").asInt(0),
+                    row.path("phase").asText("unknown"),
+                    row.path("accepted").asBoolean(false),
+                    row.path("summary").asText("")
+            ));
+        }
+        return attempts;
     }
 
     private String first(Object value) {
