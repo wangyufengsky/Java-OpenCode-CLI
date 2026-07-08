@@ -17,6 +17,9 @@
 - 读取交易/模块审查 session 摘要时只读取 `<out>/summary.json`、`<out>/index_inputs.json`、`<out>/reports/*/summary.json` 允许的文件。
 - `index.md` 和 `summary.md` 已由准备脚本预创建为完整模板；本汇总 session 使用 `index_inputs.output.index_md`、`index_inputs.output.summary_md` 和 `index_inputs.output_placeholders` 替换占位符，不创建交易级或模块级输出文件。
 - 写入 `index.md` 和 `summary.md` 时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
+- 所有文件写入都必须分段执行，优先按 Markdown 标题、状态表行、finding 分组、代码规范分组或模板占位符拆分。
+- 单次写入不超过 6000 字符、120 行；不要一次性重写完整大文件。
+- 需要追加较长内容时，先写小块，再继续替换下一个占位符或下一段内容。
 - `AgentBridge` MCP 读写工具不可用时必须写入失败说明，不要在最终回答中粘贴完整报告替代写文件。
 - 只能替换 `index_inputs.output_placeholders` 中列出的占位符；写入完成后，`index.md` 和 `summary.md` 不得残留 `{{...}}` 占位符。
 - 搜索不到刚生成的报告或项目文件视图疑似过期时，先尝试 `当前可用项目文件列表能力`，再重试读取。

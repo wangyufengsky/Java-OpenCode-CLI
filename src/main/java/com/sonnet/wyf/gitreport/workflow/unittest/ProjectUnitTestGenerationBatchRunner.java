@@ -110,6 +110,7 @@ public class ProjectUnitTestGenerationBatchRunner {
                     Path.of(string(batch.get("input_json"))),
                     failureSummary
             ));
+            client.clearSession(webBaseUrl);
             client.postPrompt(webBaseUrl, Files.readString(promptFile));
             client.waitUntilIdle(webBaseUrl, timeout, pollInterval);
 

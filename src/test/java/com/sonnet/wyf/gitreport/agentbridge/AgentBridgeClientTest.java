@@ -8,13 +8,26 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.Authenticator;
+import java.net.CookieHandler;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.ProxySelector;
+import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -87,6 +100,30 @@ class AgentBridgeClientTest {
         assertThat(response.structured().path("tests")).hasSize(1);
     }
 
+    @Test
+    void usesToolTimeoutForLongRunningMcpCalls() throws Exception {
+        CapturingHttpClient httpClient = new CapturingHttpClient("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "result": {
+                    "content": [
+                      {"type": "text", "text": "{\\"success\\":true}"}
+                    ]
+                  }
+                }
+                """);
+        AgentBridgeClient client = new AgentBridgeClient(objectMapper, httpClient);
+
+        client.callTool(
+                URI.create("http://127.0.0.1:8642/mcp"),
+                "run_command",
+                objectMapper.createObjectNode().put("timeout", 2400)
+        );
+
+        assertThat(httpClient.lastRequest.timeout()).contains(Duration.ofSeconds(2430));
+    }
+
     private HttpServer server() throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         servers.add(server);
@@ -103,6 +140,126 @@ class AgentBridgeClientTest {
         exchange.sendResponseHeaders(status, bytes.length);
         try (exchange; var responseBody = exchange.getResponseBody()) {
             responseBody.write(bytes);
+        }
+    }
+
+    private static final class CapturingHttpClient extends HttpClient {
+        private final String responseBody;
+        private HttpRequest lastRequest;
+
+        private CapturingHttpClient(String responseBody) {
+            this.responseBody = responseBody;
+        }
+
+        @Override
+        public Optional<CookieHandler> cookieHandler() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<Duration> connectTimeout() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Redirect followRedirects() {
+            return Redirect.NEVER;
+        }
+
+        @Override
+        public Optional<ProxySelector> proxy() {
+            return Optional.empty();
+        }
+
+        @Override
+        public SSLContext sslContext() {
+            return null;
+        }
+
+        @Override
+        public SSLParameters sslParameters() {
+            return null;
+        }
+
+        @Override
+        public Optional<Authenticator> authenticator() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Version version() {
+            return Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<Executor> executor() {
+            return Optional.empty();
+        }
+
+        @Override
+        public <T> java.net.http.HttpResponse<T> send(
+                HttpRequest request,
+                java.net.http.HttpResponse.BodyHandler<T> responseBodyHandler
+        ) {
+            this.lastRequest = request;
+            return new java.net.http.HttpResponse<>() {
+                @Override
+                public int statusCode() {
+                    return 200;
+                }
+
+                @Override
+                public HttpRequest request() {
+                    return request;
+                }
+
+                @Override
+                public Optional<java.net.http.HttpResponse<T>> previousResponse() {
+                    return Optional.empty();
+                }
+
+                @Override
+                public HttpHeaders headers() {
+                    return HttpHeaders.of(Map.of(), (name, value) -> true);
+                }
+
+                @Override
+                public T body() {
+                    return (T) responseBody;
+                }
+
+                @Override
+                public Optional<SSLSession> sslSession() {
+                    return Optional.empty();
+                }
+
+                @Override
+                public URI uri() {
+                    return request.uri();
+                }
+
+                @Override
+                public Version version() {
+                    return Version.HTTP_1_1;
+                }
+            };
+        }
+
+        @Override
+        public <T> CompletableFuture<java.net.http.HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                java.net.http.HttpResponse.BodyHandler<T> responseBodyHandler
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <T> CompletableFuture<java.net.http.HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                java.net.http.HttpResponse.BodyHandler<T> responseBodyHandler,
+                java.net.http.HttpResponse.PushPromiseHandler<T> pushPromiseHandler
+        ) {
+            throw new UnsupportedOperationException();
         }
     }
 }

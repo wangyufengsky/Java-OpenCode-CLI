@@ -34,7 +34,7 @@ class AgentBridgeTaskRunnerTest {
                 0
         ));
 
-        assertThat(client.prompts).containsExactly("MESSAGE\n\nPROMPT");
+        assertThat(client.prompts).containsExactly("/session-clear", "MESSAGE\n\nPROMPT");
         assertThat(result.validationOk()).isTrue();
         assertThat(result.completedByOutput()).isTrue();
         assertThat(Files.readString(tempDir.resolve("run").resolve("agent-status.json")))
@@ -61,8 +61,9 @@ class AgentBridgeTaskRunnerTest {
 
         assertThat(result.validationOk()).isTrue();
         assertThat(result.correctionRounds()).isEqualTo(1);
-        assertThat(client.prompts).hasSize(2);
-        assertThat(client.prompts.get(1))
+        assertThat(client.prompts).hasSize(3);
+        assertThat(client.prompts.get(0)).isEqualTo("/session-clear");
+        assertThat(client.prompts.get(2))
                 .contains("summary missing")
                 .contains("原 prompt 文件：" + promptFile)
                 .contains("AgentBridge 任务")
@@ -82,7 +83,8 @@ class AgentBridgeTaskRunnerTest {
                 1
         ));
 
-        assertThat(client.prompts).hasSize(2);
+        assertThat(client.prompts).hasSize(3);
+        assertThat(client.prompts.get(0)).isEqualTo("/session-clear");
         assertThat(result.validationOk()).isFalse();
         assertThat(result.validationError()).isEqualTo("summary missing");
         assertThat(result.correctionRounds()).isEqualTo(1);

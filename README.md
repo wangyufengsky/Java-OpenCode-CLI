@@ -338,7 +338,7 @@ agentbridge:
 | `test.jacoco-jvm-arg-base` | 可选 JVM 基础参数，会追加在 JaCoCo agent 参数前。 |
 | `agentbridge.web-base-url` | AgentBridge Web Access 地址，用于提交 prompt 和轮询状态。 |
 | `agentbridge.mcp-url` | AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。 |
-| `agentbridge.timeout-minutes` | 单个单元测试生成 task 的最大等待时间。 |
+| `agentbridge.timeout-minutes` | 单个单元测试生成 task 的最大等待时间；JaCoCo/Maven 验收命令的 MCP 请求等待时间也会按该值放大。 |
 | `agentbridge.max-attempts` | 当前 batch 被判定失败前最多启动 agent 的次数。 |
 
 ## 运行时行为

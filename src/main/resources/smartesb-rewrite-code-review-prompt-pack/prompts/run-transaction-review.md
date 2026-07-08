@@ -50,6 +50,10 @@
 
 写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
 
+所有文件写入都必须分段执行，优先按 JSON 字段、Markdown 标题、表格行、finding、调用链阶段、协议域或模板占位符拆分。
+单次写入不超过 6000 字符、120 行；不要一次性重写完整大文件。
+需要追加较长内容时，先写小块，再继续替换下一个占位符或下一段内容。
+
 `AgentBridge` MCP 读写工具不可用时必须写入失败说明，不要在最终回答中粘贴完整报告替代写文件。
 
 不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 读取或写入 task JSON、报告、摘要、代码文件、映射文档或详细设计。

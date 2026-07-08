@@ -520,6 +520,10 @@ class GitReportOrchestratorIntegrationTest {
         server.createContext("/prompt", exchange -> {
             try {
                 String prompt = promptFromBody(exchange);
+                if (isSessionClear(prompt)) {
+                    respond(exchange, 200, "{}");
+                    return;
+                }
                 ids.incrementAndGet();
                 runningPolls.set(1);
                 prompts.add(prompt);
@@ -542,6 +546,10 @@ class GitReportOrchestratorIntegrationTest {
                 if (path.endsWith("/prompt_async")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                     String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    if (isSessionClear(prompt)) {
+                        respond(exchange, 204, "");
+                        return;
+                    }
                     prompts.add(prompt);
                     writeFakeAgentBridgeOutput(prompt);
                     respond(exchange, 204, "");
@@ -572,7 +580,12 @@ class GitReportOrchestratorIntegrationTest {
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":" + consumeRunningPoll(runningPolls) + "}"));
         server.createContext("/prompt", exchange -> {
             try {
-                prompts.add(promptFromBody(exchange));
+                String prompt = promptFromBody(exchange);
+                if (isSessionClear(prompt)) {
+                    respond(exchange, 200, "{}");
+                    return;
+                }
+                prompts.add(prompt);
                 ids.incrementAndGet();
                 runningPolls.set(1);
                 respond(exchange, 200, "{}");
@@ -592,7 +605,12 @@ class GitReportOrchestratorIntegrationTest {
                 String path = exchange.getRequestURI().getPath();
                 if (path.endsWith("/prompt_async")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-                    prompts.add(objectMapper.readTree(body).at("/parts/0/text").asText());
+                    String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    if (isSessionClear(prompt)) {
+                        respond(exchange, 204, "");
+                        return;
+                    }
+                    prompts.add(prompt);
                     respond(exchange, 204, "");
                     return;
                 }
@@ -625,6 +643,10 @@ class GitReportOrchestratorIntegrationTest {
         server.createContext("/prompt", exchange -> {
             try {
                 String prompt = promptFromBody(exchange);
+                if (isSessionClear(prompt)) {
+                    respond(exchange, 200, "{}");
+                    return;
+                }
                 ids.incrementAndGet();
                 runningPolls.set(1);
                 prompts.add(prompt);
@@ -658,6 +680,10 @@ class GitReportOrchestratorIntegrationTest {
                 if (path.endsWith("/prompt_async")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                     String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    if (isSessionClear(prompt)) {
+                        respond(exchange, 204, "");
+                        return;
+                    }
                     prompts.add(prompt);
                     int active = activeAgentBridgeTasks.incrementAndGet();
                     maxActiveAgentBridgeTasks.accumulateAndGet(active, Math::max);
@@ -701,6 +727,10 @@ class GitReportOrchestratorIntegrationTest {
         server.createContext("/prompt", exchange -> {
             try {
                 String prompt = promptFromBody(exchange);
+                if (isSessionClear(prompt)) {
+                    respond(exchange, 200, "{}");
+                    return;
+                }
                 ids.incrementAndGet();
                 runningPolls.set(1);
                 prompts.add(prompt);
@@ -732,6 +762,10 @@ class GitReportOrchestratorIntegrationTest {
                 if (path.endsWith("/prompt_async")) {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                     String prompt = objectMapper.readTree(body).at("/parts/0/text").asText();
+                    if (isSessionClear(prompt)) {
+                        respond(exchange, 204, "");
+                        return;
+                    }
                     prompts.add(prompt);
                     if (prompt.contains("detail_json:")) {
                         Path detailPath = Path.of(extractPath(prompt, "detail_json:"));
@@ -890,6 +924,10 @@ class GitReportOrchestratorIntegrationTest {
     private String promptFromBody(HttpExchange exchange) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         return objectMapper.readTree(body).path("text").asText();
+    }
+
+    private boolean isSessionClear(String prompt) {
+        return "/session-clear".equals(prompt);
     }
 
     private boolean consumeRunningPoll(AtomicInteger runningPolls) {

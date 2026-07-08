@@ -40,6 +40,9 @@ class PromptPackContractTest {
         assertThat(worker).contains(
                 "读取 `detail_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入",
                 "写入个人报告和质量摘要时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "必须先完成质量分析并写入 `quality-summary.json`，再写 `person-report.md`",
                 "质量分析只能基于 `detail.changed_regions`",
                 "不得打开或通读 `detail.top_files[].path` 对应的完整文件",
@@ -54,6 +57,9 @@ class PromptPackContractTest {
                 "以 `synthesis_inputs.code_snippets` 中 Java 已压缩后的内容为准",
                 "读取 `synthesis_inputs_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入",
                 "写入最终报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "将 `|` 转义为 `\\|`",
@@ -81,6 +87,9 @@ class PromptPackContractTest {
         assertThat(worker + "\n" + module).contains(
                 "读取 task JSON 和准备脚本输出时，使用当前 AgentBridge 环境可用能力读取任务输入",
                 "写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "只能替换 task JSON 中 `output_placeholders` 列出的占位符",
@@ -105,6 +114,9 @@ class PromptPackContractTest {
         assertThat(synthesis).contains(
                 "读取汇总输入和审查项摘要时，使用当前 AgentBridge 环境可用能力读取任务输入",
                 "写入 `index.md` 和 `summary.md` 时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "`AgentBridge` MCP 读写工具不可用时必须写入失败说明",
                 "只能替换 `index_inputs.output_placeholders` 中列出的占位符"
         );
@@ -154,6 +166,9 @@ class PromptPackContractTest {
         assertThat(combined).contains(
                 "读取任务输入、XML、.biz、Java 候选文件和摘要时，使用当前 AgentBridge 环境可用能力读取任务输入",
                 "写入 Markdown 和 JSON 报告时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "当前能力不可用或证据不足时，在输出文件中说明",
                 "不得使用 shell、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i`",
                 "不要在执行前搜索、读取、加载或调用任何外部 skill、SKILL.md"
@@ -186,6 +201,9 @@ class PromptPackContractTest {
                 "batch_input_json:",
                 "上一轮 Java 验收失败摘要",
                 "只允许修改 `target_test_files` 或 `allowed_write_globs` 内的测试文件",
+                "所有文件写入都必须分段执行",
+                "单次写入不超过 6000 字符、120 行",
+                "不要一次性重写完整大文件",
                 "不要修改生产代码、构建脚本、配置文件",
                 "只需修改当前批次允许范围内的测试文件",
                 "最终只回复简短完成信息"

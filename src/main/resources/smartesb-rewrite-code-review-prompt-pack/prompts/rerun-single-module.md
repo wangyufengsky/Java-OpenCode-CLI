@@ -17,4 +17,5 @@
 7. 模块审查不要求交易名、映射文档、old-8583-doc 或 8583 到 JSON 映射关系存在。
 8. 无法完成 只允许用于 `AgentBridge` MCP 受控读写工具不可用、目标路径不可写、预创建输出文件缺失或必需输入文件不存在；任务复杂、搜索结果少、想使用额外任务 session、找不到同名交易都不是 无法完成 理由。
 9. 证据不足时必须写 `summary_json`，`status` 设为 `partial`，并在 `unverified` 中说明剩余范围；完成文件写入后回复简短完成信息。
-10. 禁止用 shell、bash、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 做补审读写。
+10. 写文件使用当前 AgentBridge 环境可用能力 文件编辑工具。所有文件写入都必须分段执行，优先按 JSON 字段、Markdown 标题、表格行、finding、调用链阶段或模板占位符拆分；单次写入不超过 6000 字符、120 行；不要一次性重写完整大文件。
+11. 禁止用 shell、bash、PowerShell、Python、`cat`、`type`、`Get-Content`、重定向、`cat >` 或 `sed -i` 做补审读写。

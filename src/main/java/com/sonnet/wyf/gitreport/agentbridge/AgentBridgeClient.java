@@ -39,6 +39,10 @@ public class AgentBridgeClient {
         requireSuccess(response, "AgentBridge POST /prompt failed");
     }
 
+    public void clearSession(URI webBaseUrl) throws IOException, InterruptedException {
+        postPrompt(webBaseUrl, "/session-clear");
+    }
+
     public void waitUntilIdle(URI webBaseUrl, Duration timeout, Duration pollInterval) throws Exception {
         long deadline = System.nanoTime() + timeout.toNanos();
         long startupGraceNanos = Math.min(Duration.ofSeconds(30).toNanos(), timeout.toNanos());
@@ -78,7 +82,7 @@ public class AgentBridgeClient {
         body.put("method", "tools/call");
         body.set("params", params);
 
-        HttpResponse<String> response = sendJson(mcpUrl, body);
+        HttpResponse<String> response = sendJson(mcpUrl, body, toolCallTimeout(arguments));
         requireSuccess(response, "AgentBridge MCP tools/call failed: " + name);
         JsonNode root = objectMapper.readTree(response.body());
         if (root.hasNonNull("error")) {
@@ -90,12 +94,26 @@ public class AgentBridgeClient {
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body) throws IOException, InterruptedException {
+        return sendJson(uri, body, Duration.ofSeconds(30));
+    }
+
+    private HttpResponse<String> sendJson(URI uri, JsonNode body, Duration timeout) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofSeconds(30))
+                .timeout(timeout)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private Duration toolCallTimeout(JsonNode arguments) {
+        if (arguments != null && arguments.path("timeout").canConvertToInt()) {
+            int seconds = arguments.path("timeout").asInt();
+            if (seconds > 0) {
+                return Duration.ofSeconds(seconds).plusSeconds(30);
+            }
+        }
+        return Duration.ofSeconds(30);
     }
 
     private void requireSuccess(HttpResponse<String> response, String message) {

@@ -45,6 +45,12 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         chain(properties, client).run(request("full", "", ""));
 
         assertThat(client.prompts).hasSize(2);
+        assertThat(client.allPrompts).containsSubsequence(
+                "/session-clear",
+                client.prompts.get(0),
+                "/session-clear",
+                client.prompts.get(1)
+        );
         assertThat(client.prompts.get(0))
                 .contains("batch_input_json:", "上一轮 Java 验收失败摘要", "测试类不存在")
                 .contains("只需修改当前批次允许范围内的测试文件")
@@ -90,6 +96,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         chain(properties, client).run(request("full", "", ""));
 
         assertThat(client.prompts).isEmpty();
+        assertThat(client.allPrompts).isEmpty();
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
                 .contains("test-batch-001-orderservice", "accepted: `1`");
     }
@@ -104,6 +111,12 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         chain(properties, client).run(request("full", "", ""));
 
         assertThat(client.prompts).hasSize(2);
+        assertThat(client.allPrompts).containsSubsequence(
+                "/session-clear",
+                client.prompts.get(0),
+                "/session-clear",
+                client.prompts.get(1)
+        );
         assertThat(client.prompts.get(1)).contains("测试类不存在");
     }
 
@@ -121,6 +134,12 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .hasMessageContaining("测试类不存在");
 
         assertThat(client.prompts).hasSize(2);
+        assertThat(client.allPrompts).containsSubsequence(
+                "/session-clear",
+                client.prompts.get(0),
+                "/session-clear",
+                client.prompts.get(1)
+        );
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
                 .contains("failed: `1`");
     }
@@ -296,6 +315,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
 
     private class FakeAgentBridgeClient extends AgentBridgeClient {
         protected final ProjectUnitTestGenerationProperties properties;
+        protected final CopyOnWriteArrayList<String> allPrompts = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> toolNames = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> commands = new CopyOnWriteArrayList<>();
@@ -307,6 +327,10 @@ class ProjectUnitTestGenerationWorkflowChainTest {
 
         @Override
         public void postPrompt(URI webBaseUrl, String prompt) {
+            allPrompts.add(prompt);
+            if ("/session-clear".equals(prompt)) {
+                return;
+            }
             prompts.add(prompt);
             try {
                 createTargetTest(prompt);

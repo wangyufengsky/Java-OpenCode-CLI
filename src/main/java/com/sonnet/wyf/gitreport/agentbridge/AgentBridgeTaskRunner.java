@@ -51,6 +51,7 @@ public class AgentBridgeTaskRunner {
         log.info("Starting AgentBridge task: taskId={}, title={}, runDir={}, timeoutMinutes={}, validationSettleSeconds={}, validationMaxCorrections={}",
                 monitor.taskId(), spec.title(), spec.runDir(), spec.timeoutMinutes(), spec.validationSettleSeconds(), spec.validationMaxCorrections());
         monitor.write("created", "created", false);
+        client.clearSession(spec.webBaseUrl());
         client.postPrompt(spec.webBaseUrl(), text);
         monitor.write("running", "submitted", false);
 
