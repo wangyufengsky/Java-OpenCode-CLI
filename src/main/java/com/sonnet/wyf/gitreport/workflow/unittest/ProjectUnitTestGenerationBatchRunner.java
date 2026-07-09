@@ -137,6 +137,7 @@ public class ProjectUnitTestGenerationBatchRunner {
         String testClass = testClassFqn(targetTestFile);
         String sourceClass = sourceClass(batch);
         String module = moduleName(targetTestFile);
+        boolean requireCoverage = requireCoverage(batch, properties);
         int threshold = threshold(batch, properties);
 
         List<String> failures = new ArrayList<>();
@@ -152,16 +153,18 @@ public class ProjectUnitTestGenerationBatchRunner {
         if (failures.isEmpty()) {
             Path coverageReport = coverageReportPath(properties.getProject().getRepo(), module);
             Path coverageExec = coverageExecPath(properties.getProject().getRepo(), module);
-            Files.deleteIfExists(coverageReport);
-            Files.deleteIfExists(coverageExec);
+            if (requireCoverage) {
+                Files.deleteIfExists(coverageReport);
+                Files.deleteIfExists(coverageExec);
+            }
             AgentBridgeClient.ToolResponse run = client.callTool(
                     mcpUrl,
                     "run_command",
-                    runCommandArguments(properties, testClass, module, coverageExec)
+                    runCommandArguments(properties, testClass, module, coverageExec, requireCoverage)
             );
             if (!commandSucceeded(run)) {
                 failures.add("目标测试类运行失败: " + testClass + " " + run.text());
-            } else {
+            } else if (requireCoverage) {
                 coverage = jacocoCoverage(coverageReport, sourceClass);
                 if (coverage.percent() < 0) {
                     failures.add("覆盖率无数据: " + sourceClass);
@@ -171,7 +174,8 @@ public class ProjectUnitTestGenerationBatchRunner {
             }
         }
         if (failures.isEmpty()) {
-            return new Acceptance(true, "accepted: " + testClass + ", coverage=" + coverage.percent() + "%");
+            String suffix = requireCoverage ? ", coverage=" + coverage.percent() + "%" : ", coverage=skipped";
+            return new Acceptance(true, "accepted: " + testClass + suffix);
         }
         return new Acceptance(false, String.join("; ", failures));
     }
@@ -198,36 +202,45 @@ public class ProjectUnitTestGenerationBatchRunner {
             ProjectUnitTestGenerationProperties properties,
             String testClass,
             String module,
-            Path coverageExec
+            Path coverageExec,
+            boolean requireCoverage
     ) {
-        String jacocoVersion = properties.getTest().getJacocoVersion();
-        Path agentJar = Path.of(System.getProperty("user.home"))
-                .resolve(".m2/repository/org/jacoco/org.jacoco.agent")
-                .resolve(jacocoVersion)
-                .resolve("org.jacoco.agent-" + jacocoVersion + "-runtime.jar");
-        String javaAgent = "-javaagent:" + agentJar.toAbsolutePath().normalize()
-                + "=destfile=" + coverageExec.toAbsolutePath().normalize();
-        String jvmArgBase = properties.getTest().getJacocoJvmArgBase().trim();
-        String jvmArgs = jvmArgBase.isBlank() ? javaAgent : jvmArgBase + " " + javaAgent;
-
         StringBuilder command = new StringBuilder();
         command.append("cd ").append(shellQuote(properties.getProject().getRepo().toAbsolutePath().normalize().toString()));
-        command.append(" && mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get");
-        command.append(" -Dartifact=").append(shellQuote("org.jacoco:org.jacoco.agent:" + jacocoVersion + ":jar:runtime"));
-        command.append(" && mvn -q");
-        if (!module.isBlank()) {
-            command.append(" -pl ").append(shellQuote(module)).append(" -am");
+        if (requireCoverage) {
+            String jacocoVersion = properties.getTest().getJacocoVersion();
+            Path agentJar = Path.of(System.getProperty("user.home"))
+                    .resolve(".m2/repository/org/jacoco/org.jacoco.agent")
+                    .resolve(jacocoVersion)
+                    .resolve("org.jacoco.agent-" + jacocoVersion + "-runtime.jar");
+            String javaAgent = "-javaagent:" + agentJar.toAbsolutePath().normalize()
+                    + "=destfile=" + coverageExec.toAbsolutePath().normalize();
+            String jvmArgBase = properties.getTest().getJacocoJvmArgBase().trim();
+            String jvmArgs = jvmArgBase.isBlank() ? javaAgent : jvmArgBase + " " + javaAgent;
+            command.append(" && mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get");
+            command.append(" -Dartifact=").append(shellQuote("org.jacoco:org.jacoco.agent:" + jacocoVersion + ":jar:runtime"));
+            command.append(" && mvn -q");
+            if (!module.isBlank()) {
+                command.append(" -pl ").append(shellQuote(module)).append(" -am");
+            }
+            command.append(" -Dtest=").append(shellQuote(simpleName(testClass)));
+            command.append(" ").append(shellQuote("-D" + properties.getTest().getJacocoJvmArgProperty() + "=" + jvmArgs));
+            command.append(" test");
+            command.append(" ").append(shellQuote("org.jacoco:jacoco-maven-plugin:" + jacocoVersion + ":report"));
+        } else {
+            command.append(" && mvn -q");
+            if (!module.isBlank()) {
+                command.append(" -pl ").append(shellQuote(module)).append(" -am");
+            }
+            command.append(" -Dtest=").append(shellQuote(simpleName(testClass)));
+            command.append(" test");
         }
-        command.append(" -Dtest=").append(shellQuote(simpleName(testClass)));
-        command.append(" ").append(shellQuote("-D" + properties.getTest().getJacocoJvmArgProperty() + "=" + jvmArgs));
-        command.append(" test");
-        command.append(" ").append(shellQuote("org.jacoco:jacoco-maven-plugin:" + jacocoVersion + ":report"));
         int timeoutSeconds = Math.max(60, properties.getAgentbridge().getTimeoutMinutes() * 60);
         return objectMapper.createObjectNode()
                 .put("command", command.toString())
                 .put("timeout", timeoutSeconds)
                 .put("max_chars", 12000)
-                .put("title", "Run unit test with JaCoCo");
+                .put("title", requireCoverage ? "Run unit test with JaCoCo" : "Run unit test");
     }
 
     private boolean commandSucceeded(AgentBridgeClient.ToolResponse response) {
@@ -302,6 +315,14 @@ public class ProjectUnitTestGenerationBatchRunner {
             return number.intValue();
         }
         return properties.getTest().getCoverageThresholdPercent();
+    }
+
+    private boolean requireCoverage(Map<String, Object> batch, ProjectUnitTestGenerationProperties properties) {
+        Object coverage = batch.get("coverage");
+        if (coverage instanceof Map<?, ?> map && map.get("required") instanceof Boolean required) {
+            return required;
+        }
+        return properties.getTest().isRequireCoverage();
     }
 
     private String sourceClass(Map<String, Object> batch) {

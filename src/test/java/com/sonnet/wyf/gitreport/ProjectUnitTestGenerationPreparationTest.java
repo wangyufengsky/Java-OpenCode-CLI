@@ -55,6 +55,7 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(batch.has("rules")).isFalse();
         assertThat(batch.has(legacyBatchField("summary", "_json"))).isFalse();
         assertThat(batch.has(legacyBatchField("sta", "tus"))).isFalse();
+        assertThat(batch.path("coverage").path("required").asBoolean()).isFalse();
         assertThat(batch.path("coverage").path("threshold_percent").asInt()).isEqualTo(90);
         assertThat(batch.path("coverage").path("scope").asText()).isEqualTo("class");
         assertThat(batch.path("allowed_write_globs")).extracting(JsonNode::asText)

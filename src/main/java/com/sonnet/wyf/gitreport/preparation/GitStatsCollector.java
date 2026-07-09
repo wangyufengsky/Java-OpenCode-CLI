@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
 import com.sonnet.wyf.gitreport.core.GitReportConstants;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -20,6 +22,12 @@ import java.util.Map;
 import java.util.Set;
 
 public class GitStatsCollector {
+    private static final Logger log = LoggerFactory.getLogger(GitStatsCollector.class);
+    private static final int LARGE_COMMIT_HUNK_LINE_LIMIT = Integer.getInteger(
+            "gitreport.git.largeCommitHunkLineLimit",
+            50_000
+    );
+
     private final CommandExecutor commandExecutor;
     private final WorkloadScoreCalculator scoreCalculator;
     private final ObjectMapper objectMapper;
@@ -43,12 +51,47 @@ public class GitStatsCollector {
         FileScopeFilter filter = FileScopeFilter.withUserPatterns(properties.getGit().getInclude(), properties.getGit().getExclude());
         Map<String, String> authorMap = loadAuthorMap(properties.getGit().getAuthorMap());
         List<Map<String, String>> commits = parseCommits(repo, properties.getGit().getRevision(), properties.getGit().getSince(), properties.getGit().getUntil(), properties.getGit().isIncludeMerges());
+        log.info("Collected git commits for contribution data: repo={}, revision={}, since={}, until={}, includeMerges={}, commitCount={}, include={}, exclude={}",
+                repo,
+                properties.getGit().getRevision(),
+                properties.getGit().getSince(),
+                properties.getGit().getUntil(),
+                properties.getGit().isIncludeMerges(),
+                commits.size(),
+                filter.includes(),
+                filter.excludes());
         Map<String, Map<String, Object>> authors = new LinkedHashMap<>();
+        int processedCommits = 0;
+        int countedCommits = 0;
+        int skippedCommits = 0;
         for (Map<String, String> commit : commits) {
+            processedCommits++;
+            long startedNanos = System.nanoTime();
+            String shortHash = shortHash(commit.get("hash"));
+            log.info("Preparing git contribution commit {}/{}: hash={}, author={}, date={}, subject=\"{}\"",
+                    processedCommits,
+                    commits.size(),
+                    shortHash,
+                    commit.get("name") + " <" + commit.get("email") + ">",
+                    commit.get("date"),
+                    commit.get("subject"));
             List<Map<String, Object>> numstatRows = diffParser.parseNumstat(repo, commit.get("hash"), filter);
             if (numstatRows.isEmpty()) {
+                skippedCommits++;
+                log.info("Skipped git contribution commit {}/{}: hash={}, reason=no_counted_files, elapsedMillis={}",
+                        processedCommits,
+                        commits.size(),
+                        shortHash,
+                        elapsedMillis(startedNanos));
                 continue;
             }
+            int changedLineCount = changedLineCount(numstatRows);
+            log.info("Read git contribution numstat {}/{}: hash={}, countedFiles={}, changedLines={}",
+                    processedCommits,
+                    commits.size(),
+                    shortHash,
+                    numstatRows.size(),
+                    changedLineCount);
             String author = normalizeAuthor(commit.get("name"), commit.get("email"), authorMap);
             Map<String, Object> stats = authors.computeIfAbsent(author, this::emptyAuthor);
             increment(stats, "commit_count", 1);
@@ -58,13 +101,24 @@ public class GitStatsCollector {
                     "date", commit.get("date"),
                     "subject", commit.get("subject")
             ));
-            Map<String, Map<String, Integer>> nonComment = diffParser.parseNonCommentDiff(repo, commit.get("hash"), filter);
-            list(stats, "changed_regions").addAll(diffParser.parseChangedRegions(
-                    repo,
-                    commit.get("hash"),
-                    filter,
-                    properties.getDetailInput().getChangedRegionLines()
-            ));
+            Map<String, Map<String, Integer>> nonComment;
+            if (changedLineCount > LARGE_COMMIT_HUNK_LINE_LIMIT) {
+                nonComment = estimateNonCommentFromNumstat(numstatRows);
+                log.warn("Skipping hunk-level git contribution parsing for large commit: hash={}, countedFiles={}, changedLines={}, limit={}, skippedPhases=non_comment_diff,changed_regions",
+                        shortHash,
+                        numstatRows.size(),
+                        changedLineCount,
+                        LARGE_COMMIT_HUNK_LINE_LIMIT);
+            } else {
+                nonComment = diffParser.parseNonCommentDiff(repo, commit.get("hash"), filter);
+                list(stats, "changed_regions").addAll(diffParser.parseChangedRegions(
+                        repo,
+                        commit.get("hash"),
+                        filter,
+                        properties.getDetailInput().getChangedRegionLines()
+                ));
+            }
+            countedCommits++;
             for (Map<String, Object> row : numstatRows) {
                 String path = row.get("path").toString();
                 Map<String, Integer> nc = nonComment.getOrDefault(path, Map.of("added", 0, "deleted", 0));
@@ -79,8 +133,21 @@ public class GitStatsCollector {
                 increment(stats, "non_comment_deleted", ncDeleted);
                 addFileStats(stats, path, added, deleted, ncAdded, ncDeleted);
             }
+            log.info("Prepared git contribution commit {}/{}: hash={}, author={}, countedFiles={}, elapsedMillis={}",
+                    processedCommits,
+                    commits.size(),
+                    shortHash,
+                    author,
+                    numstatRows.size(),
+                    elapsedMillis(startedNanos));
         }
         List<Map<String, Object>> ranked = finalizeAuthors(authors.values());
+        log.info("Prepared git contribution data: repo={}, commitCount={}, countedCommits={}, skippedCommits={}, authorCount={}",
+                repo,
+                commits.size(),
+                countedCommits,
+                skippedCommits,
+                ranked.size());
         Map<String, Object> metadata = new LinkedHashMap<>();
         Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
         String generatedAt = OffsetDateTime.now().toString();
@@ -136,6 +203,33 @@ public class GitStatsCollector {
             }
         }
         return commits;
+    }
+
+    private String shortHash(String hash) {
+        return hash == null ? "" : hash.substring(0, Math.min(12, hash.length()));
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000;
+    }
+
+    private int changedLineCount(List<Map<String, Object>> numstatRows) {
+        int total = 0;
+        for (Map<String, Object> row : numstatRows) {
+            total += intValue(row, "added") + intValue(row, "deleted");
+        }
+        return total;
+    }
+
+    private Map<String, Map<String, Integer>> estimateNonCommentFromNumstat(List<Map<String, Object>> numstatRows) {
+        Map<String, Map<String, Integer>> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : numstatRows) {
+            result.put(row.get("path").toString(), Map.of(
+                    "added", intValue(row, "added"),
+                    "deleted", intValue(row, "deleted")
+            ));
+        }
+        return result;
     }
 
     private Map<String, String> loadAuthorMap(Path path) throws IOException {

@@ -147,10 +147,21 @@ public class ProjectUnitTestGenerationProperties {
     }
 
     public static class Test {
+        private boolean requireCoverage = false;
         private int coverageThresholdPercent = 90;
         private String jacocoVersion = "0.8.15";
         private String jacocoJvmArgProperty = "argLine";
         private String jacocoJvmArgBase = "";
+
+        @JsonProperty("require-coverage")
+        public boolean isRequireCoverage() {
+            return requireCoverage;
+        }
+
+        @JsonProperty("require-coverage")
+        public void setRequireCoverage(boolean requireCoverage) {
+            this.requireCoverage = requireCoverage;
+        }
 
         @JsonProperty("coverage-threshold-percent")
         public int getCoverageThresholdPercent() {

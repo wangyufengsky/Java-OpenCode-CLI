@@ -10,7 +10,10 @@ import com.sonnet.wyf.gitreport.preparation.GitStatsCollector;
 import com.sonnet.wyf.gitreport.preparation.ReportPreparationWriter;
 import com.sonnet.wyf.gitreport.scoring.WorkloadScoreCalculator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,11 +22,47 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(OutputCaptureExtension.class)
 class GitReportPreparationIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void preparationLogsCommitCollectionProgress(CapturedOutput output) throws Exception {
+        Path repo = tempDir.resolve("repo-logging");
+        Path out = tempDir.resolve("out-logging");
+        Files.createDirectories(repo);
+        GitTestSupport.run(repo, "git", "init", "-q");
+        GitTestSupport.run(repo, "git", "config", "user.name", "Alice");
+        GitTestSupport.run(repo, "git", "config", "user.email", "alice@example.com");
+        Files.writeString(repo.resolve("First.java"), "class First {}\n");
+        GitTestSupport.run(repo, "git", "add", ".");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "first change");
+        Files.writeString(repo.resolve("Second.java"), "class Second {}\n");
+        GitTestSupport.run(repo, "git", "add", ".");
+        GitTestSupport.run(repo, "git", "commit", "-q", "-m", "second change");
+
+        GitReportProperties properties = new GitReportProperties();
+        properties.getPaths().setRepo(repo);
+        properties.getPaths().setOut(out);
+        properties.getGit().setSince(LocalDate.of(2000, 1, 1));
+        properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
+
+        GitReportPreparation preparation = new GitReportPreparation(
+                new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper),
+                new ReportPreparationWriter(objectMapper)
+        );
+        preparation.prepare(properties);
+
+        assertThat(output).contains("Collected git commits for contribution data: repo=")
+                .contains("commitCount=2")
+                .contains("Preparing git contribution commit 1/2")
+                .contains("Preparing git contribution commit 2/2")
+                .contains("Prepared git contribution commit 1/2")
+                .contains("Prepared git contribution data: repo=");
+    }
 
     @Test
     void javaPreparationCreatesSummaryIndexInputsDetailsAndTemplateSkeletons() throws Exception {

@@ -422,6 +422,7 @@ public class ProjectUnitTestGenerationPreparation {
 
     private Map<String, Object> coveragePolicy(ProjectUnitTestGenerationProperties properties) {
         return Map.of(
+                "required", properties.getTest().isRequireCoverage(),
                 "threshold_percent", clampPercent(properties.getTest().getCoverageThresholdPercent()),
                 "scope", "class"
         );

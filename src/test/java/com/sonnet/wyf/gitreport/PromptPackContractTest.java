@@ -206,6 +206,7 @@ class PromptPackContractTest {
                 "不要一次性重写完整大文件",
                 "不要修改生产代码、构建脚本、配置文件",
                 "只需修改当前批次允许范围内的测试文件",
+                "只有 `batch_input_json.coverage.required` 为 `true` 时才验收覆盖率",
                 "最终只回复简短完成信息"
         );
         assertThat(worker).doesNotContain(

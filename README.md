@@ -308,6 +308,7 @@ source:
     - "**/generated/**"
 
 test:
+  require-coverage: false
   coverage-threshold-percent: 90
   jacoco-version: "0.8.15"
   jacoco-jvm-arg-property: "sqlite.native.access.argument"
@@ -332,10 +333,11 @@ agentbridge:
 | `source.package-paths` | 要处理的包名或源码路径。为空时扫描全部 `src/main/java`。 |
 | `source.include` | 可选 include glob。 |
 | `source.exclude` | 排除构建输出、生成代码等不应处理路径的 glob。 |
-| `test.coverage-threshold-percent` | 当前源码类达到该覆盖率百分比后，当前 batch 才算达标。 |
-| `test.jacoco-version` | 验收命令使用的 JaCoCo 版本。 |
-| `test.jacoco-jvm-arg-property` | 目标项目 Maven/Surefire 实际读取的 JVM 参数属性；普通项目通常是 `argLine`。 |
-| `test.jacoco-jvm-arg-base` | 可选 JVM 基础参数，会追加在 JaCoCo agent 参数前。 |
+| `test.require-coverage` | 是否要求覆盖率达标。默认 `false`；开启后才执行 JaCoCo 覆盖率验收。 |
+| `test.coverage-threshold-percent` | `test.require-coverage=true` 时，当前源码类达到该覆盖率百分比后，当前 batch 才算达标。 |
+| `test.jacoco-version` | `test.require-coverage=true` 时，验收命令使用的 JaCoCo 版本。 |
+| `test.jacoco-jvm-arg-property` | `test.require-coverage=true` 时，目标项目 Maven/Surefire 实际读取的 JVM 参数属性；普通项目通常是 `argLine`。 |
+| `test.jacoco-jvm-arg-base` | `test.require-coverage=true` 时，可选 JVM 基础参数，会追加在 JaCoCo agent 参数前。 |
 | `agentbridge.web-base-url` | AgentBridge Web Access 地址，用于提交 prompt 和轮询状态。 |
 | `agentbridge.mcp-url` | AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。 |
 | `agentbridge.timeout-minutes` | 单个单元测试生成 task 的最大等待时间；JaCoCo/Maven 验收命令的 MCP 请求等待时间也会按该值放大。 |

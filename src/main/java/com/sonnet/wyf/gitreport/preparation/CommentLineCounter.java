@@ -71,7 +71,30 @@ public class CommentLineCounter {
     }
 
     private String stripStringLiterals(String line) {
-        return line.replaceAll("(['\"])(?:\\\\.|(?!\\1).)*\\1", "\"\"");
+        StringBuilder result = new StringBuilder(line.length());
+        Character quote = null;
+        boolean escaped = false;
+        for (int index = 0; index < line.length(); index++) {
+            char current = line.charAt(index);
+            if (quote == null) {
+                if (current == '\'' || current == '"') {
+                    quote = current;
+                    result.append('"');
+                } else {
+                    result.append(current);
+                }
+                continue;
+            }
+            if (escaped) {
+                escaped = false;
+            } else if (current == '\\') {
+                escaped = true;
+            } else if (current == quote) {
+                quote = null;
+                result.append('"');
+            }
+        }
+        return result.toString();
     }
 
     private String suffix(String path) {

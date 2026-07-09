@@ -26,6 +26,7 @@ source:
     - "**/generated/**"
 
 test:
+  require-coverage: false
   coverage-threshold-percent: 90
   jacoco-version: "0.8.15"
   jacoco-jvm-arg-property: "sqlite.native.access.argument"

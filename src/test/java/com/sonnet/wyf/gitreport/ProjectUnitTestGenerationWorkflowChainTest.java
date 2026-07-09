@@ -69,18 +69,41 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         );
         assertThat(client.toolNames).doesNotContain("run_tests", "get_coverage");
         assertThat(client.commands).allSatisfy(command -> assertThat(command)
-                .contains("org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get")
-                .contains("org.jacoco:org.jacoco.agent:0.8.15:jar:runtime")
-                .contains("-Dsqlite.native.access.argument=--enable-native-access=ALL-UNNAMED -javaagent:")
-                .contains("target/jacoco.exec")
                 .contains("test")
-                .contains("org.jacoco:jacoco-maven-plugin:0.8.15:report"));
+                .doesNotContain(
+                        "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get",
+                        "org.jacoco:org.jacoco.agent",
+                        "-javaagent:",
+                        "target/jacoco.exec",
+                        "org.jacoco:jacoco-maven-plugin"
+                ));
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/user/UserHelperTest.java")).exists();
         assertThat(properties.getPaths().getOut().resolve("verification.json")).doesNotExist();
         assertThat(properties.getPaths().getOut().resolve("agentbridge-results.json")).exists();
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
                 .contains("accepted: `2`", "failed: `0`");
+    }
+
+    @Test
+    void coverageValidationIsOptIn() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getTest().setRequireCoverage(true);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        FakeAgentBridgeClient client = new FakeAgentBridgeClient(properties);
+
+        chain(properties, client).run(request("full", "", ""));
+
+        assertThat(client.commands).allSatisfy(command -> assertThat(command)
+                .contains("org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get")
+                .contains("org.jacoco:org.jacoco.agent:0.8.15:jar:runtime")
+                .contains("-Dsqlite.native.access.argument=--enable-native-access=ALL-UNNAMED -javaagent:")
+                .contains("target/jacoco.exec")
+                .contains("test")
+                .contains("org.jacoco:jacoco-maven-plugin:0.8.15:report"));
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("coverage=95.0%");
     }
 
     @Test

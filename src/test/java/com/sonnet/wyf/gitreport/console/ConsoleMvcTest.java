@@ -148,6 +148,7 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['source.package-paths']").isArray())
                 .andExpect(jsonPath("$.defaults['test.concurrency']").doesNotExist())
                 .andExpect(jsonPath("$.defaults['test.max-types-per-task']").doesNotExist())
+                .andExpect(jsonPath("$.defaults['test.require-coverage']").value(false))
                 .andExpect(jsonPath("$.defaults['test.coverage-threshold-percent']").value(90))
                 .andExpect(jsonPath("$.defaults['test.jacoco-version']").value("0.8.15"))
                 .andExpect(jsonPath("$.defaults['test.jacoco-jvm-arg-property']").value("sqlite.native.access.argument"))
