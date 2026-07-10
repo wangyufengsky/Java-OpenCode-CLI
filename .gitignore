@@ -48,3 +48,7 @@ data/
 .agentbridge/conversation.db*
 .agentbridge/sessions/
 .agentbridge/hooks/.provision-hashes
+
+### Codex local workspaces ###
+.worktrees/
+.superpowers/
