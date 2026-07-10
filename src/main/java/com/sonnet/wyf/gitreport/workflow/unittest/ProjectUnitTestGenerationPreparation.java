@@ -434,10 +434,19 @@ public class ProjectUnitTestGenerationPreparation {
 
     private List<String> allowedWriteGlobs(List<String> targetTestFiles) {
         return targetTestFiles.stream()
-                .map(this::testRootGlob)
+                .flatMap(targetTestFile -> Stream.of(testRootGlob(targetTestFile), modulePomFile(targetTestFile)))
                 .distinct()
                 .sorted()
                 .toList();
+    }
+
+    private String modulePomFile(String targetTestFile) {
+        String marker = "src/test/";
+        int index = targetTestFile.indexOf(marker);
+        if (index <= 0) {
+            return "pom.xml";
+        }
+        return targetTestFile.substring(0, index) + "pom.xml";
     }
 
     private String testRootGlob(String targetTestFile) {

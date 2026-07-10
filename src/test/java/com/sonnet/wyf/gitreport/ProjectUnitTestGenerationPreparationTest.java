@@ -59,7 +59,7 @@ class ProjectUnitTestGenerationPreparationTest {
         assertThat(batch.path("coverage").path("threshold_percent").asInt()).isEqualTo(90);
         assertThat(batch.path("coverage").path("scope").asText()).isEqualTo("class");
         assertThat(batch.path("allowed_write_globs")).extracting(JsonNode::asText)
-                .containsExactly("src/test/**");
+                .containsExactly("pom.xml", "src/test/**");
         assertThat(Files.exists(properties.getPaths().getOut().resolve("test-batches")
                 .resolve(batches.path("batches").get(0).path("batch_id").asText())
                 .resolve("input.json"))).isTrue();
@@ -108,9 +108,9 @@ class ProjectUnitTestGenerationPreparationTest {
 
         JsonNode batches = objectMapper.readTree(properties.getPaths().getOut().resolve("test-batches.json").toFile());
         assertThat(batches.path("batches").get(0).path("allowed_write_globs")).extracting(JsonNode::asText)
-                .containsExactly("upfs-common/src/test/**");
+                .containsExactly("upfs-common/pom.xml", "upfs-common/src/test/**");
         assertThat(batches.path("batches").get(1).path("allowed_write_globs")).extracting(JsonNode::asText)
-                .containsExactly("upfs-cup/src/test/**");
+                .containsExactly("upfs-cup/pom.xml", "upfs-cup/src/test/**");
     }
 
     @Test
