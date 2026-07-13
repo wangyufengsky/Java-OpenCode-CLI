@@ -355,12 +355,12 @@
   list.addEventListener('click', async (event) => {
     const row = event.target.closest('tr[data-schedule-id]');
     if (!row) return;
-    const toggle = event.target.closest('.schedule-switch');
-    if (toggle) {
+    const toggleButton = event.target.closest('.schedule-switch');
+    if (toggleButton) {
       try {
-        await toggle(toggle, row.dataset.scheduleId);
-      } catch (_error) {
-        // toggleSchedule already restores the complete visual and accessible state.
+        await toggle(toggleButton, row.dataset.scheduleId);
+      } catch (error) {
+        pageMessage.textContent = error.message || '启停操作失败';
       }
       return;
     }

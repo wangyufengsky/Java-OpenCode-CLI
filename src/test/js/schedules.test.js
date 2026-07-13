@@ -139,6 +139,11 @@ class FakeButton {
   getAttribute(name) { return this.attributes.get(name) || null; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   querySelector(selector) { return selector === '.schedule-switch-label' ? this.label : null; }
+  closest(selector) {
+    if (selector === '.schedule-switch') return this;
+    if (selector === 'tr[data-schedule-id]') return this.row || null;
+    return null;
+  }
 }
 
 function loadApi() {
@@ -263,6 +268,34 @@ test('toggle success updates cached record, rejects duplicate clicks, and failur
   controller.setFetch(failed);
   await assert.rejects(controller.toggle(button, '7'), /启用失败/);
   assert.equal(controller.getRecords()[0].enabled, false);
+});
+
+test('delegated schedule switch click calls the enabled endpoint and updates UI plus cache', async () => {
+  const calls = [];
+  const record = { id: 7, chainId: 'alpha', mode: 'full', frequency: 'DAILY', runTime: '06:00:00', enabled: true, config: {} };
+  const fetchImplementation = async (url, options) => {
+    if (url === '/api/schedules') return response([record]);
+    calls.push({ url, options });
+    return response({ ...record, enabled: false, updatedAt: 'new' });
+  };
+  const { controller, nodes } = controllerHarness(fetchImplementation);
+  await controller.loadRecords();
+  const button = new FakeButton(true);
+  const row = { dataset: { scheduleId: '7' }, querySelector: () => button };
+  button.row = row;
+  nodes['#schedule-list'].rows = [row];
+
+  nodes['#schedule-list'].dispatch('click', { target: button });
+  await flush();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/schedules/7/enabled');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { enabled: false });
+  assert.equal(button.getAttribute('aria-checked'), 'false');
+  assert.equal(button.label.textContent, '已停用');
+  assert.equal(controller.getRecords()[0].enabled, false);
+  assert.equal(nodes['#schedule-page-message'].textContent, '计划已停用。');
 });
 
 test('submit has a hard in-flight guard and preserves loading gate in finally', async () => {
