@@ -61,8 +61,18 @@ public class WorkflowScheduleService implements AutoCloseable {
         return repository.listSchedules();
     }
 
+    public WorkflowScheduleRecord update(long id, WorkflowScheduleRequest request) {
+        WorkflowScheduleRecord existing = repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
+        WorkflowScheduleRequest normalized = normalizeAndValidate(request);
+        rejectCompletedOneTimeReenable(existing, normalized.enabled());
+        Instant nextTriggerAt = normalized.enabled() ? nextTrigger(normalized, clock.instant()) : null;
+        repository.updateSchedule(id, normalized, nextTriggerAt);
+        return repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
+    }
+
     public WorkflowScheduleRecord setEnabled(long id, boolean enabled) {
         WorkflowScheduleRecord schedule = repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
+        rejectCompletedOneTimeReenable(schedule, enabled);
         Instant nextTriggerAt = enabled ? nextTrigger(schedule, clock.instant()) : null;
         repository.updateEnabled(id, enabled, nextTriggerAt);
         return repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
@@ -148,6 +158,12 @@ public class WorkflowScheduleService implements AutoCloseable {
         }
         if (frequency == ScheduleFrequency.ONCE && request.runAt() == null) {
             throw new IllegalArgumentException("一次性执行必须填写执行日期时间");
+        }
+    }
+
+    private static void rejectCompletedOneTimeReenable(WorkflowScheduleRecord schedule, boolean enabled) {
+        if (enabled && schedule.frequency() == ScheduleFrequency.ONCE && schedule.lastTriggeredAt() != null) {
+            throw new IllegalArgumentException("已执行的一次性计划不能重新启用，请复制后创建新计划");
         }
     }
 

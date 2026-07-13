@@ -1,73 +1,115 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('配置运行')}"></head>
+<head th:replace="~{fragments/layout :: head('新建运行')}"></head>
 <body>
-<main class="shell">
-  <header class="topbar">
-    <div>
-      <h1>配置运行</h1>
-      <p>按链路填写结构化配置；资源配置文件不会被改写。</p>
-    </div>
-    <nav class="actions">
-      <a class="button" href="/">控制台</a>
-      <a class="button" href="/history">运行历史</a>
-      <a class="button" href="/schedules">定时任务</a>
-    </nav>
-  </header>
-
-  <form id="run-form" class="run-form" th:attr="data-selected-chain=${chainId}">
-    <section class="panel form-main">
-      <label for="chainId">链路</label>
-      <select id="chainId" name="chainId">
-        <option th:each="chain : ${chains}" th:value="${chain}" th:text="${@consoleText.chain(chain)}" th:selected="${chain == chainId}">链路</option>
-      </select>
-
-      <div class="form-row">
-        <label for="mode">模式
-          <select id="mode" name="mode">
-            <option value="full">全量</option>
-            <option value="rerun">重跑</option>
-          </select>
-        </label>
-        <label for="rerunType">重跑类型
-          <select id="rerunType" name="rerunType">
-            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
-          </select>
-        </label>
-        <label for="rerunId">重跑编号
-          <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔">
-        </label>
-        <label for="runDate">运行日期
-          <input id="runDate" name="runDate" type="date">
-        </label>
-      </div>
-
-      <section class="config-editor" aria-labelledby="chain-config-title">
-        <div class="panel-title">
-          <div>
-            <h2 id="chain-config-title">链路配置</h2>
-            <p id="chain-config-description"></p>
-          </div>
-        </div>
-        <div id="chain-config-fields" class="config-fields"></div>
+<div class="app-shell">
+  <aside th:replace="~{fragments/layout :: sidebar('new-run')}"></aside>
+  <main class="app-main">
+    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '新建运行', '选择工作流、填写所需参数，并在提交前完成路径预检。')}"></header>
+    <div class="page-content">
+      <section class="metrics" aria-label="创建运行步骤">
+        <article><span>步骤 1</span><strong>选择工作流</strong></article>
+        <article><span>步骤 2</span><strong>填写配置</strong></article>
+        <article><span>步骤 3</span><strong>确认并运行</strong></article>
       </section>
-    </section>
 
-    <aside class="panel submit-panel">
-      <h2>提交校验</h2>
-      <ul>
-        <li>链路必须存在</li>
-        <li>模式必须是全量或重跑</li>
-        <li>重跑类型按链路选择，明细重跑才需要编号</li>
-        <li>链路字段来自当前页面默认值</li>
-        <li>运行时设置只覆盖连接、并发和超时等共享参数</li>
-        <li>提交后生成本次运行配置，不改资源配置</li>
-      </ul>
-      <button class="button primary" type="submit">提交运行</button>
-      <p id="submit-result" class="form-message"></p>
-    </aside>
-  </form>
-</main>
-<script src="/app.js"></script>
+      <form id="run-form" class="run-form" novalidate
+            th:attr="data-selected-chain=${chainId},data-selected-mode=${selectedMode},data-selected-rerun-type=${selectedRerunType},data-selected-rerun-id=${selectedRerunId},data-selected-run-date=${selectedRunDate},data-copy-from=${copiedRun == null ? null : copiedRun.id}">
+        <section class="panel form-main">
+          <div class="copy-banner" th:if="${copiedRun != null}" role="status">
+            <strong th:text="${'复制自运行 #' + copiedRun.id}">复制自运行 #1</strong>
+            <span>正在载入原运行配置；链路默认值会先行保留。</span>
+          </div>
+          <p id="copy-load-status" class="form-message" role="status" aria-live="polite"></p>
+
+          <section aria-labelledby="workflow-title">
+            <div class="panel-title">
+              <div>
+                <h2 id="workflow-title">选择工作流</h2>
+                <p class="muted">切换工作流会载入对应默认配置，不会改写资源文件。</p>
+              </div>
+            </div>
+            <div id="workflow-cards" class="chain-list">
+              <a th:each="chain : ${chains}" th:href="@{/runs/new(chainId=${chain})}"
+                 th:attr="data-chain-card=${chain},aria-current=${chain == chainId ? 'true' : null}">
+                <strong th:text="${@consoleText.chain(chain)}">工作流</strong>
+                <span th:text="${chain}">chain-id</span>
+              </a>
+            </div>
+            <label for="chainId">工作流标识
+              <select id="chainId" name="chainId">
+                <option th:each="chain : ${chains}" th:value="${chain}" th:text="${@consoleText.chain(chain)}" th:selected="${chain == chainId}">链路</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="config-editor" aria-labelledby="execution-title">
+            <div class="panel-title">
+              <div>
+                <h2 id="execution-title">运行方式</h2>
+                <p class="muted">重跑参数沿用现有链路契约；仅需要编号的类型会启用编号输入。</p>
+              </div>
+            </div>
+            <div class="form-row">
+              <label for="mode">模式
+                <select id="mode" name="mode">
+                  <option value="full" th:selected="${selectedMode == 'full'}">全量</option>
+                  <option value="rerun" th:selected="${selectedMode == 'rerun'}">重跑</option>
+                </select>
+              </label>
+              <label for="rerunType">重跑类型
+                <select id="rerunType" name="rerunType">
+                  <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}"
+                          th:selected="${type.value() == selectedRerunType}">重跑类型</option>
+                </select>
+              </label>
+              <label for="rerunId">重跑编号
+                <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔" th:value="${selectedRerunId}">
+                <small id="rerunId-validation" class="form-message" aria-live="polite"></small>
+              </label>
+              <label for="runDate">运行日期
+                <input id="runDate" name="runDate" type="date" th:value="${selectedRunDate}">
+              </label>
+            </div>
+          </section>
+
+          <section class="config-editor" aria-labelledby="chain-config-title">
+            <div class="panel-title">
+              <div>
+                <h2 id="chain-config-title">链路配置</h2>
+                <p id="chain-config-description"></p>
+              </div>
+            </div>
+            <div id="chain-config-fields"></div>
+          </section>
+        </section>
+
+        <aside class="panel submit-panel" style="position: sticky; top: 20px;">
+          <div class="panel-title">
+            <div>
+              <h2>运行摘要</h2>
+              <p class="muted">提交前确认关键参数。</p>
+            </div>
+          </div>
+          <dl id="run-summary">
+            <dt>工作流</dt><dd id="summary-chain">-</dd>
+            <dt>模式</dt><dd id="summary-mode">-</dd>
+            <dt>运行日期</dt><dd id="summary-date">未指定</dd>
+            <dt>项目 / 仓库</dt><dd id="summary-project">-</dd>
+          </dl>
+          <ul>
+            <li>路径预检只读取本机文件状态，不创建目录。</li>
+            <li>预检警告不会阻止提交，请在确认后继续。</li>
+            <li>只有服务端创建运行成功后才会跳转。</li>
+          </ul>
+          <button id="submit-run" class="button primary" type="submit">提交运行</button>
+          <p id="submit-result" class="form-message" role="alert" aria-live="polite"></p>
+        </aside>
+      </form>
+    </div>
+  </main>
+</div>
+<script src="/js/console-common.js"></script>
+<script src="/js/run-form.js"></script>
 </body>
 </html>

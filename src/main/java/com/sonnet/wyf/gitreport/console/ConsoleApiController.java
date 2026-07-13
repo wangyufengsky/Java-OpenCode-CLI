@@ -6,9 +6,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.file.Path;
+import java.nio.file.InvalidPathException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -20,19 +24,28 @@ public class ConsoleApiController {
     private final WorkflowExecutionService executionService;
     private final EventStreamService eventStreamService;
     private final WorkflowScheduleService scheduleService;
+    private final RunConfigReader configReader;
+    private final PathPreflightService pathPreflightService;
+    private final ConsoleViewService viewService;
 
     public ConsoleApiController(
             ChainCatalog chainCatalog,
             WorkflowRunRepository repository,
             WorkflowExecutionService executionService,
             EventStreamService eventStreamService,
-            WorkflowScheduleService scheduleService
+            WorkflowScheduleService scheduleService,
+            RunConfigReader configReader,
+            PathPreflightService pathPreflightService,
+            ConsoleViewService viewService
     ) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
         this.executionService = executionService;
         this.eventStreamService = eventStreamService;
         this.scheduleService = scheduleService;
+        this.configReader = configReader;
+        this.pathPreflightService = pathPreflightService;
+        this.viewService = viewService;
     }
 
     @GetMapping("/chains")
@@ -66,6 +79,11 @@ public class ConsoleApiController {
         return Map.of("id", scheduleService.create(request));
     }
 
+    @PostMapping("/schedules/{id}")
+    public WorkflowScheduleRecord updateSchedule(@PathVariable long id, @RequestBody WorkflowScheduleRequest request) {
+        return scheduleService.update(id, request);
+    }
+
     @PostMapping("/schedules/{id}/enabled")
     public WorkflowScheduleRecord setScheduleEnabled(@PathVariable long id, @RequestBody Map<String, Boolean> body) {
         return scheduleService.setEnabled(id, Boolean.TRUE.equals(body.get("enabled")));
@@ -76,9 +94,55 @@ public class ConsoleApiController {
         return repository.findRun(id).orElseThrow();
     }
 
+    @GetMapping("/runs/{id}/config")
+    public RunConfigResponse runConfig(@PathVariable long id) throws Exception {
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        if (run.configPath() == null || run.configPath().isBlank()) {
+            throw new IllegalArgumentException("运行没有配置文件");
+        }
+        try {
+            return new RunConfigResponse(
+                    run.id(),
+                    run.chainId(),
+                    run.mode(),
+                    run.rerunType(),
+                    run.rerunId(),
+                    run.runDate(),
+                    configReader.readFlat(Path.of(run.configPath()))
+            );
+        } catch (InvalidPathException exception) {
+            throw new IllegalArgumentException("运行配置文件不存在或不可读取", exception);
+        }
+    }
+
+    @GetMapping("/path-preflight")
+    public PathPreflightService.Result pathPreflight(@RequestParam String path) {
+        return pathPreflightService.inspect(path);
+    }
+
     @GetMapping(path = "/runs/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter events(@PathVariable long id) throws Exception {
         return eventStreamService.subscribe(id, repository.listEvents(id));
+    }
+
+    @GetMapping("/runs/{id}/snapshot")
+    public RunSnapshotResponse runSnapshot(
+            @PathVariable long id,
+            @RequestParam(required = false, defaultValue = "0") long afterEventId
+    ) {
+        long normalizedAfterEventId = Math.max(0L, afterEventId);
+        // Producers persist task/run state before their corresponding event, so capture the event watermark first.
+        List<WorkflowRunEvent> events = repository.listEventsAfter(id, normalizedAfterEventId);
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        ConsoleRunDetailSummary summary = viewService.runDetail(id);
+        List<WorkflowTaskStatus> tasks = repository.listTaskStatuses(id);
+        return new RunSnapshotResponse(
+                run,
+                summary,
+                tasks,
+                events,
+                WorkflowRerunContract.failedTaskAction(run.chainId(), summary, tasks)
+        );
     }
 
     private void validate(WorkflowRunSubmission submission) {
@@ -101,5 +165,25 @@ public class ConsoleApiController {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
         }
+    }
+
+    public record RunConfigResponse(
+            long sourceRunId,
+            String chainId,
+            String mode,
+            String rerunType,
+            String rerunId,
+            LocalDate runDate,
+            Map<String, Object> config
+    ) {
+    }
+
+    public record RunSnapshotResponse(
+            WorkflowRunRecord run,
+            ConsoleRunDetailSummary summary,
+            List<WorkflowTaskStatus> tasks,
+            List<WorkflowRunEvent> events,
+            FailedTaskRerunAction rerunAction
+    ) {
     }
 }

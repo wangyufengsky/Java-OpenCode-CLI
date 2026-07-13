@@ -1,7 +1,10 @@
 package com.sonnet.wyf.gitreport.config;
 
 import com.sonnet.wyf.gitreport.console.ChainCatalog;
+import com.sonnet.wyf.gitreport.console.ConsoleViewService;
 import com.sonnet.wyf.gitreport.console.EventStreamService;
+import com.sonnet.wyf.gitreport.console.PathPreflightService;
+import com.sonnet.wyf.gitreport.console.RunConfigReader;
 import com.sonnet.wyf.gitreport.console.RunConfigWriter;
 import com.sonnet.wyf.gitreport.console.TaskConsoleProperties;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
@@ -77,6 +80,26 @@ public class TaskConsoleConfiguration {
         return new RunConfigWriter(properties);
     }
 
+    @Bean
+    RunConfigReader runConfigReader() {
+        return new RunConfigReader();
+    }
+
+    @Bean
+    PathPreflightService pathPreflightService() {
+        return new PathPreflightService();
+    }
+
+    @Bean
+    Clock taskConsoleClock() {
+        return Clock.systemDefaultZone();
+    }
+
+    @Bean
+    ConsoleViewService consoleViewService(WorkflowRunRepository repository, Clock taskConsoleClock) {
+        return new ConsoleViewService(repository, taskConsoleClock);
+    }
+
     @Bean(destroyMethod = "close")
     WorkflowExecutionService workflowExecutionService(
             ChainCatalog chainCatalog,
@@ -92,8 +115,9 @@ public class TaskConsoleConfiguration {
     WorkflowScheduleService workflowScheduleService(
             WorkflowScheduleRepository repository,
             WorkflowExecutionService executionService,
-            ChainCatalog chainCatalog
+            ChainCatalog chainCatalog,
+            Clock taskConsoleClock
     ) {
-        return new WorkflowScheduleService(repository, executionService, chainCatalog, Clock.systemDefaultZone());
+        return new WorkflowScheduleService(repository, executionService, chainCatalog, taskConsoleClock);
     }
 }

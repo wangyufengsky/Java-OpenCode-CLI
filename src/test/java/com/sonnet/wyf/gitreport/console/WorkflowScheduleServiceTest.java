@@ -160,6 +160,43 @@ class WorkflowScheduleServiceTest {
     }
 
     @Test
+    void refusesToReenableAnAlreadyTriggeredOneTimeSchedule() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "once"),
+                "once", null, null, LocalDateTime.of(2026, 6, 30, 6, 0), true
+        ));
+        fixture.service.triggerDueSchedules(Instant.parse("2026-06-30T03:01:00Z"));
+
+        assertThatThrownBy(() -> fixture.service.setEnabled(scheduleId, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("已执行的一次性计划不能重新启用，请复制后创建新计划");
+
+        assertThat(fixture.repository.findSchedule(scheduleId)).get()
+                .satisfies(schedule -> {
+                    assertThat(schedule.enabled()).isFalse();
+                    assertThat(schedule.nextTriggerAt()).isNull();
+                });
+    }
+
+    @Test
+    void refusesToReenableAnAlreadyTriggeredOneTimeScheduleThroughEdit() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "once"),
+                "once", null, null, LocalDateTime.of(2026, 6, 30, 6, 0), true
+        ));
+        fixture.service.triggerDueSchedules(Instant.parse("2026-06-30T03:01:00Z"));
+
+        assertThatThrownBy(() -> fixture.service.update(scheduleId, new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "rescheduled"),
+                "once", null, null, LocalDateTime.of(2026, 7, 1, 6, 0), true
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("已执行的一次性计划不能重新启用，请复制后创建新计划");
+    }
+
+    @Test
     void rejectsUnknownChainAndInvalidFrequency() {
         Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
 
@@ -190,6 +227,46 @@ class WorkflowScheduleServiceTest {
                 null,
                 true
         ))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("频率");
+    }
+
+    @Test
+    void updatesScheduleWithCreateValidationAndRecalculatedNextTrigger() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "before"),
+                "daily", null, LocalTime.of(6, 0), null, true
+        ));
+
+        WorkflowScheduleRecord updated = fixture.service.update(scheduleId, new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, LocalDate.of(2026, 7, 1),
+                Map.of("value", "after", "paths.repo", "undefined"),
+                "weekly", DayOfWeek.WEDNESDAY.getValue(), LocalTime.of(7, 30), null, true
+        ));
+
+        assertThat(updated.runTime()).isEqualTo(LocalTime.of(7, 30));
+        assertThat(updated.frequency()).isEqualTo(ScheduleFrequency.WEEKLY);
+        assertThat(updated.config()).containsEntry("value", "after").doesNotContainKey("paths.repo");
+        assertThat(updated.nextTriggerAt()).isEqualTo(Instant.parse("2026-06-30T23:30:00Z"));
+    }
+
+    @Test
+    void updateRejectsInvalidRequestsAndMissingSchedules() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        WorkflowScheduleRequest invalid = new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of(),
+                "weekly", null, LocalTime.of(6, 0), null, true
+        );
+
+        assertThatThrownBy(() -> fixture.service.update(99, invalid))
+                .isInstanceOf(java.util.NoSuchElementException.class);
+
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of(),
+                "daily", null, LocalTime.of(6, 0), null, true
+        ));
+        assertThatThrownBy(() -> fixture.service.update(scheduleId, invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("星期");
     }
 
     private Fixture fixture(Instant now) {
