@@ -130,6 +130,9 @@ public class ConsoleApiController {
             @PathVariable long id,
             @RequestParam(required = false, defaultValue = "0") long afterEventId
     ) {
+        long normalizedAfterEventId = Math.max(0L, afterEventId);
+        // Producers persist task/run state before their corresponding event, so capture the event watermark first.
+        List<WorkflowRunEvent> events = repository.listEventsAfter(id, normalizedAfterEventId);
         WorkflowRunRecord run = repository.findRun(id).orElseThrow();
         ConsoleRunDetailSummary summary = viewService.runDetail(id);
         List<WorkflowTaskStatus> tasks = repository.listTaskStatuses(id);
@@ -137,7 +140,7 @@ public class ConsoleApiController {
                 run,
                 summary,
                 tasks,
-                repository.listEventsAfter(id, Math.max(0L, afterEventId)),
+                events,
                 WorkflowRerunContract.failedTaskAction(run.chainId(), summary, tasks)
         );
     }
