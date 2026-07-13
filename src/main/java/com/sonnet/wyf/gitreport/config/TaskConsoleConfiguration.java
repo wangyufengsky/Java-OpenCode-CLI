@@ -3,6 +3,8 @@ package com.sonnet.wyf.gitreport.config;
 import com.sonnet.wyf.gitreport.console.ChainCatalog;
 import com.sonnet.wyf.gitreport.console.ConsoleViewService;
 import com.sonnet.wyf.gitreport.console.EventStreamService;
+import com.sonnet.wyf.gitreport.console.PathPreflightService;
+import com.sonnet.wyf.gitreport.console.RunConfigReader;
 import com.sonnet.wyf.gitreport.console.RunConfigWriter;
 import com.sonnet.wyf.gitreport.console.TaskConsoleProperties;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
@@ -76,6 +78,16 @@ public class TaskConsoleConfiguration {
     @Bean
     RunConfigWriter runConfigWriter(TaskConsoleProperties properties) {
         return new RunConfigWriter(properties);
+    }
+
+    @Bean
+    RunConfigReader runConfigReader() {
+        return new RunConfigReader();
+    }
+
+    @Bean
+    PathPreflightService pathPreflightService() {
+        return new PathPreflightService();
     }
 
     @Bean

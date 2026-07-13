@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.console;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
@@ -9,6 +10,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
@@ -342,6 +345,145 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
                 .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
                 .andExpect(jsonPath("$.defaults['agentbridge.max-attempts']").value(5));
+    }
+
+    @Test
+    void runConfigApiReadsAndFlattensTheStoredYaml(@TempDir Path tempDir) throws Exception {
+        long runId = createCopiedRun(tempDir);
+        mockMvc.perform(get("/api/runs/" + runId + "/config"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sourceRunId").value(runId))
+                .andExpect(jsonPath("$.chainId").value("project-unit-test-generation"))
+                .andExpect(jsonPath("$.mode").value("rerun"))
+                .andExpect(jsonPath("$.rerunType").value("test-batch"))
+                .andExpect(jsonPath("$.rerunId").value("batch-7"))
+                .andExpect(jsonPath("$.runDate").value("2026-07-13"))
+                .andExpect(jsonPath("$.config['project.id']").value("demo"))
+                .andExpect(jsonPath("$.config['source.package-paths'][0]").value("com.example.service"))
+                .andExpect(jsonPath("$.config['test.require-coverage']").value(false));
+    }
+
+    @Test
+    void pathPreflightRecognizesReadableMavenDirectory(@TempDir Path tempDir) throws Exception {
+        Path tempProject = Files.createDirectory(tempDir.resolve("maven-project"));
+        Files.writeString(tempProject.resolve("pom.xml"), "<project/>");
+        mockMvc.perform(get("/api/path-preflight").param("path", tempProject.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessible").value(true))
+                .andExpect(jsonPath("$.directory").value(true))
+                .andExpect(jsonPath("$.mavenProject").value(true));
+    }
+
+    @Test
+    void runConfigApiRejectsMissingAndNonFileConfigPaths(@TempDir Path tempDir) throws Exception {
+        long missingPathRun = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), null);
+        long directoryPathRun = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), tempDir.toString());
+
+        mockMvc.perform(get("/api/runs/" + missingPathRun + "/config"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("运行没有配置文件")));
+        mockMvc.perform(get("/api/runs/" + directoryPathRun + "/config"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("运行配置文件不存在或不可读取")));
+    }
+
+    @Test
+    void pathPreflightReportsMissingPathsWithoutMutatingThem(@TempDir Path tempDir) throws Exception {
+        Path missing = tempDir.resolve("not-created");
+
+        mockMvc.perform(get("/api/path-preflight").param("path", missing.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessible").value(false))
+                .andExpect(jsonPath("$.directory").value(false))
+                .andExpect(jsonPath("$.mavenProject").value(false))
+                .andExpect(jsonPath("$.message").value("路径不存在"));
+        assertThat(missing).doesNotExist();
+    }
+
+    @Test
+    void copiedRunPageShowsTheSourceRunBanner(@TempDir Path tempDir) throws Exception {
+        long runId = createCopiedRun(tempDir);
+        mockMvc.perform(get("/runs/new").param("copyFrom", String.valueOf(runId)))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("复制自运行 #" + runId)))
+                .andExpect(content().string(containsString("运行摘要")));
+    }
+
+    @Test
+    void newRunAssetsExposeGroupedDefaultsPreflightAndResilientSubmission() throws Exception {
+        String page = mockMvc.perform(get("/runs/new").param("chainId", "project-unit-test-generation"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(page)
+                .contains("选择工作流")
+                .contains("填写配置")
+                .contains("确认并运行")
+                .contains("workflow-cards")
+                .contains("console-common.js")
+                .contains("run-form.js");
+
+        String commonJs = mockMvc.perform(get("/js/console-common.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(commonJs)
+                .contains("function field(key, label, description, type = 'text', group = 'advanced', required = false, summary = false)")
+                .contains("group: 'project'")
+                .contains("group: 'scope'")
+                .contains("group: 'validation'")
+                .contains("group: 'agentbridge'")
+                .contains("agentbridge.web-base-url")
+                .doesNotContain("test.concurrency")
+                .doesNotContain("worker-message");
+
+        String runFormJs = mockMvc.perform(get("/js/run-form.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(runFormJs)
+                .contains("400")
+                .contains("AbortController")
+                .contains("endsWith('.repo')")
+                .contains("endsWith('-root')")
+                .contains("恢复默认值")
+                .contains("firstInvalid.focus()")
+                .contains("submitButton.disabled = true")
+                .contains("submitButton.disabled = false")
+                .contains("window.location.href = `/runs/${body.id}`")
+                .contains("/api/path-preflight")
+                .contains("/config");
+    }
+
+    private long createCopiedRun(Path tempDir) throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "project-unit-test-generation",
+                "rerun",
+                "test-batch",
+                "batch-7",
+                LocalDate.of(2026, 7, 13),
+                Map.of("project.id", "placeholder"),
+                null
+        ), "missing-config.yml");
+        Path configPath = tempDir.resolve("copied-run.yml");
+        Files.writeString(configPath, """
+                project:
+                  id: demo
+                source:
+                  package-paths:
+                    - com.example.service
+                test:
+                  require-coverage: false
+                """);
+        repository.updateConfigPath(runId, configPath.toString());
+        return runId;
     }
 
     @Test

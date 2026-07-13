@@ -46,22 +46,30 @@ public class ConsolePageController {
             @RequestParam(required = false, defaultValue = "full") String mode,
             @RequestParam(required = false, defaultValue = "") String rerunType,
             @RequestParam(required = false, defaultValue = "") String rerunId,
+            @RequestParam(required = false) Long copyFrom,
             Model model
     ) {
-        String selectedMode = "rerun".equals(mode) ? "rerun" : "full";
-        String selectedRerunType = WorkflowRerunContract.normalizeType(chainId, rerunType);
-        if (!"rerun".equals(selectedMode) || !WorkflowRerunContract.isKnownType(chainId, selectedRerunType)) {
+        WorkflowRunRecord copiedRun = copyFrom == null ? null : repository.findRun(copyFrom).orElseThrow();
+        String selectedChainId = copiedRun == null ? chainId : copiedRun.chainId();
+        String requestedMode = copiedRun == null ? mode : copiedRun.mode();
+        String requestedRerunType = copiedRun == null ? rerunType : copiedRun.rerunType();
+        String requestedRerunId = copiedRun == null ? rerunId : copiedRun.rerunId();
+        String selectedMode = "rerun".equals(requestedMode) ? "rerun" : "full";
+        String selectedRerunType = WorkflowRerunContract.normalizeType(selectedChainId, requestedRerunType);
+        if (!"rerun".equals(selectedMode) || !WorkflowRerunContract.isKnownType(selectedChainId, selectedRerunType)) {
             selectedRerunType = "";
         }
-        String selectedRerunId = WorkflowRerunContract.requiresRerunId(chainId, selectedRerunType)
-                ? rerunId.trim()
+        String selectedRerunId = WorkflowRerunContract.requiresRerunId(selectedChainId, selectedRerunType)
+                ? trimmed(requestedRerunId)
                 : "";
         model.addAttribute("chains", chainCatalog.chainIds());
-        model.addAttribute("chainId", chainId);
-        model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(chainId));
+        model.addAttribute("chainId", selectedChainId);
+        model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(selectedChainId));
         model.addAttribute("selectedMode", selectedMode);
         model.addAttribute("selectedRerunType", selectedRerunType);
         model.addAttribute("selectedRerunId", selectedRerunId);
+        model.addAttribute("selectedRunDate", copiedRun == null ? null : copiedRun.runDate());
+        model.addAttribute("copiedRun", copiedRun);
         return "run-new";
     }
 
@@ -180,5 +188,9 @@ public class ConsolePageController {
 
     private static String normalized(String value) {
         return value == null ? "" : value.toUpperCase(Locale.ROOT);
+    }
+
+    private static String trimmed(String value) {
+        return value == null ? "" : value.trim();
     }
 }

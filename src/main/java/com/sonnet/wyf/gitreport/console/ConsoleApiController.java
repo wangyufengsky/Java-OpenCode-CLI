@@ -6,9 +6,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -20,19 +23,25 @@ public class ConsoleApiController {
     private final WorkflowExecutionService executionService;
     private final EventStreamService eventStreamService;
     private final WorkflowScheduleService scheduleService;
+    private final RunConfigReader configReader;
+    private final PathPreflightService pathPreflightService;
 
     public ConsoleApiController(
             ChainCatalog chainCatalog,
             WorkflowRunRepository repository,
             WorkflowExecutionService executionService,
             EventStreamService eventStreamService,
-            WorkflowScheduleService scheduleService
+            WorkflowScheduleService scheduleService,
+            RunConfigReader configReader,
+            PathPreflightService pathPreflightService
     ) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
         this.executionService = executionService;
         this.eventStreamService = eventStreamService;
         this.scheduleService = scheduleService;
+        this.configReader = configReader;
+        this.pathPreflightService = pathPreflightService;
     }
 
     @GetMapping("/chains")
@@ -76,6 +85,28 @@ public class ConsoleApiController {
         return repository.findRun(id).orElseThrow();
     }
 
+    @GetMapping("/runs/{id}/config")
+    public RunConfigResponse runConfig(@PathVariable long id) throws Exception {
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        if (run.configPath() == null || run.configPath().isBlank()) {
+            throw new IllegalArgumentException("运行没有配置文件");
+        }
+        return new RunConfigResponse(
+                run.id(),
+                run.chainId(),
+                run.mode(),
+                run.rerunType(),
+                run.rerunId(),
+                run.runDate(),
+                configReader.readFlat(Path.of(run.configPath()))
+        );
+    }
+
+    @GetMapping("/path-preflight")
+    public PathPreflightService.Result pathPreflight(@RequestParam String path) {
+        return pathPreflightService.inspect(path);
+    }
+
     @GetMapping(path = "/runs/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter events(@PathVariable long id) throws Exception {
         return eventStreamService.subscribe(id, repository.listEvents(id));
@@ -101,5 +132,16 @@ public class ConsoleApiController {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
         }
+    }
+
+    public record RunConfigResponse(
+            long sourceRunId,
+            String chainId,
+            String mode,
+            String rerunType,
+            String rerunId,
+            LocalDate runDate,
+            Map<String, Object> config
+    ) {
     }
 }
