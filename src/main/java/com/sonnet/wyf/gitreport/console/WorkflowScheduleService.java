@@ -61,6 +61,14 @@ public class WorkflowScheduleService implements AutoCloseable {
         return repository.listSchedules();
     }
 
+    public WorkflowScheduleRecord update(long id, WorkflowScheduleRequest request) {
+        repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
+        WorkflowScheduleRequest normalized = normalizeAndValidate(request);
+        Instant nextTriggerAt = normalized.enabled() ? nextTrigger(normalized, clock.instant()) : null;
+        repository.updateSchedule(id, normalized, nextTriggerAt);
+        return repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
+    }
+
     public WorkflowScheduleRecord setEnabled(long id, boolean enabled) {
         WorkflowScheduleRecord schedule = repository.findSchedule(id).orElseThrow(NoSuchElementException::new);
         Instant nextTriggerAt = enabled ? nextTrigger(schedule, clock.instant()) : null;

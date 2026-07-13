@@ -101,6 +101,23 @@ public class WorkflowScheduleRepository {
                 Instant.now().toString(), id);
     }
 
+    public void updateSchedule(long id, WorkflowScheduleRequest request, Instant nextTriggerAt) {
+        jdbcTemplate.update("""
+                update workflow_schedules
+                set chain_id=?, mode=?, rerun_type=?, rerun_id=?, run_date=?, config_json=?,
+                    frequency=?, day_of_week=?, run_time=?, run_at=?, enabled=?, next_trigger_at=?, updated_at=?
+                where id=?
+                """,
+                request.chainId(), request.mode(), request.rerunType(), request.rerunId(),
+                request.runDate() == null ? null : request.runDate().toString(), writeConfig(request.config()),
+                ScheduleFrequency.parse(request.frequency()).name(), request.dayOfWeek(),
+                request.runTime() == null ? null : request.runTime().toString(),
+                request.runAt() == null ? null : request.runAt().toString(),
+                request.enabled() ? 1 : 0,
+                nextTriggerAt == null ? null : nextTriggerAt.toString(),
+                Instant.now().toString(), id);
+    }
+
     private RowMapper<WorkflowScheduleRecord> scheduleMapper() {
         return (rs, rowNum) -> new WorkflowScheduleRecord(
                 rs.getLong("id"),

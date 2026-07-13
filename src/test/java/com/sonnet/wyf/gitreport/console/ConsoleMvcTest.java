@@ -794,6 +794,63 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void scheduleApiUpdatesSchedulesAndReturnsStableNotFound() throws Exception {
+        String createResponse = mockMvc.perform(post("/api/schedules")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"full",
+                                 "config":{"project.id":"before"},"frequency":"daily",
+                                 "runTime":"06:00","enabled":true}
+                                """))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        long id = new com.fasterxml.jackson.databind.ObjectMapper().readTree(createResponse).get("id").asLong();
+
+        mockMvc.perform(post("/api/schedules/" + id)
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"full",
+                                 "config":{"project.id":"after"},"frequency":"weekly",
+                                 "dayOfWeek":5,"runTime":"07:30","enabled":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.runTime").value("07:30:00"))
+                .andExpect(jsonPath("$.config['project.id']").value("after"));
+
+        mockMvc.perform(post("/api/schedules/999999")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"full",
+                                 "config":{},"frequency":"daily","runTime":"06:00","enabled":true}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("未找到"));
+    }
+
+    @Test
+    void schedulesPageProvidesSearchDrawerCopyEditAndAccessibleSwitches() throws Exception {
+        mockMvc.perform(post("/api/schedules")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"full",
+                                 "config":{"project.id":"schedule-ui"},"frequency":"daily",
+                                 "runTime":"06:00","enabled":true}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/schedules"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"schedule-search\"")))
+                .andExpect(content().string(containsString("id=\"schedule-drawer\"")))
+                .andExpect(content().string(containsString("data-action=\"edit\"")))
+                .andExpect(content().string(containsString("data-action=\"copy\"")))
+                .andExpect(content().string(containsString("role=\"switch\"")))
+                .andExpect(content().string(containsString("aria-checked=\"true\"")))
+                .andExpect(content().string(containsString("/js/schedules.js")));
+    }
+
+    @Test
     void sseEndpointStartsStreamWithExistingEvents() throws Exception {
         long runId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report",

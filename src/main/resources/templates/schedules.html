@@ -2,115 +2,155 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('定时任务')}"></head>
 <body>
-<div class="app-shell">
+<div class="app-shell" id="schedule-page">
   <aside th:replace="~{fragments/layout :: sidebar('schedules')}"></aside>
   <main class="app-main">
-    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '定时任务', '按固定时间触发链路运行；触发后进入现有运行队列。')}"></header>
+    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '定时任务', '查看下一次执行时间，安全地创建、编辑、复制或启停计划。')}"></header>
     <div class="page-content">
-
-    <section class="panel schedule-list-panel">
-    <div class="panel-title">
-      <h2>任务列表</h2>
-    </div>
-    <table>
-      <thead>
-      <tr><th>编号</th><th>链路</th><th>频率</th><th>启用</th><th>上次触发</th><th>下次执行</th><th>操作</th></tr>
-      </thead>
-      <tbody id="schedule-list">
-      <tr th:each="schedule : ${schedules}" th:attr="data-schedule-id=${schedule.id}">
-        <td th:text="${schedule.id}">1</td>
-        <td th:text="${@consoleText.chain(schedule.chainId)}">链路</td>
-        <td th:text="${@consoleText.frequency(schedule.frequency.name())}">每天</td>
-        <td><span class="status-badge" th:classappend="${schedule.enabled ? 'succeeded' : 'failed'}" th:text="${schedule.enabled ? '启用' : '停用'}">启用</span></td>
-        <td th:text="${schedule.lastTriggeredAt ?: '-'}">-</td>
-        <td th:text="${schedule.nextTriggerAt ?: '-'}">-</td>
-        <td>
-          <button class="button schedule-toggle" type="button" th:attr="data-enabled=${!schedule.enabled}" th:text="${schedule.enabled ? '停用' : '启用'}">停用</button>
-        </td>
-      </tr>
-      <tr th:if="${schedules.isEmpty()}"><td colspan="7" class="empty">暂无定时任务。</td></tr>
-      </tbody>
-    </table>
-    </section>
-
-    <form id="schedule-form" class="run-form schedule-form" th:attr="data-selected-chain=${chainId}">
-    <section class="panel form-main">
-      <div class="panel-title">
-        <h2>新建定时任务</h2>
-      </div>
-      <label for="chainId">链路</label>
-      <select id="chainId" name="chainId">
-        <option th:each="chain : ${chains}" th:value="${chain}" th:text="${@consoleText.chain(chain)}" th:selected="${chain == chainId}">链路</option>
-      </select>
-
-      <div class="form-row">
-        <label for="mode">模式
-          <select id="mode" name="mode">
-            <option value="full">全量</option>
-            <option value="rerun">重跑</option>
-          </select>
-        </label>
-        <label for="rerunType">重跑类型
-          <select id="rerunType" name="rerunType">
-            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
-          </select>
-        </label>
-        <label for="rerunId">重跑编号
-          <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔">
-        </label>
-        <label for="runDate">运行日期
-          <input id="runDate" name="runDate" type="date">
-        </label>
-      </div>
-
-      <section class="config-editor" aria-labelledby="chain-config-title">
-        <div class="panel-title">
+      <section class="panel schedule-list-panel" aria-labelledby="schedule-list-title">
+        <div class="panel-title schedule-toolbar">
           <div>
-            <h2 id="chain-config-title">链路配置</h2>
-            <p id="chain-config-description"></p>
+            <h2 id="schedule-list-title">任务计划</h2>
+            <p>搜索只筛选当前列表，不会改变服务端计划。</p>
+          </div>
+          <div class="schedule-toolbar-actions">
+            <label class="schedule-search-label" for="schedule-search">
+              <span class="visually-hidden">搜索定时任务</span>
+              <input id="schedule-search" type="search" placeholder="搜索计划、链路或模式" autocomplete="off">
+            </label>
+            <button id="create-schedule" class="button primary" type="button">新建计划</button>
           </div>
         </div>
-        <div id="chain-config-fields" class="config-fields"></div>
-      </section>
-    </section>
 
-    <aside class="panel submit-panel">
-      <h2>执行频率</h2>
-      <label for="frequency">频率
-        <select id="frequency" name="frequency">
-          <option value="daily">每天</option>
-          <option value="weekly">每周</option>
-          <option value="once">一次性</option>
-        </select>
-      </label>
-      <label for="dayOfWeek" class="schedule-weekly-field">星期
-        <select id="dayOfWeek" name="dayOfWeek">
-          <option value="1">周一</option>
-          <option value="2">周二</option>
-          <option value="3">周三</option>
-          <option value="4">周四</option>
-          <option value="5">周五</option>
-          <option value="6">周六</option>
-          <option value="7">周日</option>
-        </select>
-      </label>
-      <label for="scheduleTime" class="schedule-time-field">执行时间
-        <input id="scheduleTime" name="scheduleTime" type="time" value="06:00">
-      </label>
-      <label for="runAt" class="schedule-once-field">执行日期时间
-        <input id="runAt" name="runAt" type="datetime-local">
-      </label>
-      <label class="checkbox-row" for="enabled">
-        <input id="enabled" name="enabled" type="checkbox" checked>
-        <span>创建后立即启用</span>
-      </label>
-      <button class="button primary" type="submit">保存定时任务</button>
-      <p id="schedule-result" class="form-message"></p>
-    </aside>
-    </form>
+        <p id="schedule-page-message" class="form-message" role="status" aria-live="polite"></p>
+        <div class="table-scroll">
+          <table class="schedule-table">
+            <thead>
+            <tr><th>计划</th><th>链路 / 模式</th><th>执行频率</th><th>下次执行</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody id="schedule-list">
+            <tr th:each="schedule : ${schedules}"
+                th:attr="data-schedule-id=${schedule.id},data-search=${@consoleText.chain(schedule.chainId) + ' ' + schedule.chainId + ' ' + schedule.mode + ' ' + schedule.id}">
+              <td>
+                <strong th:text="${@consoleText.chain(schedule.chainId) + ' #' + schedule.id}">计划</strong>
+                <small th:text="${'编号 ' + schedule.id}">编号</small>
+              </td>
+              <td>
+                <strong th:text="${@consoleText.chain(schedule.chainId)}">链路</strong>
+                <small th:text="${schedule.mode == 'rerun' ? '重跑' : '全量'}">全量</small>
+              </td>
+              <td>
+                <strong th:text="${@consoleText.frequency(schedule.frequency.name())}">每天</strong>
+                <small th:if="${schedule.frequency.name() == 'DAILY'}" th:text="${schedule.runTime}">06:00</small>
+                <small th:if="${schedule.frequency.name() == 'WEEKLY'}" th:text="${'星期 ' + schedule.dayOfWeek + ' · ' + schedule.runTime}">星期 5</small>
+                <small th:if="${schedule.frequency.name() == 'ONCE'}" th:text="${schedule.runAt}">日期</small>
+              </td>
+              <td>
+                <strong th:if="${schedule.nextTriggerAt != null}" th:text="${schedule.nextTriggerAt}">下次执行</strong>
+                <strong th:if="${schedule.nextTriggerAt == null && schedule.lastTriggeredAt != null}">已执行</strong>
+                <span th:if="${schedule.nextTriggerAt == null && schedule.lastTriggeredAt == null}">—</span>
+              </td>
+              <td>
+                <button class="schedule-switch" type="button" role="switch"
+                        th:attr="aria-checked=${schedule.enabled},aria-label=${(@consoleText.chain(schedule.chainId) + ' #' + schedule.id + (schedule.enabled ? '，当前已启用，点击停用' : '，当前已停用，点击启用'))},data-enabled=${schedule.enabled}">
+                  <span class="schedule-switch-track" aria-hidden="true"><span></span></span>
+                  <span class="schedule-switch-label" th:text="${schedule.enabled ? '已启用' : '已停用'}">已启用</span>
+                </button>
+              </td>
+              <td class="schedule-actions">
+                <button class="button" type="button" data-action="edit">编辑</button>
+                <button class="button" type="button" data-action="copy">复制</button>
+              </td>
+            </tr>
+            <tr id="schedule-empty" th:hidden="${!schedules.isEmpty()}"><td colspan="6" class="empty">暂无定时任务。</td></tr>
+            <tr id="schedule-no-results" hidden><td colspan="6" class="empty">没有匹配的定时任务，请调整搜索条件。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>
 </div>
-<script src="/app.js"></script>
+
+<div id="schedule-drawer-backdrop" class="drawer-backdrop" hidden></div>
+<section id="schedule-drawer" class="schedule-drawer" role="dialog" aria-modal="true"
+         aria-labelledby="schedule-drawer-title" hidden>
+  <form id="schedule-form" class="schedule-drawer-form" novalidate>
+    <header class="drawer-header">
+      <div>
+        <span class="eyebrow">任务计划</span>
+        <h2 id="schedule-drawer-title">新建计划</h2>
+        <p id="schedule-drawer-description">配置工作流和执行时间。</p>
+      </div>
+      <button id="close-schedule-drawer" class="button" type="button" aria-label="关闭定时任务抽屉">关闭</button>
+    </header>
+
+    <input id="schedule-id" type="hidden">
+    <div id="schedule-form-error" class="alert error" role="alert" hidden></div>
+
+    <fieldset class="drawer-section">
+      <legend>运行设置</legend>
+      <label for="schedule-chain-id">链路
+        <select id="schedule-chain-id" name="chainId">
+          <option th:each="chain : ${chains}" th:value="${chain}" th:text="${@consoleText.chain(chain)}" th:selected="${chain == chainId}">链路</option>
+        </select>
+      </label>
+      <div class="form-row schedule-form-row">
+        <label for="schedule-mode">模式
+          <select id="schedule-mode" name="mode"><option value="full">全量</option><option value="rerun">重跑</option></select>
+        </label>
+        <label for="schedule-rerun-type">重跑类型
+          <select id="schedule-rerun-type" name="rerunType">
+            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
+          </select>
+        </label>
+        <label for="schedule-rerun-id">重跑编号
+          <input id="schedule-rerun-id" name="rerunId" placeholder="多个编号用英文逗号分隔">
+        </label>
+        <label for="schedule-run-date">运行日期
+          <input id="schedule-run-date" name="runDate" type="date">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset class="drawer-section">
+      <legend>执行频率</legend>
+      <div class="form-row schedule-form-row schedule-frequency-grid">
+        <label for="frequency">频率
+          <select id="frequency" name="frequency"><option value="daily">每天</option><option value="weekly">每周</option><option value="once">一次性</option></select>
+        </label>
+        <label for="dayOfWeek" class="schedule-weekly-field">星期
+          <select id="dayOfWeek" name="dayOfWeek">
+            <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
+            <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+          </select>
+        </label>
+        <label for="scheduleTime" class="schedule-time-field">执行时间
+          <input id="scheduleTime" name="scheduleTime" type="time" value="06:00" required>
+        </label>
+        <label for="runAt" class="schedule-once-field">执行日期时间
+          <input id="runAt" name="runAt" type="datetime-local">
+        </label>
+      </div>
+      <label class="checkbox-row" for="enabled">
+        <input id="enabled" name="enabled" type="checkbox" checked><span>保存后立即启用</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="drawer-section">
+      <legend>链路配置</legend>
+      <p id="schedule-config-description" class="muted"></p>
+      <div id="schedule-config-fields" class="config-fields"></div>
+    </fieldset>
+
+    <footer class="drawer-footer">
+      <p id="schedule-result" class="form-message" role="status" aria-live="polite"></p>
+      <div><button id="cancel-schedule" class="button" type="button">取消</button><button id="save-schedule" class="button primary" type="submit">保存计划</button></div>
+    </footer>
+  </form>
+</section>
+
+<script src="/js/console-common.js"></script>
+<script src="/js/schedules.js"></script>
 </body>
 </html>

@@ -103,6 +103,43 @@ class WorkflowScheduleRepositoryTest {
                 });
     }
 
+    @Test
+    void updatesEveryEditableFieldWithoutChangingTriggerHistory() {
+        WorkflowScheduleRepository repository = repository();
+        long scheduleId = repository.createSchedule(new WorkflowScheduleRequest(
+                "git-code-contribution-report", "full", null, null,
+                LocalDate.of(2026, 6, 30), Map.of("project.id", "before"),
+                "daily", null, LocalTime.of(6, 0), null, true
+        ), Instant.parse("2026-06-29T22:00:00Z"));
+        repository.markTriggered(scheduleId, Instant.parse("2026-06-30T22:00:00Z"),
+                Instant.parse("2026-07-01T22:00:00Z"), true);
+        WorkflowScheduleRecord before = repository.findSchedule(scheduleId).orElseThrow();
+
+        WorkflowScheduleRequest changed = new WorkflowScheduleRequest(
+                "weekly-engineering-report", "rerun", "review-batch", "batch-7",
+                LocalDate.of(2026, 7, 1), Map.of("project.id", "after"),
+                "weekly", DayOfWeek.FRIDAY.getValue(), LocalTime.of(7, 30), null, false
+        );
+        repository.updateSchedule(scheduleId, changed, null);
+
+        assertThat(repository.findSchedule(scheduleId)).get().satisfies(schedule -> {
+            assertThat(schedule.chainId()).isEqualTo("weekly-engineering-report");
+            assertThat(schedule.mode()).isEqualTo("rerun");
+            assertThat(schedule.rerunType()).isEqualTo("review-batch");
+            assertThat(schedule.rerunId()).isEqualTo("batch-7");
+            assertThat(schedule.runDate()).isEqualTo(LocalDate.of(2026, 7, 1));
+            assertThat(schedule.config()).containsEntry("project.id", "after");
+            assertThat(schedule.frequency()).isEqualTo(ScheduleFrequency.WEEKLY);
+            assertThat(schedule.dayOfWeek()).isEqualTo(DayOfWeek.FRIDAY.getValue());
+            assertThat(schedule.runTime()).isEqualTo(LocalTime.of(7, 30));
+            assertThat(schedule.enabled()).isFalse();
+            assertThat(schedule.nextTriggerAt()).isNull();
+            assertThat(schedule.createdAt()).isEqualTo(before.createdAt());
+            assertThat(schedule.lastTriggeredAt()).isEqualTo(before.lastTriggeredAt());
+            assertThat(schedule.updatedAt()).isAfterOrEqualTo(before.updatedAt());
+        });
+    }
+
     private WorkflowScheduleRepository repository() {
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));

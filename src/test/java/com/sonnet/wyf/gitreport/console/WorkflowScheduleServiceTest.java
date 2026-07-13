@@ -192,6 +192,46 @@ class WorkflowScheduleServiceTest {
         ))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("频率");
     }
 
+    @Test
+    void updatesScheduleWithCreateValidationAndRecalculatedNextTrigger() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "before"),
+                "daily", null, LocalTime.of(6, 0), null, true
+        ));
+
+        WorkflowScheduleRecord updated = fixture.service.update(scheduleId, new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, LocalDate.of(2026, 7, 1),
+                Map.of("value", "after", "paths.repo", "undefined"),
+                "weekly", DayOfWeek.WEDNESDAY.getValue(), LocalTime.of(7, 30), null, true
+        ));
+
+        assertThat(updated.runTime()).isEqualTo(LocalTime.of(7, 30));
+        assertThat(updated.frequency()).isEqualTo(ScheduleFrequency.WEEKLY);
+        assertThat(updated.config()).containsEntry("value", "after").doesNotContainKey("paths.repo");
+        assertThat(updated.nextTriggerAt()).isEqualTo(Instant.parse("2026-06-30T23:30:00Z"));
+    }
+
+    @Test
+    void updateRejectsInvalidRequestsAndMissingSchedules() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        WorkflowScheduleRequest invalid = new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of(),
+                "weekly", null, LocalTime.of(6, 0), null, true
+        );
+
+        assertThatThrownBy(() -> fixture.service.update(99, invalid))
+                .isInstanceOf(java.util.NoSuchElementException.class);
+
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of(),
+                "daily", null, LocalTime.of(6, 0), null, true
+        ));
+        assertThatThrownBy(() -> fixture.service.update(scheduleId, invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("星期");
+    }
+
     private Fixture fixture(Instant now) {
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));

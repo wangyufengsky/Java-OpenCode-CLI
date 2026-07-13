@@ -79,6 +79,11 @@ public class ConsoleApiController {
         return Map.of("id", scheduleService.create(request));
     }
 
+    @PostMapping("/schedules/{id}")
+    public WorkflowScheduleRecord updateSchedule(@PathVariable long id, @RequestBody WorkflowScheduleRequest request) {
+        return scheduleService.update(id, request);
+    }
+
     @PostMapping("/schedules/{id}/enabled")
     public WorkflowScheduleRecord setScheduleEnabled(@PathVariable long id, @RequestBody Map<String, Boolean> body) {
         return scheduleService.setEnabled(id, Boolean.TRUE.equals(body.get("enabled")));
