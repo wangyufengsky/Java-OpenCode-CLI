@@ -364,6 +364,40 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void runConfigApiPreservesExplicitNullValues(@TempDir Path tempDir) throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "project-unit-test-generation", "full", null, null, null, Map.of(), null
+        ), "missing-config.yml");
+        Path configPath = tempDir.resolve("null-config.yml");
+        Files.writeString(configPath, "project:\n  id: null\n");
+        repository.updateConfigPath(runId, configPath.toString());
+
+        String body = mockMvc.perform(get("/api/runs/" + runId + "/config"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(body).contains("\"project.id\":null");
+    }
+
+    @Test
+    void runConfigApiMapsMalformedYamlToStableBadRequest(@TempDir Path tempDir) throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "project-unit-test-generation", "full", null, null, null, Map.of(), null
+        ), "missing-config.yml");
+        Path configPath = tempDir.resolve("malformed-secret-config.yml");
+        Files.writeString(configPath, "project: [unterminated\n");
+        repository.updateConfigPath(runId, configPath.toString());
+
+        mockMvc.perform(get("/api/runs/" + runId + "/config"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("运行配置文件无法读取或解析"))
+                .andExpect(content().string(not(containsString(configPath.toString()))))
+                .andExpect(content().string(not(containsString("JsonParseException"))));
+    }
+
+    @Test
     void pathPreflightRecognizesReadableMavenDirectory(@TempDir Path tempDir) throws Exception {
         Path tempProject = Files.createDirectory(tempDir.resolve("maven-project"));
         Files.writeString(tempProject.resolve("pom.xml"), "<project/>");
@@ -425,6 +459,9 @@ class ConsoleMvcTest {
                 .contains("填写配置")
                 .contains("确认并运行")
                 .contains("workflow-cards")
+                .contains("id=\"copy-load-status\"")
+                .contains("id=\"rerunId-validation\"")
+                .doesNotContain("id=\"rerun-validation\"")
                 .contains("console-common.js")
                 .contains("run-form.js");
 
@@ -459,7 +496,17 @@ class ConsoleMvcTest {
                 .contains("submitButton.disabled = false")
                 .contains("window.location.href = `/runs/${body.id}`")
                 .contains("/api/path-preflight")
-                .contains("/config");
+                .contains("/config")
+                .contains("Object.prototype.hasOwnProperty.call(values, definitionField.key)")
+                .contains("let nextDefaults")
+                .contains("const copySnapshot")
+                .contains("sequence !== renderSequence")
+                .contains("复制配置读取失败，已保留链路默认值。")
+                .contains("let configLoading = false")
+                .contains("if (configLoading)")
+                .contains("validation.textContent = message")
+                .contains("submitButton.disabled = configLoading")
+                .doesNotContain("if (validation && message) validation.textContent = message");
     }
 
     private long createCopiedRun(Path tempDir) throws Exception {

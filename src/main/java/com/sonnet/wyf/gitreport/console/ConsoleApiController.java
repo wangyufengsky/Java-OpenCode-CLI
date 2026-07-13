@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.file.Path;
+import java.nio.file.InvalidPathException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -91,15 +92,19 @@ public class ConsoleApiController {
         if (run.configPath() == null || run.configPath().isBlank()) {
             throw new IllegalArgumentException("运行没有配置文件");
         }
-        return new RunConfigResponse(
-                run.id(),
-                run.chainId(),
-                run.mode(),
-                run.rerunType(),
-                run.rerunId(),
-                run.runDate(),
-                configReader.readFlat(Path.of(run.configPath()))
-        );
+        try {
+            return new RunConfigResponse(
+                    run.id(),
+                    run.chainId(),
+                    run.mode(),
+                    run.rerunType(),
+                    run.rerunId(),
+                    run.runDate(),
+                    configReader.readFlat(Path.of(run.configPath()))
+            );
+        } catch (InvalidPathException exception) {
+            throw new IllegalArgumentException("运行配置文件不存在或不可读取", exception);
+        }
     }
 
     @GetMapping("/path-preflight")

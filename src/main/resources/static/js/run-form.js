@@ -13,10 +13,13 @@
   const configDescription = document.querySelector('#chain-config-description');
   const submitButton = document.querySelector('#submit-run');
   const submitResult = document.querySelector('#submit-result');
+  const copyLoadStatus = document.querySelector('#copy-load-status');
   const preflightState = new Map();
   let defaults = {};
   let renderSequence = 0;
   let copiedConfigPending = Boolean(runForm.dataset.copyFrom);
+  let configLoading = false;
+  let configReady = false;
 
   chainSelect.value = runForm.dataset.selectedChain || chainSelect.value;
   modeSelect.value = runForm.dataset.selectedMode || modeSelect.value;
@@ -64,30 +67,47 @@
 
   async function renderConfigFields(chainId) {
     const sequence = ++renderSequence;
+    const copySnapshot = copiedConfigPending ? runForm.dataset.copyFrom : '';
+    copiedConfigPending = false;
     const definition = chainConfigDefinitions[chainId];
+    configReady = false;
+    setConfigLoading(true);
     configFields.replaceChildren();
     configDescription.textContent = definition ? definition.description : '';
-    if (!definition) return;
+    copyLoadStatus.textContent = copySnapshot ? '正在载入复制配置...' : '';
+    if (!definition) {
+      setConfigLoading(false);
+      return;
+    }
 
     const loading = document.createElement('p');
     loading.className = 'muted';
     loading.textContent = '正在读取链路默认配置...';
     configFields.appendChild(loading);
-    let values = {};
+    let nextDefaults = {};
     try {
-      defaults = await loadDefaults(chainId);
-      values = { ...defaults };
-      if (copiedConfigPending) {
-        const copied = await loadCopiedConfig(runForm.dataset.copyFrom);
-        if (copied.chainId === chainId) values = { ...values, ...(copied.config || {}) };
-        copiedConfigPending = false;
-      }
+      nextDefaults = await loadDefaults(chainId);
     } catch (error) {
-      defaults = {};
-      configDescription.textContent = `${definition.description}（配置读取失败，可保留当前页面并重试）`;
+      if (sequence !== renderSequence || chainSelect.value !== chainId) return;
+      configDescription.textContent = `${definition.description}（默认配置读取失败，可手动填写后提交）`;
+    }
+    let values = { ...nextDefaults };
+    if (copySnapshot) {
+      try {
+        const copied = await loadCopiedConfig(copySnapshot);
+        if (copied.chainId === chainId) values = { ...values, ...(copied.config || {}) };
+        if (sequence === renderSequence && chainSelect.value === chainId) {
+          copyLoadStatus.textContent = '原运行配置已载入；提交时将创建新运行。';
+        }
+      } catch (error) {
+        if (sequence === renderSequence && chainSelect.value === chainId) {
+          copyLoadStatus.textContent = '复制配置读取失败，已保留链路默认值。';
+        }
+      }
     }
     if (sequence !== renderSequence || chainSelect.value !== chainId) return;
 
+    defaults = nextDefaults;
     configFields.replaceChildren();
     groupDefinitions.forEach((groupDefinition) => {
       const fields = definition.fields.filter((item) => item.group === groupDefinition.group);
@@ -110,12 +130,23 @@
       const grid = document.createElement('div');
       grid.className = 'config-fields';
       fields.forEach((definitionField) => {
-        grid.appendChild(createConfigField(definitionField, values[definitionField.key]));
+        const value = Object.prototype.hasOwnProperty.call(values, definitionField.key)
+          ? values[definitionField.key] : undefined;
+        grid.appendChild(createConfigField(definitionField, value));
       });
       group.appendChild(grid);
       configFields.appendChild(group);
     });
+    configReady = Boolean(configFields.querySelector('[data-config-key]'));
+    setConfigLoading(false);
     updateSummary();
+  }
+
+  function setConfigLoading(loading) {
+    configLoading = loading;
+    configFields.setAttribute('aria-busy', String(loading));
+    submitButton.disabled = configLoading;
+    if (!configLoading && !configReady) submitButton.disabled = true;
   }
 
   async function loadDefaults(chainId) {
@@ -210,7 +241,7 @@
       ? `请填写${label}` : '';
     control.setCustomValidity(message);
     const validation = document.querySelector(`#${control.id}-validation`);
-    if (validation && message) validation.textContent = message;
+    if (validation) validation.textContent = message;
     return message === '';
   }
 
@@ -228,7 +259,7 @@
     }
     const value = control.value.trim();
     if (!value) {
-      status.textContent = '';
+      if (!control.validationMessage) status.textContent = '';
       preflightState.delete(control.id);
       return;
     }
@@ -335,6 +366,14 @@
 
   runForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (configLoading) {
+      submitResult.textContent = '配置仍在载入，请稍候。';
+      return;
+    }
+    if (!configReady) {
+      submitResult.textContent = '配置字段尚未就绪，请重新选择工作流后再试。';
+      return;
+    }
     runForm.querySelectorAll('[data-config-key]').forEach((control) => {
       const definition = chainConfigDefinitions[chainSelect.value].fields
         .find((item) => item.key === control.dataset.configKey);

@@ -18,8 +18,9 @@
         <section class="panel form-main">
           <div class="copy-banner" th:if="${copiedRun != null}" role="status">
             <strong th:text="${'复制自运行 #' + copiedRun.id}">复制自运行 #1</strong>
-            <span>原运行的模式、日期与配置会被载入；提交时将创建新运行。</span>
+            <span>正在载入原运行配置；链路默认值会先行保留。</span>
           </div>
+          <p id="copy-load-status" class="form-message" role="status" aria-live="polite"></p>
 
           <section aria-labelledby="workflow-title">
             <div class="panel-title">
@@ -64,7 +65,7 @@
               </label>
               <label for="rerunId">重跑编号
                 <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔" th:value="${selectedRerunId}">
-                <small id="rerun-validation" class="form-message" aria-live="polite"></small>
+                <small id="rerunId-validation" class="form-message" aria-live="polite"></small>
               </label>
               <label for="runDate">运行日期
                 <input id="runDate" name="runDate" type="date" th:value="${selectedRunDate}">

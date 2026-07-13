@@ -15,25 +15,26 @@ public class RunConfigReader {
 
     private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
 
-    public Map<String, Object> readFlat(Path configPath) throws IOException {
+    public Map<String, Object> readFlat(Path configPath) {
         if (configPath == null) {
             throw new IllegalArgumentException("运行配置路径不能为空");
         }
         Path normalized = configPath.toAbsolutePath().normalize();
-        if (!Files.isRegularFile(normalized)) {
+        if (!Files.isRegularFile(normalized) || !Files.isReadable(normalized)) {
             throw new IllegalArgumentException("运行配置文件不存在或不可读取");
         }
-        Map<String, Object> source = yamlMapper.readValue(normalized.toFile(), MAP_TYPE);
-        Map<String, Object> flattened = new LinkedHashMap<>();
-        flatten("", source == null ? Map.of() : source, flattened);
-        return flattened;
+        try {
+            Map<String, Object> source = yamlMapper.readValue(normalized.toFile(), MAP_TYPE);
+            Map<String, Object> flattened = new LinkedHashMap<>();
+            flatten("", source == null ? Map.of() : source, flattened);
+            return flattened;
+        } catch (IOException | RuntimeException exception) {
+            throw new IllegalArgumentException("运行配置文件无法读取或解析", exception);
+        }
     }
 
     private static void flatten(String prefix, Map<?, ?> source, Map<String, Object> target) {
         source.forEach((key, value) -> {
-            if (value == null) {
-                return;
-            }
             String segment = String.valueOf(key);
             String flattenedKey = prefix.isBlank() ? segment : prefix + "." + segment;
             if (value instanceof Map<?, ?> nested) {
