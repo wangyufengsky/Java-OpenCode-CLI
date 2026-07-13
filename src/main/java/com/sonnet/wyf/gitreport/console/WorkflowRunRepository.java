@@ -9,6 +9,8 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -86,7 +88,44 @@ public class WorkflowRunRepository {
     }
 
     public List<WorkflowRunRecord> listRuns() {
-        return jdbcTemplate.query("select * from workflow_runs order by id desc", runMapper());
+        return listRuns(WorkflowRunFilter.empty());
+    }
+
+    public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter) {
+        WorkflowRunFilter normalized = filter == null ? WorkflowRunFilter.empty() : filter;
+        List<String> conditions = new ArrayList<>();
+        List<Object> arguments = new ArrayList<>();
+
+        if (normalized.query() != null) {
+            conditions.add("(cast(id as text) like ? or chain_id like ? or config_path like ?)");
+            String queryPattern = "%" + normalized.query() + "%";
+            arguments.add(queryPattern);
+            arguments.add(queryPattern);
+            arguments.add(queryPattern);
+        }
+        if (normalized.state() != null) {
+            conditions.add("state = ?");
+            arguments.add(normalized.state().name());
+        }
+        if (normalized.chainId() != null) {
+            conditions.add("chain_id = ?");
+            arguments.add(normalized.chainId());
+        }
+        if (normalized.createdFrom() != null) {
+            conditions.add("created_at >= ?");
+            arguments.add(normalized.createdFrom().atStartOfDay(ZoneOffset.UTC).toInstant().toString());
+        }
+        if (normalized.createdUntil() != null) {
+            conditions.add("created_at < ?");
+            arguments.add(normalized.createdUntil().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toString());
+        }
+
+        StringBuilder sql = new StringBuilder("select * from workflow_runs");
+        if (!conditions.isEmpty()) {
+            sql.append(" where ").append(String.join(" and ", conditions));
+        }
+        sql.append(" order by id desc");
+        return jdbcTemplate.query(sql.toString(), runMapper(), arguments.toArray());
     }
 
     public Optional<WorkflowRunRecord> findRun(long id) {

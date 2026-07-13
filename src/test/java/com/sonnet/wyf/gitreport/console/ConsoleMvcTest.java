@@ -448,6 +448,58 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void historyFiltersPersistAndExposeOnlyDetailAndCopyActions() throws Exception {
+        long failedRunId = repository.createRun(new WorkflowRunSubmission(
+                "weekly-engineering-report", "full", null, null, null, Map.of(), null
+        ), "weekly-history-config.yml");
+        repository.markFailed(failedRunId, "历史筛选测试失败");
+        long otherRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "other-history-config.yml");
+
+        String history = mockMvc.perform(get("/history")
+                        .param("q", "weekly")
+                        .param("state", "FAILED")
+                        .param("chainId", "weekly-engineering-report")
+                        .param("from", "2026-07-01")
+                        .param("until", "2026-07-31"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(history)
+                .contains("name=\"q\"")
+                .contains("value=\"weekly\"")
+                .containsPattern("(?s)<option value=\"FAILED\"\\s+selected(?:=\"selected\")?>已失败</option>")
+                .containsPattern("(?s)<option value=\"weekly-engineering-report\"\\s+selected(?:=\"selected\")?>研发周报</option>")
+                .contains("name=\"from\"")
+                .contains("value=\"2026-07-01\"")
+                .contains("name=\"until\"")
+                .contains("value=\"2026-07-31\"")
+                .contains("href=\"/runs/" + failedRunId + "\">查看详情</a>")
+                .contains("href=\"/runs/new?copyFrom=" + failedRunId + "\">复制配置</a>")
+                .doesNotContain("href=\"/runs/" + otherRunId + "\">查看详情</a>");
+    }
+
+    @Test
+    void historyShowsClearFiltersForNoResultsAndIgnoresInvalidState() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "invalid-state-history-config.yml");
+
+        mockMvc.perform(get("/history").param("q", "definitely-no-history-result"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("当前筛选下暂无运行记录")))
+                .andExpect(content().string(containsString("href=\"/history\">清除筛选</a>")));
+
+        mockMvc.perform(get("/history").param("state", "not-a-state"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("href=\"/runs/" + runId + "\">查看详情</a>")))
+                .andExpect(content().string(not(containsString("value=\"not-a-state\" selected"))));
+    }
+
+    @Test
     void newRunAssetsExposeGroupedDefaultsPreflightAndResilientSubmission() throws Exception {
         String page = mockMvc.perform(get("/runs/new").param("chainId", "project-unit-test-generation"))
                 .andExpect(status().isOk())

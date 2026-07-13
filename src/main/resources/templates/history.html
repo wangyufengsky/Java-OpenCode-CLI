@@ -7,25 +7,77 @@
   <main class="app-main">
     <header th:replace="~{fragments/layout :: pageHeader('运行管理', '运行历史', '基于 SQLite 保存的工作流运行归档。')}"></header>
     <div class="page-content">
+    <form id="history-filter-form" class="panel schedule-list-panel" action="/history" method="get">
+      <div class="panel-title">
+        <div>
+          <h2>筛选运行</h2>
+          <p class="page-description">按编号、链路、配置路径、状态和创建日期查找运行。</p>
+        </div>
+        <a class="button" href="/history">清除筛选</a>
+      </div>
+      <div class="form-row">
+        <label>搜索
+          <input type="search" name="q" placeholder="运行编号、链路或配置路径" th:value="${filter.query}">
+        </label>
+        <label>状态
+          <select name="state">
+            <option value="">全部状态</option>
+            <option th:each="candidate : ${runStates}"
+                    th:value="${candidate.name()}"
+                    th:text="${@consoleText.state(candidate)}"
+                    th:selected="${candidate == filter.state}">已失败</option>
+          </select>
+        </label>
+        <label>链路
+          <select name="chainId">
+            <option value="">全部链路</option>
+            <option th:each="candidate : ${chains}"
+                    th:value="${candidate}"
+                    th:text="${@consoleText.chain(candidate)}"
+                    th:selected="${candidate == filter.chainId}">代码贡献报告</option>
+          </select>
+        </label>
+        <label>开始日期
+          <input type="date" name="from" th:value="${filter.createdFrom}">
+        </label>
+        <label>结束日期
+          <input type="date" name="until" th:value="${filter.createdUntil}">
+        </label>
+      </div>
+      <button class="button primary" type="submit">应用筛选</button>
+    </form>
     <section class="panel">
+    <div class="panel-title">
+      <h2>运行记录</h2>
+      <span class="page-description" th:text="|${runs.size()} 条结果|">0 条结果</span>
+    </div>
     <table>
-      <thead><tr><th>编号</th><th>链路</th><th>模式</th><th>重跑</th><th>状态</th><th>创建时间</th><th>失败原因</th></tr></thead>
+      <thead><tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th><th>失败原因</th><th>操作</th></tr></thead>
       <tbody>
       <tr th:each="run : ${runs}">
-        <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
+        <td th:text="${run.id}">1</td>
         <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
         <td th:text="${@consoleText.mode(run.mode)}">全量</td>
-        <td th:text="${@consoleText.rerunType(run.rerunType)}">-</td>
         <td><span class="status-badge" th:classappend="${run.state.name().toLowerCase()}" th:text="${@consoleText.state(run.state)}">排队中</span></td>
         <td th:text="${run.createdAt}">时间</td>
         <td th:text="${run.failureMessage ?: ''}"></td>
+        <td>
+          <a th:href="@{/runs/{id}(id=${run.id})}">查看详情</a>
+          <span aria-hidden="true"> · </span>
+          <a th:href="@{/runs/new(copyFrom=${run.id})}">复制配置</a>
+        </td>
       </tr>
-      <tr th:if="${runs.isEmpty()}"><td colspan="7" class="empty">暂无运行记录。</td></tr>
+      <tr th:if="${runs.isEmpty()}">
+        <td colspan="7" class="empty">
+          当前筛选下暂无运行记录。<a href="/history">清除筛选</a>
+        </td>
+      </tr>
       </tbody>
     </table>
     </section>
     </div>
   </main>
 </div>
+<script src="/js/history.js"></script>
 </body>
 </html>

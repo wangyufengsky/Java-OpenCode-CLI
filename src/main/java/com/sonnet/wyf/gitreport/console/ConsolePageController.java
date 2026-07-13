@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -103,8 +105,25 @@ public class ConsolePageController {
     }
 
     @GetMapping("/history")
-    public String history(Model model) {
-        model.addAttribute("runs", repository.listRuns());
+    public String history(
+            @RequestParam(required = false, defaultValue = "") String q,
+            @RequestParam(required = false, defaultValue = "") String state,
+            @RequestParam(required = false, defaultValue = "") String chainId,
+            @RequestParam(name = "from", required = false, defaultValue = "") String createdFrom,
+            @RequestParam(name = "until", required = false, defaultValue = "") String createdUntil,
+            Model model
+    ) {
+        WorkflowRunFilter filter = new WorkflowRunFilter(
+                q,
+                parseRunState(state),
+                chainId,
+                parseDate(createdFrom),
+                parseDate(createdUntil)
+        );
+        model.addAttribute("runs", repository.listRuns(filter));
+        model.addAttribute("filter", filter);
+        model.addAttribute("chains", chainCatalog.chainIds());
+        model.addAttribute("runStates", RunState.values());
         return "history";
     }
 
@@ -192,5 +211,21 @@ public class ConsolePageController {
 
     private static String trimmed(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static RunState parseRunState(String value) {
+        try {
+            return RunState.valueOf(trimmed(value).toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private static LocalDate parseDate(String value) {
+        try {
+            return LocalDate.parse(trimmed(value));
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 }
