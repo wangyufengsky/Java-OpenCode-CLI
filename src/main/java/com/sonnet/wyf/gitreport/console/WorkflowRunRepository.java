@@ -137,6 +137,15 @@ public class WorkflowRunRepository {
         return jdbcTemplate.query("select * from workflow_run_events where run_id=? order by id", eventMapper(), runId);
     }
 
+    public List<WorkflowRunEvent> listEventsAfter(long runId, long afterId) {
+        return jdbcTemplate.query(
+                "select * from workflow_run_events where run_id=? and id>? order by id",
+                eventMapper(),
+                runId,
+                Math.max(0L, afterId)
+        );
+    }
+
     public List<WorkflowTaskStatus> listTaskStatuses(long runId) {
         return jdbcTemplate.query("select * from workflow_task_status where run_id=? order by task_key", taskMapper(), runId);
     }

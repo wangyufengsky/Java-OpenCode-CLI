@@ -87,7 +87,10 @@ public class ConsolePageController {
         tasks.sort(Comparator.comparing((WorkflowTaskStatus task) -> !"FAILED".equalsIgnoreCase(task.state()))
                 .thenComparing(WorkflowTaskStatus::taskKey));
         model.addAttribute("run", run);
-        model.addAttribute("events", filterEvents(allEvents, eventFilter));
+        List<WorkflowRunEvent> visibleEvents = filterEvents(allEvents, eventFilter);
+        model.addAttribute("events", allEvents);
+        model.addAttribute("visibleEventIds", visibleEvents.stream().map(WorkflowRunEvent::id).collect(java.util.stream.Collectors.toSet()));
+        model.addAttribute("visibleEventsEmpty", visibleEvents.isEmpty());
         model.addAttribute("eventFilter", eventFilter);
         model.addAttribute("tasks", tasks);
         ConsoleRunDetailSummary summary = viewService.runDetail(id);

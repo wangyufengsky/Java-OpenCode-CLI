@@ -49,6 +49,25 @@ class WorkflowRunRepositoryTest {
     }
 
     @Test
+    void listsOnlyEventsAfterTheBoundEventIdInAscendingOrder() {
+        WorkflowRunRepository repository = repository();
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "demo-chain", "full", null, null, null, Map.of(), null
+        ), tempDir.resolve("incremental-events.yml").toString());
+        repository.appendEvent(runId, "QUEUED", "first");
+        repository.appendEvent(runId, "STARTED", "second");
+        repository.appendEvent(runId, "TASK_RUNNING", "third");
+        var events = repository.listEvents(runId);
+
+        assertThat(repository.listEventsAfter(runId, events.getFirst().id()))
+                .extracting(WorkflowRunEvent::id)
+                .containsExactly(events.get(1).id(), events.get(2).id());
+        assertThat(repository.listEventsAfter(runId, -10))
+                .extracting(WorkflowRunEvent::id)
+                .containsExactlyElementsOf(events.stream().map(WorkflowRunEvent::id).toList());
+    }
+
+    @Test
     void filtersRunsByQueryStateAndChainWithBoundValues() {
         WorkflowRunRepository repository = repository();
         long matchingRunId = repository.createRun(new WorkflowRunSubmission(

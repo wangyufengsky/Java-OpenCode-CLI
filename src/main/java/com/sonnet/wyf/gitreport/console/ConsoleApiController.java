@@ -26,6 +26,7 @@ public class ConsoleApiController {
     private final WorkflowScheduleService scheduleService;
     private final RunConfigReader configReader;
     private final PathPreflightService pathPreflightService;
+    private final ConsoleViewService viewService;
 
     public ConsoleApiController(
             ChainCatalog chainCatalog,
@@ -34,7 +35,8 @@ public class ConsoleApiController {
             EventStreamService eventStreamService,
             WorkflowScheduleService scheduleService,
             RunConfigReader configReader,
-            PathPreflightService pathPreflightService
+            PathPreflightService pathPreflightService,
+            ConsoleViewService viewService
     ) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
@@ -43,6 +45,7 @@ public class ConsoleApiController {
         this.scheduleService = scheduleService;
         this.configReader = configReader;
         this.pathPreflightService = pathPreflightService;
+        this.viewService = viewService;
     }
 
     @GetMapping("/chains")
@@ -117,6 +120,20 @@ public class ConsoleApiController {
         return eventStreamService.subscribe(id, repository.listEvents(id));
     }
 
+    @GetMapping("/runs/{id}/snapshot")
+    public RunSnapshotResponse runSnapshot(
+            @PathVariable long id,
+            @RequestParam(required = false, defaultValue = "0") long afterEventId
+    ) {
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        return new RunSnapshotResponse(
+                run,
+                viewService.runDetail(id),
+                repository.listTaskStatuses(id),
+                repository.listEventsAfter(id, Math.max(0L, afterEventId))
+        );
+    }
+
     private void validate(WorkflowRunSubmission submission) {
         String chainId = submission.chainId() == null ? "" : submission.chainId().trim();
         chainCatalog.chain(chainId);
@@ -147,6 +164,14 @@ public class ConsoleApiController {
             String rerunId,
             LocalDate runDate,
             Map<String, Object> config
+    ) {
+    }
+
+    public record RunSnapshotResponse(
+            WorkflowRunRecord run,
+            ConsoleRunDetailSummary summary,
+            List<WorkflowTaskStatus> tasks,
+            List<WorkflowRunEvent> events
     ) {
     }
 }

@@ -298,19 +298,99 @@ class ConsoleMvcTest {
                 .contains("<ol id=\"events\" class=\"event-list\" data-event-filter=\"failed\">")
                 .contains("<li data-empty-state=\"true\"><span class=\"empty\">当前筛选下暂无事件。</span></li>");
 
-        String appJs = mockMvc.perform(get("/app.js"))
+        String runDetailJs = mockMvc.perform(get("/js/run-detail.js"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
-        assertThat(appJs)
+        assertThat(runDetailJs)
                 .contains("events.dataset.eventFilter")
                 .contains("function matchesEventFilter(event, filter)")
-                .contains("events.querySelector('[data-empty-state]')?.remove()")
+                .contains("const emptyState = events.querySelector('[data-empty-state]')")
                 .containsSubsequence(
-                        "seenEvents.add(eventId);",
+                        "seenIds.add(eventId);",
                         "if (!matchesEventFilter(event, eventFilter)) return;"
                 );
+
+        assertThat(detail)
+                .contains("/js/run-detail.js")
+                .doesNotContain("/app.js");
+    }
+
+    @Test
+    void runSnapshotReturnsConsistentSummaryTasksAndIncrementalEvents() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "snapshot-config.yml");
+        repository.markRunning(runId);
+        repository.appendEvent(runId, "QUEUED", "first event");
+        WorkflowRunEvent firstEvent = repository.listEvents(runId).getFirst();
+        repository.appendEvent(runId, "TASK_RUNNING", "second event");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId, "task-a", "Task A", "RUNNING", "execution", null, null, Instant.now()
+        ));
+
+        mockMvc.perform(get("/api/runs/" + runId + "/snapshot")
+                        .param("afterEventId", String.valueOf(firstEvent.id())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.run.id").value(runId))
+                .andExpect(jsonPath("$.run.state").value("RUNNING"))
+                .andExpect(jsonPath("$.summary.totalTasks").value(1))
+                .andExpect(jsonPath("$.tasks[0].taskKey").value("task-a"))
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].eventType").value("TASK_RUNNING"));
+    }
+
+    @Test
+    void runSnapshotNormalizesNegativeCursorAndReturnsStableNotFound() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "negative-snapshot-config.yml");
+        repository.appendEvent(runId, "QUEUED", "visible from zero");
+
+        mockMvc.perform(get("/api/runs/" + runId + "/snapshot").param("afterEventId", "-99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].message").value("visible from zero"));
+        mockMvc.perform(get("/api/runs/9223372036854775807/snapshot"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("未找到"));
+    }
+
+    @Test
+    void runDetailScriptOwnsReconnectPollingDeduplicationAndClientFilters() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "detail-assets-config.yml");
+
+        String detail = mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail)
+                .contains("id=\"event-filter\"")
+                .contains("id=\"task-filter\"")
+                .contains("id=\"run-summary\"")
+                .contains("id=\"task-rows\"")
+                .contains("/js/run-detail.js")
+                .doesNotContain("/app.js");
+
+        String script = mockMvc.perform(get("/js/run-detail.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(script)
+                .contains("new EventSource")
+                .contains("lastEventId")
+                .contains("seenIds")
+                .contains("consecutiveErrors")
+                .contains("5000")
+                .contains("/snapshot?afterEventId=")
+                .contains("stopSnapshotPolling")
+                .contains("textContent")
+                .doesNotContain("innerHTML");
     }
 
     @Test
