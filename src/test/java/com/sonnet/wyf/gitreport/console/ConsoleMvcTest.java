@@ -490,13 +490,17 @@ class ConsoleMvcTest {
     }
 
     @Test
-    void runFormKeepsSubmitDisabledWhenConfigurationIsNotReadyAfterARequest() throws Exception {
+    void runFormKeepsSubmitDisabledWhileRequestOrConfigurationIsInFlight() throws Exception {
         String script = mockMvc.perform(get("/js/run-form.js"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
         assertThat(script)
-                .contains("submitButton.disabled = configLoading || !configReady")
+                .contains("let submitInFlight = false")
+                .contains("if (submitInFlight) return;")
+                .contains("submitButton.disabled = submitInFlight || configLoading || !configReady")
+                .contains("submitInFlight = true")
+                .contains("submitInFlight = false")
                 .doesNotContain("finally {\n      submitButton.disabled = false;");
     }
 
@@ -731,8 +735,8 @@ class ConsoleMvcTest {
                 .contains("endsWith('-root')")
                 .contains("恢复默认值")
                 .contains("firstInvalid.focus()")
-                .contains("submitButton.disabled = true")
-                .contains("submitButton.disabled = configLoading || !configReady")
+                .contains("if (submitInFlight) return;")
+                .contains("submitButton.disabled = submitInFlight || configLoading || !configReady")
                 .contains("window.location.href = `/runs/${body.id}`")
                 .contains("/api/path-preflight")
                 .contains("/config")
@@ -744,7 +748,6 @@ class ConsoleMvcTest {
                 .contains("let configLoading = false")
                 .contains("if (configLoading)")
                 .contains("validation.textContent = message")
-                .contains("submitButton.disabled = configLoading")
                 .doesNotContain("if (validation && message) validation.textContent = message");
     }
 

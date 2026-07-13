@@ -20,6 +20,7 @@
   let copiedConfigPending = Boolean(runForm.dataset.copyFrom);
   let configLoading = false;
   let configReady = false;
+  let submitInFlight = false;
 
   chainSelect.value = runForm.dataset.selectedChain || chainSelect.value;
   modeSelect.value = runForm.dataset.selectedMode || modeSelect.value;
@@ -149,7 +150,7 @@
   }
 
   function syncSubmitState() {
-    submitButton.disabled = configLoading || !configReady;
+    submitButton.disabled = submitInFlight || configLoading || !configReady;
   }
 
   async function loadDefaults(chainId) {
@@ -369,6 +370,7 @@
 
   runForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitInFlight) return;
     if (configLoading) {
       submitResult.textContent = '配置仍在载入，请稍候。';
       return;
@@ -390,7 +392,8 @@
       return;
     }
 
-    submitButton.disabled = true;
+    submitInFlight = true;
+    syncSubmitState();
     submitResult.textContent = '正在提交…';
     const payload = {
       chainId: chainSelect.value,
@@ -415,6 +418,7 @@
     } catch (error) {
       submitResult.textContent = '网络请求失败，已保留当前填写内容。';
     } finally {
+      submitInFlight = false;
       syncSubmitState();
     }
   });
