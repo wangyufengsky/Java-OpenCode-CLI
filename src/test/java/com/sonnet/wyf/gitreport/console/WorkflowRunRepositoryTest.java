@@ -103,11 +103,63 @@ class WorkflowRunRepositoryTest {
         ))).extracting(WorkflowRunRecord::id).containsExactly(runId);
     }
 
+    @Test
+    void dateFiltersUseUtcDayBoundariesForFractionalSecondTimestamps() {
+        WorkflowRunRepository repository = repository();
+        long startDayRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "start-day.yml");
+        long nextDayRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "next-day.yml");
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        jdbcTemplate.update("update workflow_runs set created_at=? where id=?",
+                "2026-07-13T00:00:00.123Z", startDayRunId);
+        jdbcTemplate.update("update workflow_runs set created_at=? where id=?",
+                "2026-07-14T00:00:00.123Z", nextDayRunId);
+
+        WorkflowRunFilter filter = new WorkflowRunFilter(
+                null, null, null, LocalDate.of(2026, 7, 13), LocalDate.of(2026, 7, 13)
+        );
+
+        assertThat(repository.listRuns(filter))
+                .extracting(WorkflowRunRecord::id)
+                .containsExactly(startDayRunId);
+    }
+
+    @Test
+    void textQueryTreatsPercentAndUnderscoreAsLiteralCharacters() {
+        WorkflowRunRepository repository = repository();
+        long percentRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "percent%marker.yml");
+        repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "percentXmarker.yml");
+        long underscoreRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "under_score.yml");
+        repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "underXscore.yml");
+
+        assertThat(repository.listRuns(new WorkflowRunFilter(
+                "%", null, null, null, null
+        ))).extracting(WorkflowRunRecord::id).containsExactly(percentRunId);
+        assertThat(repository.listRuns(new WorkflowRunFilter(
+                "_", null, null, null, null
+        ))).extracting(WorkflowRunRecord::id).containsExactly(underscoreRunId);
+    }
+
     private WorkflowRunRepository repository() {
-        SQLiteDataSource dataSource = new SQLiteDataSource();
-        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
         new WorkflowRunSchema(jdbcTemplate).initialize();
         return new WorkflowRunRepository(jdbcTemplate);
+    }
+
+    private JdbcTemplate jdbcTemplate() {
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));
+        return new JdbcTemplate(dataSource);
     }
 }

@@ -97,8 +97,8 @@ public class WorkflowRunRepository {
         List<Object> arguments = new ArrayList<>();
 
         if (normalized.query() != null) {
-            conditions.add("(cast(id as text) like ? or chain_id like ? or config_path like ?)");
-            String queryPattern = "%" + normalized.query() + "%";
+            conditions.add("(cast(id as text) like ? escape '!' or chain_id like ? escape '!' or config_path like ? escape '!')");
+            String queryPattern = "%" + escapeLikeLiteral(normalized.query()) + "%";
             arguments.add(queryPattern);
             arguments.add(queryPattern);
             arguments.add(queryPattern);
@@ -112,11 +112,11 @@ public class WorkflowRunRepository {
             arguments.add(normalized.chainId());
         }
         if (normalized.createdFrom() != null) {
-            conditions.add("created_at >= ?");
+            conditions.add("julianday(created_at) >= julianday(?)");
             arguments.add(normalized.createdFrom().atStartOfDay(ZoneOffset.UTC).toInstant().toString());
         }
         if (normalized.createdUntil() != null) {
-            conditions.add("created_at < ?");
+            conditions.add("julianday(created_at) < julianday(?)");
             arguments.add(normalized.createdUntil().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toString());
         }
 
@@ -185,6 +185,10 @@ public class WorkflowRunRepository {
 
     private static LocalDate parseDate(String value) {
         return value == null || value.isBlank() ? null : LocalDate.parse(value);
+    }
+
+    private static String escapeLikeLiteral(String value) {
+        return value.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 
     private static Instant parseInstant(String value) {
