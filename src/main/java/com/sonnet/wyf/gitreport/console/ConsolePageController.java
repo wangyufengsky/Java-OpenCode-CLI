@@ -94,15 +94,8 @@ public class ConsolePageController {
         model.addAttribute("eventFilter", eventFilter);
         model.addAttribute("tasks", tasks);
         ConsoleRunDetailSummary summary = viewService.runDetail(id);
-        String failedTaskPhase = tasks.stream()
-                .filter(task -> task.taskKey().equals(summary.failedTaskKey()))
-                .map(WorkflowTaskStatus::phase)
-                .findFirst()
-                .orElse(null);
         model.addAttribute("summary", summary);
-        model.addAttribute("failedTaskRerunType", summary.failedTaskKey() == null
-                ? null
-                : WorkflowRerunContract.failedTaskRerunType(run.chainId(), failedTaskPhase).orElse(null));
+        model.addAttribute("rerunAction", WorkflowRerunContract.failedTaskAction(run.chainId(), summary, tasks));
         model.addAttribute("stages", classifyStages(run, allEvents, tasks));
         return "run-detail";
     }

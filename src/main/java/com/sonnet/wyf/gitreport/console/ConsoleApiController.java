@@ -126,11 +126,14 @@ public class ConsoleApiController {
             @RequestParam(required = false, defaultValue = "0") long afterEventId
     ) {
         WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        ConsoleRunDetailSummary summary = viewService.runDetail(id);
+        List<WorkflowTaskStatus> tasks = repository.listTaskStatuses(id);
         return new RunSnapshotResponse(
                 run,
-                viewService.runDetail(id),
-                repository.listTaskStatuses(id),
-                repository.listEventsAfter(id, Math.max(0L, afterEventId))
+                summary,
+                tasks,
+                repository.listEventsAfter(id, Math.max(0L, afterEventId)),
+                WorkflowRerunContract.failedTaskAction(run.chainId(), summary, tasks)
         );
     }
 
@@ -171,7 +174,8 @@ public class ConsoleApiController {
             WorkflowRunRecord run,
             ConsoleRunDetailSummary summary,
             List<WorkflowTaskStatus> tasks,
-            List<WorkflowRunEvent> events
+            List<WorkflowRunEvent> events,
+            FailedTaskRerunAction rerunAction
     ) {
     }
 }

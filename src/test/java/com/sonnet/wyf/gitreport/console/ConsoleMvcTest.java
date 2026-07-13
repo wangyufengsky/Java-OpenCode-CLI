@@ -271,7 +271,8 @@ class ConsoleMvcTest {
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
         assertThat(detail)
-                .doesNotContain(">重跑失败任务</a>")
+                .containsPattern("(?s)<a id=\"rerun-failed-task\"[^>]*hidden=\"hidden\"[^>]*>重跑失败任务</a>")
+                .doesNotContain("mode=rerun")
                 .contains("无法安全确定重跑类型")
                 .contains("href=\"/runs/new?chainId=smartesb-rewrite-code-review\">配置新运行</a>");
     }
@@ -355,6 +356,53 @@ class ConsoleMvcTest {
         mockMvc.perform(get("/api/runs/9223372036854775807/snapshot"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("未找到"));
+    }
+
+    @Test
+    void runSnapshotProvidesTheSameSafeFailedTaskActionAsTheInitialPage() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "snapshot-rerun-action.yml");
+        repository.markRunning(runId);
+        repository.markFailed(runId, "作者任务失败");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId, "author-a", "Author A", "FAILED", "author", null, "failed", Instant.now()
+        ));
+        repository.appendEvent(runId, "TASK_FAILED", "author-a failed");
+
+        mockMvc.perform(get("/api/runs/" + runId + "/snapshot"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rerunAction.visible").value(true))
+                .andExpect(jsonPath("$.rerunAction.available").value(true))
+                .andExpect(jsonPath("$.rerunAction.rerunType").value("author"))
+                .andExpect(jsonPath("$.rerunAction.rerunId").value("author-a"))
+                .andExpect(jsonPath("$.rerunAction.reason").isEmpty());
+
+        mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"failure-actions\"")))
+                .andExpect(content().string(containsString("id=\"rerun-failed-task\"")))
+                .andExpect(content().string(containsString("rerunId=author-a")));
+    }
+
+    @Test
+    void runSnapshotRejectsAmbiguousFailedTaskRerunsWithoutInventingAType() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "smartesb-rewrite-code-review", "full", null, null, null, Map.of(), null
+        ), "snapshot-ambiguous-rerun.yml");
+        repository.markRunning(runId);
+        repository.markFailed(runId, "无法定位任务种类");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId, "unknown-task", "Unknown task", "FAILED", "execution", null, "failed", Instant.now()
+        ));
+
+        mockMvc.perform(get("/api/runs/" + runId + "/snapshot"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rerunAction.visible").value(true))
+                .andExpect(jsonPath("$.rerunAction.available").value(false))
+                .andExpect(jsonPath("$.rerunAction.rerunType").isEmpty())
+                .andExpect(jsonPath("$.rerunAction.rerunId").value("unknown-task"))
+                .andExpect(jsonPath("$.rerunAction.reason").value("无法安全确定重跑类型"));
     }
 
     @Test

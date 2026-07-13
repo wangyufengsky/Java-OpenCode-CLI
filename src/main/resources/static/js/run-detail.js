@@ -77,7 +77,9 @@
     let taskFilter = 'all';
     let consecutiveErrors = 0;
     let snapshotTimer = null;
-    let snapshotPending = false;
+    let recoveryGeneration = 0;
+    let snapshotPendingGeneration = null;
+    let snapshotAbortController = null;
     let source = null;
 
     if (eventFilterControl) {
@@ -108,9 +110,15 @@
     }
 
     function appendEvent(messageOrEvent) {
-      const event = messageOrEvent && typeof messageOrEvent.data === 'string'
-        ? JSON.parse(messageOrEvent.data)
-        : messageOrEvent;
+      let event = messageOrEvent;
+      if (messageOrEvent && typeof messageOrEvent.data === 'string') {
+        try {
+          event = JSON.parse(messageOrEvent.data);
+        } catch (error) {
+          setStreamState('消息格式异常，继续监听');
+          return;
+        }
+      }
       if (!event || event.id === undefined || event.id === null) return;
       const eventId = String(event.id);
       if (seenIds.has(eventId)) return;
@@ -142,8 +150,15 @@
     }
 
     function updateStateFromEvent(event) {
-      if (event.eventType !== 'SUCCEEDED' && event.eventType !== 'FAILED') return;
-      setText('#run-state', stateLabels[event.eventType] || event.eventType);
+      const stateByEventType = {
+        QUEUED: 'QUEUED',
+        STARTED: 'RUNNING',
+        SUCCEEDED: 'SUCCEEDED',
+        FAILED: 'FAILED'
+      };
+      const state = stateByEventType[event.eventType];
+      if (!state) return;
+      setText('#run-state', stateLabels[state] || state);
     }
 
     function applyEventFilter() {
@@ -181,6 +196,7 @@
       setText('#run-failed-tasks', String(summary.failedTasks || 0));
       setText('#run-duration', `${summary.durationSeconds || 0} 秒`);
       updateFailureSummary(run, summary);
+      updateFailureActions(run, snapshot.rerunAction);
       renderTasks(Array.isArray(snapshot.tasks) ? snapshot.tasks : []);
       (Array.isArray(snapshot.events) ? snapshot.events : []).forEach(appendEvent);
       applyEventFilter();
@@ -197,6 +213,42 @@
       setText('#failure-message', summary.failureMessage || '未记录');
       setText('#failed-task-key', summary.failedTaskKey || '未记录');
       setText('#last-error-message', summary.lastErrorMessage || '未记录');
+    }
+
+    function updateFailureActions(run, action) {
+      const container = root.querySelector('#failure-actions');
+      const rerunLink = root.querySelector('#rerun-failed-task');
+      const unavailableReason = root.querySelector('#rerun-unavailable-reason');
+      const configureLink = root.querySelector('#configure-new-run');
+      const visible = Boolean(action && action.visible);
+      const available = visible && Boolean(action.available);
+
+      if (container) container.hidden = !visible;
+      if (rerunLink) {
+        rerunLink.hidden = !available;
+        rerunLink.href = '';
+        if (available) {
+          const url = new URL('/runs/new', dependencies.location.href);
+          url.searchParams.set('chainId', run.chainId || '');
+          url.searchParams.set('mode', 'rerun');
+          url.searchParams.set('rerunType', action.rerunType || '');
+          url.searchParams.set('rerunId', action.rerunId || '');
+          rerunLink.href = `${url.pathname}${url.search}`;
+        }
+      }
+      if (unavailableReason) {
+        unavailableReason.hidden = !visible || available;
+        unavailableReason.textContent = visible && !available ? (action.reason || '无法安全确定重跑类型') : '';
+      }
+      if (configureLink) {
+        configureLink.hidden = !visible || available;
+        configureLink.href = '';
+        if (visible && !available) {
+          const url = new URL('/runs/new', dependencies.location.href);
+          url.searchParams.set('chainId', run.chainId || '');
+          configureLink.href = `${url.pathname}${url.search}`;
+        }
+      }
     }
 
     function renderTasks(tasks) {
@@ -258,34 +310,51 @@
       taskRows.appendChild(row);
     }
 
-    async function pollSnapshot() {
-      if (snapshotPending) return;
-      snapshotPending = true;
+    async function pollSnapshot(generation = recoveryGeneration) {
+      if (generation !== recoveryGeneration || snapshotPendingGeneration === generation) return;
+      snapshotPendingGeneration = generation;
+      const AbortControllerConstructor = dependencies.AbortController;
+      const abortController = AbortControllerConstructor ? new AbortControllerConstructor() : null;
+      snapshotAbortController = abortController;
       try {
         const response = await fetchSnapshot(`/api/runs/${encodeURIComponent(runId)}/snapshot?afterEventId=${lastEventId}`, {
-          headers: { Accept: 'application/json' }
+          headers: { Accept: 'application/json' },
+          ...(abortController ? { signal: abortController.signal } : {})
         });
+        if (generation !== recoveryGeneration) return;
         if (!response.ok) throw new Error(`snapshot ${response.status}`);
-        updateSnapshot(await response.json());
+        const snapshot = await response.json();
+        if (generation !== recoveryGeneration) return;
+        updateSnapshot(snapshot);
         setStreamState('定时刷新');
       } catch (error) {
+        if (generation !== recoveryGeneration) return;
         setStreamState('刷新失败，继续重试');
       } finally {
-        snapshotPending = false;
+        if (generation === recoveryGeneration && snapshotPendingGeneration === generation) {
+          snapshotPendingGeneration = null;
+          snapshotAbortController = null;
+        }
       }
     }
 
     function startSnapshotPolling() {
       if (snapshotTimer !== null) return;
+      const generation = ++recoveryGeneration;
       setStreamState('定时刷新');
-      void pollSnapshot();
-      snapshotTimer = setIntervalFunction(pollSnapshot, 5000);
+      void pollSnapshot(generation);
+      snapshotTimer = setIntervalFunction(() => pollSnapshot(generation), 5000);
     }
 
     function stopSnapshotPolling() {
-      if (snapshotTimer === null) return;
-      clearIntervalFunction(snapshotTimer);
-      snapshotTimer = null;
+      recoveryGeneration += 1;
+      if (snapshotTimer !== null) {
+        clearIntervalFunction(snapshotTimer);
+        snapshotTimer = null;
+      }
+      if (snapshotAbortController) snapshotAbortController.abort();
+      snapshotAbortController = null;
+      snapshotPendingGeneration = null;
     }
 
     function connect() {
@@ -328,6 +397,7 @@
         consecutiveErrors,
         lastEventId,
         polling: snapshotTimer !== null,
+        recoveryGeneration,
         seenIds: new Set(seenIds)
       }),
       getSource: () => source

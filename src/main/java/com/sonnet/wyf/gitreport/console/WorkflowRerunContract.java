@@ -3,6 +3,7 @@ package com.sonnet.wyf.gitreport.console;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -118,6 +119,27 @@ final class WorkflowRerunContract {
                 .filter(type -> requiresRerunId(chainId, type))
                 .toList();
         return taskTypes.size() == 1 ? Optional.of(taskTypes.getFirst()) : Optional.empty();
+    }
+
+    static FailedTaskRerunAction failedTaskAction(
+            String chainId,
+            ConsoleRunDetailSummary summary,
+            List<WorkflowTaskStatus> tasks
+    ) {
+        String failedTaskKey = summary.failedTaskKey();
+        if (failedTaskKey == null || failedTaskKey.isBlank()) {
+            return FailedTaskRerunAction.hidden();
+        }
+        String failedTaskPhase = tasks.stream()
+                .filter(task -> Objects.equals(task.taskKey(), failedTaskKey))
+                .map(WorkflowTaskStatus::phase)
+                .findFirst()
+                .orElse(null);
+        return failedTaskRerunType(chainId, failedTaskPhase)
+                .map(type -> new FailedTaskRerunAction(true, true, type, failedTaskKey, ""))
+                .orElseGet(() -> new FailedTaskRerunAction(
+                        true, false, "", failedTaskKey, "无法安全确定重跑类型"
+                ));
     }
 
     static List<RerunTypeOption> typeOptions(String chainId) {

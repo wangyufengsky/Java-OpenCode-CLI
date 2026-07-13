@@ -30,11 +30,17 @@
              th:attr="hidden=${run.state.name() == 'FAILED' or summary.failureMessage != null or summary.failedTaskKey != null or summary.lastErrorMessage != null} ? null : 'hidden'">
       <div class="panel-title">
         <h2>失败摘要</h2>
-        <a class="button primary" th:if="${failedTaskRerunType != null}"
-           th:href="@{/runs/new(chainId=${run.chainId},mode='rerun',rerunType=${failedTaskRerunType},rerunId=${summary.failedTaskKey})}">重跑失败任务</a>
-        <span th:if="${summary.failedTaskKey != null and failedTaskRerunType == null}">无法安全确定重跑类型</span>
-        <a th:if="${summary.failedTaskKey != null and failedTaskRerunType == null}"
-           th:href="@{/runs/new(chainId=${run.chainId})}">配置新运行</a>
+        <span id="failure-actions" th:attr="hidden=${rerunAction.visible} ? null : 'hidden'">
+          <a id="rerun-failed-task" class="button primary"
+             th:attr="hidden=${rerunAction.available} ? null : 'hidden'"
+             th:href="${rerunAction.available} ? @{/runs/new(chainId=${run.chainId},mode='rerun',rerunType=${rerunAction.rerunType},rerunId=${rerunAction.rerunId})} : null">重跑失败任务</a>
+          <span id="rerun-unavailable-reason"
+                th:attr="hidden=${rerunAction.visible and !rerunAction.available} ? null : 'hidden'"
+                th:text="${rerunAction.reason}">无法安全确定重跑类型</span>
+          <a id="configure-new-run"
+             th:attr="hidden=${rerunAction.visible and !rerunAction.available} ? null : 'hidden'"
+             th:href="@{/runs/new(chainId=${run.chainId})}">配置新运行</a>
+        </span>
       </div>
       <dl>
         <dt>运行错误</dt>
