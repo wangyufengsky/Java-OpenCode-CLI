@@ -2,26 +2,20 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('运行详情')}"></head>
 <body data-run-id="0" th:attr="data-run-id=${run.id}">
-<main class="shell">
-  <header class="topbar">
-    <div>
-      <h1 th:text="${'运行 ' + run.id + ' / ' + @consoleText.chain(run.chainId)}">运行</h1>
-      <p th:text="${@consoleText.mode(run.mode) + ' / ' + @consoleText.phase(run.phase)}">阶段</p>
-    </div>
-    <nav class="actions">
-      <a class="button" href="/">控制台</a>
-      <a class="button" href="/history">运行历史</a>
-    </nav>
-  </header>
+<div class="app-shell">
+  <aside th:replace="~{fragments/layout :: sidebar('history')}"></aside>
+  <main class="app-main">
+    <header th:replace="~{fragments/layout :: pageHeader('运行详情', ${'运行 ' + run.id + ' / ' + @consoleText.chain(run.chainId)}, ${@consoleText.mode(run.mode) + ' / ' + @consoleText.phase(run.phase)})}"></header>
+    <div class="page-content">
 
-  <section class="metrics">
+    <section class="metrics">
     <article><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>
     <article><span>模式</span><strong th:text="${@consoleText.mode(run.mode)}">全量</strong></article>
     <article><span>重跑</span><strong th:text="${@consoleText.rerunType(run.rerunType)}">-</strong></article>
     <article><span>运行日期</span><strong th:text="${run.runDate ?: '-'}">-</strong></article>
-  </section>
+    </section>
 
-  <section class="dashboard-grid">
+    <section class="dashboard-grid">
     <article class="panel">
       <div class="panel-title"><h2>事件流</h2><span id="stream-state">连接中</span></div>
       <ol id="events" class="event-list">
@@ -47,8 +41,10 @@
         </tbody>
       </table>
     </aside>
-  </section>
-</main>
+    </section>
+    </div>
+  </main>
+</div>
 <script src="/app.js"></script>
 </body>
 </html>

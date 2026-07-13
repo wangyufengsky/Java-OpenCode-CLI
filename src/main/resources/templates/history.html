@@ -2,19 +2,12 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('运行历史')}"></head>
 <body>
-<main class="shell">
-  <header class="topbar">
-    <div>
-      <h1>运行历史</h1>
-      <p>基于 SQLite 保存的工作流运行归档。</p>
-    </div>
-    <nav class="actions">
-      <a class="button" href="/">控制台</a>
-      <a class="button" href="/schedules">定时任务</a>
-      <a class="button primary" href="/runs/new">新建运行</a>
-    </nav>
-  </header>
-  <section class="panel">
+<div class="app-shell">
+  <aside th:replace="~{fragments/layout :: sidebar('history')}"></aside>
+  <main class="app-main">
+    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '运行历史', '基于 SQLite 保存的工作流运行归档。')}"></header>
+    <div class="page-content">
+    <section class="panel">
     <table>
       <thead><tr><th>编号</th><th>链路</th><th>模式</th><th>重跑</th><th>状态</th><th>创建时间</th><th>失败原因</th></tr></thead>
       <tbody>
@@ -23,14 +16,16 @@
         <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
         <td th:text="${@consoleText.mode(run.mode)}">全量</td>
         <td th:text="${@consoleText.rerunType(run.rerunType)}">-</td>
-        <td><span class="status" th:classappend="${run.state.name().toLowerCase()}" th:text="${@consoleText.state(run.state)}">排队中</span></td>
+        <td><span class="status-badge" th:classappend="${run.state.name().toLowerCase()}" th:text="${@consoleText.state(run.state)}">排队中</span></td>
         <td th:text="${run.createdAt}">时间</td>
         <td th:text="${run.failureMessage ?: ''}"></td>
       </tr>
       <tr th:if="${runs.isEmpty()}"><td colspan="7" class="empty">暂无运行记录。</td></tr>
       </tbody>
     </table>
-  </section>
-</main>
+    </section>
+    </div>
+  </main>
+</div>
 </body>
 </html>

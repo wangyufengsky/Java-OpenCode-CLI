@@ -2,20 +2,13 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('定时任务')}"></head>
 <body>
-<main class="shell">
-  <header class="topbar">
-    <div>
-      <h1>定时任务</h1>
-      <p>按固定时间触发链路运行；触发后进入现有运行队列。</p>
-    </div>
-    <nav class="actions">
-      <a class="button" href="/">控制台</a>
-      <a class="button" href="/history">运行历史</a>
-      <a class="button primary" href="/runs/new">新建运行</a>
-    </nav>
-  </header>
+<div class="app-shell">
+  <aside th:replace="~{fragments/layout :: sidebar('schedules')}"></aside>
+  <main class="app-main">
+    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '定时任务', '按固定时间触发链路运行；触发后进入现有运行队列。')}"></header>
+    <div class="page-content">
 
-  <section class="panel schedule-list-panel">
+    <section class="panel schedule-list-panel">
     <div class="panel-title">
       <h2>任务列表</h2>
     </div>
@@ -28,7 +21,7 @@
         <td th:text="${schedule.id}">1</td>
         <td th:text="${@consoleText.chain(schedule.chainId)}">链路</td>
         <td th:text="${@consoleText.frequency(schedule.frequency.name())}">每天</td>
-        <td><span class="status" th:classappend="${schedule.enabled ? 'succeeded' : 'failed'}" th:text="${schedule.enabled ? '启用' : '停用'}">启用</span></td>
+        <td><span class="status-badge" th:classappend="${schedule.enabled ? 'succeeded' : 'failed'}" th:text="${schedule.enabled ? '启用' : '停用'}">启用</span></td>
         <td th:text="${schedule.lastTriggeredAt ?: '-'}">-</td>
         <td th:text="${schedule.nextTriggerAt ?: '-'}">-</td>
         <td>
@@ -38,9 +31,9 @@
       <tr th:if="${schedules.isEmpty()}"><td colspan="7" class="empty">暂无定时任务。</td></tr>
       </tbody>
     </table>
-  </section>
+    </section>
 
-  <form id="schedule-form" class="run-form schedule-form" th:attr="data-selected-chain=${chainId}">
+    <form id="schedule-form" class="run-form schedule-form" th:attr="data-selected-chain=${chainId}">
     <section class="panel form-main">
       <div class="panel-title">
         <h2>新建定时任务</h2>
@@ -114,8 +107,10 @@
       <button class="button primary" type="submit">保存定时任务</button>
       <p id="schedule-result" class="form-message"></p>
     </aside>
-  </form>
-</main>
+    </form>
+    </div>
+  </main>
+</div>
 <script src="/app.js"></script>
 </body>
 </html>

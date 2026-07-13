@@ -58,6 +58,13 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("AgentBridge 任务控制台")))
                 .andExpect(content().string(containsString("最近运行")))
                 .andExpect(content().string(containsString("代码贡献报告")));
+        mockMvc.perform(get("/"))
+                .andExpect(content().string(containsString("class=\"app-shell\"")))
+                .andExpect(content().string(containsString("aria-label=\"主导航\"")))
+                .andExpect(content().string(containsString("运行概览")))
+                .andExpect(content().string(containsString("新建运行")))
+                .andExpect(content().string(containsString("运行历史")))
+                .andExpect(content().string(containsString("定时任务")));
         mockMvc.perform(get("/history"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("运行历史")))
