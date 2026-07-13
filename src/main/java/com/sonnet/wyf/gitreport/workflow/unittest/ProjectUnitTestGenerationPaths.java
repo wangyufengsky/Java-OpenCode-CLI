@@ -80,6 +80,18 @@ final class ProjectUnitTestGenerationPaths {
         return false;
     }
 
+    static boolean isAllowedBatchPomWrite(Path repo, Path file, List<String> allowedWriteGlobs) {
+        Path repoRoot = repo.toAbsolutePath().normalize();
+        Path normalized = file.toAbsolutePath().normalize();
+        if (!normalized.startsWith(repoRoot) || !"pom.xml".equals(normalized.getFileName().toString())) {
+            return false;
+        }
+        String relative = normalize(repoRoot.relativize(normalized).toString());
+        return allowedWriteGlobs.stream()
+                .map(ProjectUnitTestGenerationPaths::normalize)
+                .anyMatch(relative::equals);
+    }
+
     private static boolean matchesGlob(String relative, String glob) {
         if (glob.endsWith("/**")) {
             return relative.startsWith(glob.substring(0, glob.length() - 2));

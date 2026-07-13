@@ -13,12 +13,14 @@ synthesis_inputs_json: <out>\runs\synthesis\synthesis-inputs.json
 ## 严格边界
 
 - 只读取 `synthesis_inputs_json`。
+- 不读取 `summary.json` 判断质量分；`summary.json` 是准备阶段基础统计快照，其中 `quality_adjustment_percent` 保持初始值 0 是正常现象，不代表 Java 统一评分未执行。
 - 不读取 `details/*.json` 做个人分析。
 - 不读取各个人报告或质量摘要原文件；Java 已将必要摘录和质量摘要压缩进 `synthesis_inputs`。
 - 不创建、重命名、删除或移动任何文件。
 - 只写 `synthesis_inputs.final_report` 指定的文件。
 - 只能替换模板中已有的 `{{...}}` 占位符，不得删除、重命名或重排标题结构。
 - 最终质量调整、最终 `workload_score` 和最终排名只能使用 `synthesis_inputs.quality_scores`。
+- 每个开发人员的质量调整优先读取 `synthesis_inputs.authors[].quality_ranking.quality_adjustment_percent`；不得用 `synthesis_inputs.authors[].base_summary.quality_adjustment_percent` 或原始 `summary.json` 覆盖。
 - 不运行 Python、Shell 或其他脚本计算质量分。
 
 ## 写入规则

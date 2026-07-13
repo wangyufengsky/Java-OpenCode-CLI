@@ -180,12 +180,43 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void allowsAgentToModifyCurrentModulePomAndExistingTest() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        writeRootPom(properties.getProject().getRepo());
+        Path existingTest = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceLegacyTest.java");
+        Files.createDirectories(existingTest.getParent());
+        Files.writeString(existingTest, "class OrderServiceLegacyTest {}\n");
+
+        chain(properties, new CurrentModulePomAndExistingTestWritingClient(properties)).run(request("full", "", ""));
+
+        assertThat(properties.getProject().getRepo().resolve("pom.xml")).content()
+                .contains("test dependency repair");
+        assertThat(existingTest).content().contains("updated for generated test");
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
     void ignoresAgentBridgeLocalStateWhenProtectingProductionFiles() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         properties.getSource().setPackagePaths(List.of("com.acme.order"));
         writeSource(properties.getProject().getRepo());
 
         chain(properties, new AgentBridgeStateWritingClient(properties)).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void ignoresIdeaLocalStateWhenProtectingProductionFiles() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new IdeaStateWritingClient(properties)).run(request("full", "", ""));
 
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
                 .contains("accepted: `1`", "failed: `0`");
@@ -200,6 +231,18 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("created protected file")
                 .hasMessageContaining("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
+    }
+
+    @Test
+    void failsWhenAgentModifiesPomOutsideCurrentBatchModule() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("upfs-cup/src/main/java/com/spdb/upfs/cup"));
+        writeModuleSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new CrossModulePomWritingClient(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("modified protected file")
+                .hasMessageContaining("upfs-common/pom.xml");
     }
 
     @Test
@@ -311,6 +354,10 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 """);
     }
 
+    private void writeRootPom(Path repo) throws Exception {
+        Files.writeString(repo.resolve("pom.xml"), "<project><modelVersion>4.0.0</modelVersion></project>\n");
+    }
+
     private void writeModuleSource(Path repo) throws Exception {
         Files.createDirectories(repo);
         Files.writeString(repo.resolve("pom.xml"), """
@@ -325,6 +372,10 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                   </modules>
                 </project>
                 """);
+        Files.createDirectories(repo.resolve("upfs-common"));
+        Files.writeString(repo.resolve("upfs-common/pom.xml"), "<project><modelVersion>4.0.0</modelVersion></project>\n");
+        Files.createDirectories(repo.resolve("upfs-cup"));
+        Files.writeString(repo.resolve("upfs-cup/pom.xml"), "<project><modelVersion>4.0.0</modelVersion></project>\n");
         Files.createDirectories(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup"));
         Files.writeString(repo.resolve("upfs-cup/src/main/java/com/spdb/upfs/cup/CupService.java"), """
                 package com.spdb.upfs.cup;
@@ -500,6 +551,21 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         }
     }
 
+    private class CurrentModulePomAndExistingTestWritingClient extends FakeAgentBridgeClient {
+        CurrentModulePomAndExistingTestWritingClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            Path pom = properties.getProject().getRepo().resolve("pom.xml");
+            Files.writeString(pom, Files.readString(pom) + "<!-- test dependency repair -->\n");
+            Path existingTest = properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceLegacyTest.java");
+            Files.writeString(existingTest, Files.readString(existingTest) + "// updated for generated test\n");
+            super.createTargetTest(prompt);
+        }
+    }
+
     private class AgentBridgeStateWritingClient extends FakeAgentBridgeClient {
         AgentBridgeStateWritingClient(ProjectUnitTestGenerationProperties properties) {
             super(properties);
@@ -510,6 +576,20 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             Path stateFile = properties.getProject().getRepo().resolve(".agentbridge/conversation.db-shm");
             Files.createDirectories(stateFile.getParent());
             Files.writeString(stateFile, "agentbridge local state\n");
+            super.createTargetTest(prompt);
+        }
+    }
+
+    private class IdeaStateWritingClient extends FakeAgentBridgeClient {
+        IdeaStateWritingClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            Path stateFile = properties.getProject().getRepo().resolve(".idea/workspace.xml");
+            Files.createDirectories(stateFile.getParent());
+            Files.writeString(stateFile, "<project version=\"4\" />\n");
             super.createTargetTest(prompt);
         }
     }
@@ -525,6 +605,19 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                     .resolve("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java");
             Files.createDirectories(unrelatedTest.getParent());
             Files.writeString(unrelatedTest, "class CommonServiceTest {}\n");
+            super.createTargetTest(prompt);
+        }
+    }
+
+    private class CrossModulePomWritingClient extends FakeAgentBridgeClient {
+        CrossModulePomWritingClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            Path pom = properties.getProject().getRepo().resolve("upfs-common/pom.xml");
+            Files.writeString(pom, Files.readString(pom) + "<!-- forbidden -->\n");
             super.createTargetTest(prompt);
         }
     }

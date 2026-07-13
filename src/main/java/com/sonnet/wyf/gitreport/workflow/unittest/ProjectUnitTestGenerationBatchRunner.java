@@ -518,10 +518,13 @@ public class ProjectUnitTestGenerationBatchRunner {
             Path normalized = file.toAbsolutePath().normalize();
             Path gitRoot = repo.resolve(".git").normalize();
             Path agentBridgeRoot = repo.resolve(".agentbridge").normalize();
+            Path ideaRoot = repo.resolve(".idea").normalize();
             return ProjectUnitTestGenerationPaths.isAllowedBatchTestWrite(repo, normalized, allowedWriteGlobs, targetTestFiles)
+                    || ProjectUnitTestGenerationPaths.isAllowedBatchPomWrite(repo, normalized, allowedWriteGlobs)
                     || ProjectUnitTestGenerationPaths.isBuildArtifact(repo, normalized)
                     || normalized.startsWith(gitRoot)
                     || normalized.startsWith(agentBridgeRoot)
+                    || normalized.startsWith(ideaRoot)
                     || (out.startsWith(repo) && normalized.startsWith(out));
         }
 

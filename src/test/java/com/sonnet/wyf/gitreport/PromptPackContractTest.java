@@ -200,12 +200,14 @@ class PromptPackContractTest {
         assertThat(worker).contains(
                 "batch_input_json:",
                 "上一轮 Java 验收失败摘要",
-                "只允许修改 `target_test_files` 或 `allowed_write_globs` 内的测试文件",
+                "只允许修改 `allowed_write_globs` 中当前模块的测试文件",
+                "仅在修复当前批次测试的编译或运行问题确有必要时",
+                "允许修改当前模块 `pom.xml`",
                 "所有文件写入都必须分段执行",
                 "单次写入不超过 6000 字符、120 行",
                 "不要一次性重写完整大文件",
-                "不要修改生产代码、构建脚本、配置文件",
-                "只需修改当前批次允许范围内的测试文件",
+                "不要修改生产代码、配置文件、其他模块的 `pom.xml` 或当前批次以外的测试文件",
+                "只需修改当前批次允许范围内的测试文件或当前模块 `pom.xml`",
                 "只有 `batch_input_json.coverage.required` 为 `true` 时才验收覆盖率",
                 "最终只回复简短完成信息"
         );
@@ -274,6 +276,11 @@ class PromptPackContractTest {
         assertThat(prompt).contains("synthesis_inputs_json: D:/out/runs/synthesis/synthesis-inputs.json");
         assertThat(prompt).doesNotContain("index_inputs_json:", "summary_json:", "quality_scores_json:");
         assertThat(prompt).contains("Java 已将必要摘录和质量摘要压缩进 `synthesis_inputs`");
+        assertThat(prompt)
+                .contains("不读取 `summary.json` 判断质量分")
+                .contains("`summary.json` 是准备阶段基础统计快照")
+                .contains("每个开发人员的质量调整优先读取 `synthesis_inputs.authors[].quality_ranking.quality_adjustment_percent`")
+                .contains("Java 统一质量评分：`quality-scores.json`");
         assertThat(prompt).contains("{{RANKING_ROWS}}");
     }
 }

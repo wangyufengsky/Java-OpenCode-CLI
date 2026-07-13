@@ -89,7 +89,8 @@ workload_score = round(base_workload_score * (1 + quality_adjustment_percent / 1
 
 ## 9. 附录
 
-- 事实摘要：`summary.json`
+- 基础事实摘要：`summary.json`（准备阶段快照，质量调整初始值为 0）
+- Java 统一质量评分：`quality-scores.json`
 - 编排输入：`index_inputs.json`
 - 个人明细目录：`details/`
 - 个人报告目录：`reports/`
