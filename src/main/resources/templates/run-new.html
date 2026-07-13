@@ -8,7 +8,8 @@
     <header th:replace="~{fragments/layout :: pageHeader('运行管理', '配置运行', '按链路填写结构化配置；资源配置文件不会被改写。')}"></header>
     <div class="page-content">
 
-    <form id="run-form" class="run-form" th:attr="data-selected-chain=${chainId}">
+    <form id="run-form" class="run-form"
+          th:attr="data-selected-chain=${chainId},data-selected-mode=${selectedMode},data-selected-rerun-type=${selectedRerunType},data-selected-rerun-id=${selectedRerunId}">
     <section class="panel form-main">
       <label for="chainId">链路</label>
       <select id="chainId" name="chainId">
@@ -18,17 +19,18 @@
       <div class="form-row">
         <label for="mode">模式
           <select id="mode" name="mode">
-            <option value="full">全量</option>
-            <option value="rerun">重跑</option>
+            <option value="full" th:selected="${selectedMode == 'full'}">全量</option>
+            <option value="rerun" th:selected="${selectedMode == 'rerun'}">重跑</option>
           </select>
         </label>
         <label for="rerunType">重跑类型
           <select id="rerunType" name="rerunType">
-            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}">重跑类型</option>
+            <option th:each="type : ${rerunTypes}" th:value="${type.value()}" th:text="${type.label()}"
+                    th:selected="${type.value() == selectedRerunType}">重跑类型</option>
           </select>
         </label>
         <label for="rerunId">重跑编号
-          <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔">
+          <input id="rerunId" name="rerunId" placeholder="多个编号用英文逗号分隔" th:value="${selectedRerunId}">
         </label>
         <label for="runDate">运行日期
           <input id="runDate" name="runDate" type="date">

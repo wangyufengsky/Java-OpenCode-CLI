@@ -41,10 +41,27 @@ public class ConsolePageController {
     }
 
     @GetMapping("/runs/new")
-    public String newRun(@RequestParam(required = false, defaultValue = "git-code-contribution-report") String chainId, Model model) {
+    public String newRun(
+            @RequestParam(required = false, defaultValue = "git-code-contribution-report") String chainId,
+            @RequestParam(required = false, defaultValue = "full") String mode,
+            @RequestParam(required = false, defaultValue = "") String rerunType,
+            @RequestParam(required = false, defaultValue = "") String rerunId,
+            Model model
+    ) {
+        String selectedMode = "rerun".equals(mode) ? "rerun" : "full";
+        String selectedRerunType = WorkflowRerunContract.normalizeType(chainId, rerunType);
+        if (!"rerun".equals(selectedMode) || !WorkflowRerunContract.isKnownType(chainId, selectedRerunType)) {
+            selectedRerunType = "";
+        }
+        String selectedRerunId = WorkflowRerunContract.requiresRerunId(chainId, selectedRerunType)
+                ? rerunId.trim()
+                : "";
         model.addAttribute("chains", chainCatalog.chainIds());
         model.addAttribute("chainId", chainId);
         model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(chainId));
+        model.addAttribute("selectedMode", selectedMode);
+        model.addAttribute("selectedRerunType", selectedRerunType);
+        model.addAttribute("selectedRerunId", selectedRerunId);
         return "run-new";
     }
 
@@ -63,7 +80,16 @@ public class ConsolePageController {
         model.addAttribute("events", filterEvents(allEvents, eventFilter));
         model.addAttribute("eventFilter", eventFilter);
         model.addAttribute("tasks", tasks);
-        model.addAttribute("summary", viewService.runDetail(id));
+        ConsoleRunDetailSummary summary = viewService.runDetail(id);
+        String failedTaskPhase = tasks.stream()
+                .filter(task -> task.taskKey().equals(summary.failedTaskKey()))
+                .map(WorkflowTaskStatus::phase)
+                .findFirst()
+                .orElse(null);
+        model.addAttribute("summary", summary);
+        model.addAttribute("failedTaskRerunType", summary.failedTaskKey() == null
+                ? null
+                : WorkflowRerunContract.failedTaskRerunType(run.chainId(), failedTaskPhase).orElse(null));
         model.addAttribute("stages", classifyStages(run, allEvents, tasks));
         return "run-detail";
     }
@@ -118,17 +144,26 @@ public class ConsolePageController {
     }
 
     private static String taskState(List<WorkflowTaskStatus> tasks, Set<String> eventTypes, boolean observed) {
-        if (eventTypes.contains("TASK_FAILED") || tasks.stream().anyMatch(task -> isTaskPhase(task.phase(), "failed", "timeout"))) {
+        if (eventTypes.contains("TASK_FAILED") || tasks.stream().anyMatch(task -> hasTaskState(task, "FAILED"))) {
             return "已失败";
         }
-        if (eventTypes.contains("TASK_RUNNING") || tasks.stream().anyMatch(task -> isTaskPhase(task.phase(), "running"))) {
+        if (tasks.stream().anyMatch(task -> hasTaskState(task, "RUNNING", "QUEUED"))) {
             return "进行中";
         }
-        if (eventTypes.contains("TASK_SUCCEEDED")
-                || (!tasks.isEmpty() && tasks.stream().allMatch(task -> isTaskPhase(task.phase(), "complete", "completed")))) {
+        if (eventTypes.contains("TASK_GROUP_SUCCEEDED")) {
             return "已完成";
         }
+        if (!tasks.isEmpty() && tasks.stream().allMatch(task -> hasTaskState(task, "SUCCEEDED"))) {
+            return "已完成";
+        }
+        if (eventTypes.contains("TASK_RUNNING") || eventTypes.contains("TASK_QUEUED")) {
+            return "进行中";
+        }
         return observed ? "已观察" : "未开始";
+    }
+
+    private static boolean hasTaskState(WorkflowTaskStatus task, String... states) {
+        return Set.of(states).contains(normalized(task.state()));
     }
 
     private static String terminalState(RunState state) {
@@ -141,10 +176,6 @@ public class ConsolePageController {
 
     private static boolean isExecutionPhase(String phase) {
         return Set.of("started", "submitted", "running").contains(normalized(phase).toLowerCase(Locale.ROOT));
-    }
-
-    private static boolean isTaskPhase(String phase, String... recognized) {
-        return Set.of(recognized).contains(normalized(phase).toLowerCase(Locale.ROOT));
     }
 
     private static String normalized(String value) {

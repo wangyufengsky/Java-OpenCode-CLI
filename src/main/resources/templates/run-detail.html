@@ -29,7 +29,11 @@
     <section class="panel" th:if="${run.state.name() == 'FAILED' or summary.failureMessage != null or summary.failedTaskKey != null or summary.lastErrorMessage != null}">
       <div class="panel-title">
         <h2>失败摘要</h2>
-        <a class="button primary" th:if="${summary.failedTaskKey != null}" th:href="@{/runs/new(chainId=${run.chainId})}">重跑失败任务</a>
+        <a class="button primary" th:if="${failedTaskRerunType != null}"
+           th:href="@{/runs/new(chainId=${run.chainId},mode='rerun',rerunType=${failedTaskRerunType},rerunId=${summary.failedTaskKey})}">重跑失败任务</a>
+        <span th:if="${summary.failedTaskKey != null and failedTaskRerunType == null}">无法安全确定重跑类型</span>
+        <a th:if="${summary.failedTaskKey != null and failedTaskRerunType == null}"
+           th:href="@{/runs/new(chainId=${run.chainId})}">配置新运行</a>
       </div>
       <dl>
         <dt>运行错误</dt>
@@ -52,13 +56,13 @@
           <span id="stream-state">连接中</span>
         </nav>
       </div>
-      <ol id="events" class="event-list">
+      <ol id="events" class="event-list" th:attr="data-event-filter=${eventFilter}">
         <li th:each="event : ${events}" th:attr="data-event-id=${event.id}">
           <time th:text="${event.createdAt}">时间</time>
           <strong th:text="${@consoleText.eventType(event.eventType)}">事件</strong>
           <span th:text="${event.message}">消息</span>
         </li>
-        <li th:if="${events.isEmpty()}"><span class="empty">当前筛选下暂无事件。</span></li>
+        <li th:if="${events.isEmpty()}" data-empty-state="true"><span class="empty">当前筛选下暂无事件。</span></li>
       </ol>
     </article>
 

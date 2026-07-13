@@ -3,6 +3,7 @@ package com.sonnet.wyf.gitreport.console;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 final class WorkflowRerunContract {
@@ -103,6 +104,20 @@ final class WorkflowRerunContract {
 
     static boolean requiresRerunId(String chainId, String rerunType) {
         return TYPES_REQUIRING_ID.getOrDefault(chainId, Set.of()).contains(rerunType);
+    }
+
+    static Optional<String> failedTaskRerunType(String chainId, String taskPhase) {
+        String normalizedType = normalizeType(chainId, taskPhase);
+        if (isKnownType(chainId, normalizedType)) {
+            return requiresRerunId(chainId, normalizedType)
+                    ? Optional.of(normalizedType)
+                    : Optional.empty();
+        }
+        List<String> taskTypes = typeOptions(chainId).stream()
+                .map(RerunTypeOption::value)
+                .filter(type -> requiresRerunId(chainId, type))
+                .toList();
+        return taskTypes.size() == 1 ? Optional.of(taskTypes.getFirst()) : Optional.empty();
     }
 
     static List<RerunTypeOption> typeOptions(String chainId) {

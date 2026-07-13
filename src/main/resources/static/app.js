@@ -144,7 +144,7 @@ if (chainSelect) {
   if (configFields) {
     renderConfigFields(chainSelect.value);
   }
-  renderRerunTypeOptions(chainSelect.value);
+  renderRerunTypeOptions(chainSelect.value, runForm ? runForm.dataset.selectedRerunType : null);
   chainSelect.addEventListener('change', () => {
     if (configFields) {
       renderConfigFields(chainSelect.value);
@@ -157,6 +157,11 @@ if (chainSelect) {
 }
 
 if (modeSelect && rerunTypeSelect && rerunIdInput) {
+  if (runForm) {
+    modeSelect.value = runForm.dataset.selectedMode || modeSelect.value;
+    rerunTypeSelect.value = runForm.dataset.selectedRerunType || rerunTypeSelect.value;
+    rerunIdInput.value = runForm.dataset.selectedRerunId || rerunIdInput.value;
+  }
   modeSelect.addEventListener('change', updateRerunFields);
   rerunTypeSelect.addEventListener('change', updateRerunFields);
   updateRerunFields();
@@ -187,7 +192,7 @@ async function renderConfigFields(chainId) {
   });
 }
 
-function renderRerunTypeOptions(chainId) {
+function renderRerunTypeOptions(chainId, selectedValue = null) {
   if (!rerunTypeSelect) return;
   const options = rerunTypeDefinitions[chainId] || [];
   rerunTypeSelect.replaceChildren();
@@ -197,6 +202,9 @@ function renderRerunTypeOptions(chainId) {
     item.textContent = option.label;
     rerunTypeSelect.appendChild(item);
   });
+  if (selectedValue && options.some((option) => option.value === selectedValue)) {
+    rerunTypeSelect.value = selectedValue;
+  }
   updateRerunFields();
 }
 
@@ -428,10 +436,18 @@ const eventLabels = {
   TASK_FAILED: '任务已失败'
 };
 
+function matchesEventFilter(event, filter) {
+  const eventType = String(event.eventType || '').toUpperCase();
+  if (filter === 'failed') return eventType.includes('FAILED');
+  if (filter === 'task') return eventType.startsWith('TASK_');
+  return true;
+}
+
 const runId = document.body.dataset.runId;
 if (runId && window.EventSource) {
   const streamState = document.querySelector('#stream-state');
   const events = document.querySelector('#events');
+  const eventFilter = events.dataset.eventFilter || 'all';
   const seenEvents = new Set(Array.from(events.querySelectorAll('li[data-event-id]')).map((item) => item.dataset.eventId));
   const source = new EventSource(`/api/runs/${runId}/events`);
   source.onopen = () => { streamState.textContent = '实时'; };
@@ -455,6 +471,12 @@ if (runId && window.EventSource) {
     const eventId = String(event.id);
     if (seenEvents.has(eventId)) return;
     seenEvents.add(eventId);
+    if (event.eventType === 'SUCCEEDED' || event.eventType === 'FAILED') {
+      const state = document.querySelector('#run-state');
+      if (state) state.textContent = stateLabels[event.eventType] || event.eventType;
+    }
+    if (!matchesEventFilter(event, eventFilter)) return;
+    events.querySelector('[data-empty-state]')?.remove();
     const item = document.createElement('li');
     item.dataset.eventId = eventId;
     const time = document.createElement('time');
@@ -465,9 +487,5 @@ if (runId && window.EventSource) {
     text.textContent = event.message;
     item.append(time, type, text);
     events.appendChild(item);
-    if (event.eventType === 'SUCCEEDED' || event.eventType === 'FAILED') {
-      const state = document.querySelector('#run-state');
-      if (state) state.textContent = stateLabels[event.eventType] || event.eventType;
-    }
   }
 }

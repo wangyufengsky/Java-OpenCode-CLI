@@ -166,13 +166,148 @@ class ConsoleMvcTest {
                 .contains(".dashboard-grid > aside.panel table {\n  width: 100%;\n  min-width: 0;")
                 .doesNotContain(".dashboard-grid table {\n    min-width: 620px;")
                 .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
-        mockMvc.perform(get("/runs/" + failedRunId))
+        String failedRunDetail = mockMvc.perform(get("/runs/" + failedRunId))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("运行 " + failedRunId)))
                 .andExpect(content().string(containsString("事件流")))
                 .andExpect(content().string(containsString("失败摘要")))
                 .andExpect(content().string(containsString("failed-task")))
-                .andExpect(content().string(containsString("重跑失败任务")));
+                .andExpect(content().string(containsString("重跑失败任务")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(failedRunDetail).contains(
+                "href=\"/runs/new?chainId=git-code-contribution-report&amp;mode=rerun&amp;rerunType=author&amp;rerunId=failed-task\""
+        );
+
+        String rerunForm = mockMvc.perform(get("/runs/new")
+                        .param("chainId", "git-code-contribution-report")
+                        .param("mode", "rerun")
+                        .param("rerunType", "author")
+                        .param("rerunId", "failed-task"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(rerunForm)
+                .containsPattern("<option value=\"rerun\" selected(?:=\"selected\")?>重跑</option>")
+                .containsPattern("<option value=\"author\" selected(?:=\"selected\")?>作者</option>")
+                .contains("<input id=\"rerunId\" name=\"rerunId\" placeholder=\"多个编号用英文逗号分隔\" value=\"failed-task\">");
+    }
+
+    @Test
+    void taskStageUsesTaskStatesAndKeepsMixedSucceededAndRunningTasksInProgress() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report",
+                "full",
+                null,
+                null,
+                LocalDate.of(2026, 7, 13),
+                Map.of("project.id", "mixed-task-states"),
+                null
+        ), "mixed-task-config.yml");
+        repository.markRunning(runId);
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId,
+                "finished-task",
+                "finished-task",
+                "SUCCEEDED",
+                "complete",
+                null,
+                null,
+                Instant.now()
+        ));
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId,
+                "active-task",
+                "active-task",
+                "RUNNING",
+                "complete",
+                null,
+                null,
+                Instant.now()
+        ));
+        repository.appendEvent(runId, "TASK_SUCCEEDED", "finished-task complete");
+        repository.appendEvent(runId, "TASK_GROUP_SUCCEEDED", "旧的任务组完成事件");
+
+        String detail = mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail).containsPattern("(?s)<strong>任务</strong>\\s*<span>进行中</span>");
+    }
+
+    @Test
+    void failedTaskWithoutSafeRerunTypeDoesNotExposeFabricatedRerunLink() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "smartesb-rewrite-code-review",
+                "full",
+                null,
+                null,
+                LocalDate.of(2026, 7, 13),
+                Map.of("project.id", "ambiguous-rerun"),
+                null
+        ), "ambiguous-rerun-config.yml");
+        repository.markRunning(runId);
+        repository.markFailed(runId, "任务失败");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId,
+                "ambiguous-task",
+                "ambiguous-task",
+                "FAILED",
+                "execution",
+                null,
+                "任务失败",
+                Instant.now()
+        ));
+
+        String detail = mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail)
+                .doesNotContain(">重跑失败任务</a>")
+                .contains("无法安全确定重跑类型")
+                .contains("href=\"/runs/new?chainId=smartesb-rewrite-code-review\">配置新运行</a>");
+    }
+
+    @Test
+    void eventFilterIsPreservedForSseAndEmptyStateCanBeRemoved() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report",
+                "full",
+                null,
+                null,
+                LocalDate.of(2026, 7, 13),
+                Map.of("project.id", "filtered-events"),
+                null
+        ), "filtered-events-config.yml");
+        repository.appendEvent(runId, "STARTED", "运行开始");
+
+        String detail = mockMvc.perform(get("/runs/" + runId).param("eventFilter", "failed"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail)
+                .contains("<ol id=\"events\" class=\"event-list\" data-event-filter=\"failed\">")
+                .contains("<li data-empty-state=\"true\"><span class=\"empty\">当前筛选下暂无事件。</span></li>");
+
+        String appJs = mockMvc.perform(get("/app.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(appJs)
+                .contains("events.dataset.eventFilter")
+                .contains("function matchesEventFilter(event, filter)")
+                .contains("events.querySelector('[data-empty-state]')?.remove()")
+                .containsSubsequence(
+                        "seenEvents.add(eventId);",
+                        "if (!matchesEventFilter(event, eventFilter)) return;"
+                );
     }
 
     @Test
