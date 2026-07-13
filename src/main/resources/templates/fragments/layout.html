@@ -8,13 +8,17 @@
 </head>
 <body>
 <aside class="app-sidebar" th:fragment="sidebar(activeItem)">
-  <a class="brand" href="/" aria-label="AgentBridge 任务控制台首页">AB</a>
+  <a class="brand" href="/" aria-label="AgentBridge 任务控制台首页">
+    <span class="brand-mark" aria-hidden="true">AB</span>
+    <span class="brand-copy"><strong>AgentBridge</strong><small>任务控制台</small></span>
+  </a>
   <nav class="side-navigation" aria-label="主导航">
     <a href="/" th:classappend="${activeItem == 'dashboard'} ? ' active'">运行概览</a>
     <a href="/runs/new" th:classappend="${activeItem == 'new-run'} ? ' active'">新建运行</a>
     <a href="/history" th:classappend="${activeItem == 'history'} ? ' active'">运行历史</a>
     <a href="/schedules" th:classappend="${activeItem == 'schedules'} ? ' active'">定时任务</a>
   </nav>
+  <p class="sidebar-status"><span aria-hidden="true"></span>本地运行环境 · 已连接</p>
 </aside>
 
 <header class="page-header" th:fragment="pageHeader(eyebrow,title,description)">

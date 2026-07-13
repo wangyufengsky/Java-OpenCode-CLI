@@ -126,12 +126,12 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("单元测试生成")))
                 .andExpect(content().string(containsString("<option value=\"test-batch\">测试批次</option>")))
                 .andExpect(content().string(containsString("<option value=\"verification\">验证</option>")));
-        String appJs = mockMvc.perform(get("/app.js"))
+        String commonJs = mockMvc.perform(get("/js/console-common.js"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
-        assertThat(appJs)
+        assertThat(commonJs)
                 .contains("项目标识")
                 .contains("transaction-plan-dir")
                 .contains("review.grouping.max-regions-per-task")
@@ -148,7 +148,6 @@ class ConsoleMvcTest {
                 .contains("git-code-contribution-report")
                 .contains("synthesis")
                 .contains("总报告重跑不需要编号")
-                .contains("/api/chains/")
                 .doesNotContain("review.max-regions-per-batch")
                 .doesNotContain("test.concurrency")
                 .doesNotContain("test.max-types-per-task")
@@ -157,7 +156,6 @@ class ConsoleMvcTest {
                 .doesNotContain("synthesis-message")
                 .doesNotContain("AgentBridge session")
                 .doesNotContain("AgentBridge 设置会复制应用默认值")
-                .doesNotContain("rerunTypeSelect.disabled = !rerunMode")
                 .doesNotContain("src/main/resources/smartesb-transactions");
         String styles = mockMvc.perform(get("/styles.css"))
                 .andExpect(status().isOk())
@@ -171,6 +169,7 @@ class ConsoleMvcTest {
                 .contains(".dashboard-grid > article.panel > table {\n    min-width: 620px;")
                 .contains(".dashboard-grid > aside.panel table {\n  width: 100%;\n  min-width: 0;")
                 .doesNotContain(".dashboard-grid table {\n    min-width: 620px;")
+                .contains(".dashboard-grid > aside.panel .event-list li {\n  grid-template-columns: minmax(0, 1fr);")
                 .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
         String failedRunDetail = mockMvc.perform(get("/runs/" + failedRunId))
                 .andExpect(status().isOk())
@@ -445,6 +444,63 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void pagesLoadOnlyTheirScopedScriptsAndLegacyBundleIsRetired() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "asset-contract-config.yml");
+
+        assertThat(mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("class=\"brand-copy\"")
+                .contains("<strong>AgentBridge</strong>")
+                .contains("本地运行环境 · 已连接")
+                .contains("class=\"metrics\" aria-label=\"运行指标\"")
+                .contains("<span>需要关注</span>")
+                .doesNotContain("<article><span>排队中</span>")
+                .doesNotContain("<article><span>已成功</span>")
+                .doesNotContain("<article><span>已失败</span>")
+                .doesNotContain("<script src=");
+        assertThat(mockMvc.perform(get("/runs/new"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<title>新建运行</title>")
+                .contains("<h1>新建运行</h1>")
+                .contains("<script src=\"/js/console-common.js\"></script>")
+                .contains("<script src=\"/js/run-form.js\"></script>")
+                .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js");
+        assertThat(mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<script src=\"/js/run-detail.js\"></script>")
+                .doesNotContain("/js/console-common.js", "/js/run-form.js", "/js/history.js", "/js/schedules.js", "/app.js");
+        assertThat(mockMvc.perform(get("/history"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<script src=\"/js/history.js\"></script>")
+                .doesNotContain("/js/console-common.js", "/js/run-form.js", "/js/run-detail.js", "/js/schedules.js", "/app.js");
+        assertThat(mockMvc.perform(get("/schedules"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<script src=\"/js/console-common.js\"></script>")
+                .contains("<script src=\"/js/schedules.js\"></script>")
+                .doesNotContain("/js/run-form.js", "/js/run-detail.js", "/js/history.js", "/app.js");
+        mockMvc.perform(get("/app.js"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void runFormKeepsSubmitDisabledWhenConfigurationIsNotReadyAfterARequest() throws Exception {
+        String script = mockMvc.perform(get("/js/run-form.js"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(script)
+                .contains("submitButton.disabled = configLoading || !configReady")
+                .doesNotContain("finally {\n      submitButton.disabled = false;");
+    }
+
+    @Test
     void chainDefaultsComeFromParsedYaml() throws Exception {
         mockMvc.perform(get("/api/chains/git-code-contribution-report/defaults"))
                 .andExpect(status().isOk())
@@ -621,7 +677,7 @@ class ConsoleMvcTest {
 
         mockMvc.perform(get("/history").param("q", "definitely-no-history-result"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("当前筛选下暂无运行记录")))
+                .andExpect(content().string(containsString("没有符合当前筛选条件的运行")))
                 .andExpect(content().string(containsString("href=\"/history\">清除筛选</a>")));
 
         mockMvc.perform(get("/history").param("state", "not-a-state"))
@@ -676,7 +732,7 @@ class ConsoleMvcTest {
                 .contains("恢复默认值")
                 .contains("firstInvalid.focus()")
                 .contains("submitButton.disabled = true")
-                .contains("submitButton.disabled = false")
+                .contains("submitButton.disabled = configLoading || !configReady")
                 .contains("window.location.href = `/runs/${body.id}`")
                 .contains("/api/path-preflight")
                 .contains("/config")

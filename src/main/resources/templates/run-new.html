@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('配置运行')}"></head>
+<head th:replace="~{fragments/layout :: head('新建运行')}"></head>
 <body>
 <div class="app-shell">
   <aside th:replace="~{fragments/layout :: sidebar('new-run')}"></aside>
   <main class="app-main">
-    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '配置运行', '选择工作流，确认关键路径，再提交一次可追溯的运行。')}"></header>
+    <header th:replace="~{fragments/layout :: pageHeader('运行管理', '新建运行', '选择工作流、填写所需参数，并在提交前完成路径预检。')}"></header>
     <div class="page-content">
       <section class="metrics" aria-label="创建运行步骤">
         <article><span>步骤 1</span><strong>选择工作流</strong></article>

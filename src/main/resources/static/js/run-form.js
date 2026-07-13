@@ -74,7 +74,7 @@
     setConfigLoading(true);
     configFields.replaceChildren();
     configDescription.textContent = definition ? definition.description : '';
-    copyLoadStatus.textContent = copySnapshot ? '正在载入复制配置...' : '';
+    copyLoadStatus.textContent = copySnapshot ? '正在载入复制配置…' : '';
     if (!definition) {
       setConfigLoading(false);
       return;
@@ -82,7 +82,7 @@
 
     const loading = document.createElement('p');
     loading.className = 'muted';
-    loading.textContent = '正在读取链路默认配置...';
+    loading.textContent = '正在读取链路默认配置…';
     configFields.appendChild(loading);
     let nextDefaults = {};
     try {
@@ -145,8 +145,11 @@
   function setConfigLoading(loading) {
     configLoading = loading;
     configFields.setAttribute('aria-busy', String(loading));
-    submitButton.disabled = configLoading;
-    if (!configLoading && !configReady) submitButton.disabled = true;
+    syncSubmitState();
+  }
+
+  function syncSubmitState() {
+    submitButton.disabled = configLoading || !configReady;
   }
 
   async function loadDefaults(chainId) {
@@ -388,7 +391,7 @@
     }
 
     submitButton.disabled = true;
-    submitResult.textContent = '正在提交...';
+    submitResult.textContent = '正在提交…';
     const payload = {
       chainId: chainSelect.value,
       mode: modeSelect.value,
@@ -412,7 +415,7 @@
     } catch (error) {
       submitResult.textContent = '网络请求失败，已保留当前填写内容。';
     } finally {
-      submitButton.disabled = false;
+      syncSubmitState();
     }
   });
 }());
