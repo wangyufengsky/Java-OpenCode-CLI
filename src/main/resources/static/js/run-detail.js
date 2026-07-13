@@ -80,6 +80,8 @@
     let recoveryGeneration = 0;
     let snapshotPendingGeneration = null;
     let snapshotAbortController = null;
+    let healthyRefreshDirty = false;
+    let sseOpen = false;
     let source = null;
 
     if (eventFilterControl) {
@@ -109,7 +111,7 @@
       if (streamState) streamState.textContent = text;
     }
 
-    function appendEvent(messageOrEvent) {
+    function appendEvent(messageOrEvent, refreshFromLiveEvent = false) {
       let event = messageOrEvent;
       if (messageOrEvent && typeof messageOrEvent.data === 'string') {
         try {
@@ -128,10 +130,18 @@
       updateStateFromEvent(event);
       const item = createEventItem(event, eventId);
       events.appendChild(item);
+      if (refreshFromLiveEvent && requiresSnapshotRefresh(event)) {
+        queueHealthySnapshotRefresh();
+      }
       if (!matchesEventFilter(event, eventFilter)) return;
       item.hidden = false;
       const emptyState = events.querySelector('[data-empty-state]');
       if (emptyState) emptyState.remove();
+    }
+
+    function requiresSnapshotRefresh(event) {
+      const eventType = String(event.eventType || '').toUpperCase();
+      return eventType.startsWith('TASK_') || eventType === 'SUCCEEDED' || eventType === 'FAILED';
     }
 
     function createEventItem(event, eventId) {
@@ -198,7 +208,7 @@
       updateFailureSummary(run, summary);
       updateFailureActions(run, snapshot.rerunAction);
       renderTasks(Array.isArray(snapshot.tasks) ? snapshot.tasks : []);
-      (Array.isArray(snapshot.events) ? snapshot.events : []).forEach(appendEvent);
+      (Array.isArray(snapshot.events) ? snapshot.events : []).forEach((event) => appendEvent(event, false));
       applyEventFilter();
     }
 
@@ -310,9 +320,10 @@
       taskRows.appendChild(row);
     }
 
-    async function pollSnapshot(generation = recoveryGeneration) {
+    async function pollSnapshot(generation = recoveryGeneration, updateStreamState = true) {
       if (generation !== recoveryGeneration || snapshotPendingGeneration === generation) return;
       snapshotPendingGeneration = generation;
+      if (!updateStreamState) healthyRefreshDirty = false;
       const AbortControllerConstructor = dependencies.AbortController;
       const abortController = AbortControllerConstructor ? new AbortControllerConstructor() : null;
       snapshotAbortController = abortController;
@@ -326,35 +337,60 @@
         const snapshot = await response.json();
         if (generation !== recoveryGeneration) return;
         updateSnapshot(snapshot);
-        setStreamState('定时刷新');
+        if (updateStreamState) setStreamState('定时刷新');
       } catch (error) {
         if (generation !== recoveryGeneration) return;
-        setStreamState('刷新失败，继续重试');
+        if (updateStreamState) setStreamState('刷新失败，继续重试');
       } finally {
+        const refreshAgain = !updateStreamState
+          && generation === recoveryGeneration
+          && sseOpen
+          && snapshotTimer === null
+          && healthyRefreshDirty;
         if (generation === recoveryGeneration && snapshotPendingGeneration === generation) {
           snapshotPendingGeneration = null;
           snapshotAbortController = null;
         }
+        if (refreshAgain) {
+          healthyRefreshDirty = false;
+          void pollSnapshot(generation, false);
+        }
       }
+    }
+
+    function queueHealthySnapshotRefresh() {
+      if (!sseOpen || snapshotTimer !== null) return;
+      const generation = recoveryGeneration;
+      if (snapshotPendingGeneration === generation) {
+        healthyRefreshDirty = true;
+        return;
+      }
+      void pollSnapshot(generation, false);
+    }
+
+    function invalidateSnapshotRequest() {
+      recoveryGeneration += 1;
+      if (snapshotAbortController) snapshotAbortController.abort();
+      snapshotAbortController = null;
+      snapshotPendingGeneration = null;
+      healthyRefreshDirty = false;
     }
 
     function startSnapshotPolling() {
       if (snapshotTimer !== null) return;
-      const generation = ++recoveryGeneration;
+      invalidateSnapshotRequest();
+      const generation = recoveryGeneration;
       setStreamState('定时刷新');
       void pollSnapshot(generation);
       snapshotTimer = setIntervalFunction(() => pollSnapshot(generation), 5000);
     }
 
     function stopSnapshotPolling() {
-      recoveryGeneration += 1;
+      invalidateSnapshotRequest();
       if (snapshotTimer !== null) {
         clearIntervalFunction(snapshotTimer);
         snapshotTimer = null;
       }
-      if (snapshotAbortController) snapshotAbortController.abort();
-      snapshotAbortController = null;
-      snapshotPendingGeneration = null;
     }
 
     function connect() {
@@ -366,14 +402,19 @@
       source.onopen = () => {
         consecutiveErrors = 0;
         stopSnapshotPolling();
+        sseOpen = true;
         setStreamState('实时');
       };
       source.onerror = () => {
+        if (sseOpen) {
+          sseOpen = false;
+          invalidateSnapshotRequest();
+        }
         consecutiveErrors += 1;
         setStreamState('正在重连');
         if (consecutiveErrors >= 2) startSnapshotPolling();
       };
-      eventTypes.forEach((type) => source.addEventListener(type, appendEvent));
+      eventTypes.forEach((type) => source.addEventListener(type, (message) => appendEvent(message, true)));
     }
 
     function setText(selector, value) {
@@ -398,6 +439,7 @@
         lastEventId,
         polling: snapshotTimer !== null,
         recoveryGeneration,
+        sseOpen,
         seenIds: new Set(seenIds)
       }),
       getSource: () => source

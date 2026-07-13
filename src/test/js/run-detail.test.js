@@ -133,6 +133,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function flushPromises() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 function snapshot(state, failedTaskKey = null, rerunAction = { visible: false, available: false }) {
   return {
     run: { state, chainId: 'git-code-contribution-report' },
@@ -241,4 +245,106 @@ test('malformed SSE data is observable and does not stop the next event', () => 
   harness.source.emit('STARTED', { id: 12, eventType: 'STARTED', message: 'valid' });
   assert.equal(harness.document.querySelector('#run-state').textContent, '运行中');
   assert.equal(harness.controller.getState().seenIds.has('12'), true);
+});
+
+test('healthy task events refresh the snapshot without leaving realtime mode', async () => {
+  const requests = [];
+  const failedSnapshot = snapshot('FAILED', 'author-a', {
+    visible: true,
+    available: true,
+    rerunType: 'author',
+    rerunId: 'author-a',
+    reason: null
+  });
+  failedSnapshot.summary.totalTasks = 2;
+  failedSnapshot.summary.succeededTasks = 1;
+  failedSnapshot.tasks = [
+    { taskKey: 'author-a', taskName: '作者 A', state: 'FAILED', phase: 'failed' },
+    { taskKey: 'author-b', taskName: '作者 B', state: 'SUCCEEDED', phase: 'complete' }
+  ];
+  const harness = createHarness(async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => failedSnapshot };
+  });
+
+  harness.source.onopen();
+  harness.source.emit('TASK_FAILED', {
+    id: 21,
+    eventType: 'TASK_FAILED',
+    message: 'author-a failed'
+  });
+  await flushPromises();
+
+  assert.deepEqual(requests, ['/api/runs/42/snapshot?afterEventId=21']);
+  assert.equal(harness.document.querySelector('#stream-state').textContent, '实时');
+  assert.equal(harness.document.querySelector('#run-task-progress').textContent, '1/2');
+  assert.equal(harness.document.querySelector('#run-failed-tasks').textContent, '1');
+  assert.equal(harness.document.querySelector('#failure-summary').hidden, false);
+  assert.equal(harness.document.querySelector('#failure-message').textContent, 'failed');
+  assert.equal(harness.document.querySelector('#task-rows').querySelectorAll('tr[data-task-key]').length, 2);
+  assert.equal(harness.document.querySelector('#rerun-failed-task').hidden, false);
+  assert.match(harness.document.querySelector('#rerun-failed-task').href, /rerunId=author-a/);
+});
+
+test('healthy task refreshes coalesce bursts and replayed snapshot events do not loop', async () => {
+  const first = deferred();
+  const second = deferred();
+  const requests = [];
+  const harness = createHarness((url) => {
+    requests.push(url);
+    return requests.length === 1 ? first.promise : second.promise;
+  });
+
+  harness.source.onopen();
+  harness.source.emit('TASK_RUNNING', { id: 30, eventType: 'TASK_RUNNING', message: 'running' });
+  harness.source.emit('TASK_FAILED', { id: 31, eventType: 'TASK_FAILED', message: 'failed' });
+  harness.source.emit('TASK_SUCCEEDED', { id: 32, eventType: 'TASK_SUCCEEDED', message: 'succeeded' });
+  assert.equal(requests.length, 1);
+
+  const firstSnapshot = snapshot('RUNNING');
+  firstSnapshot.events = [{ id: 33, eventType: 'TASK_RUNNING', message: 'snapshot replay' }];
+  first.resolve({ ok: true, json: async () => firstSnapshot });
+  await flushPromises();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1], '/api/runs/42/snapshot?afterEventId=33');
+
+  const secondSnapshot = snapshot('RUNNING');
+  secondSnapshot.events = [
+    { id: 34, eventType: 'TASK_RUNNING', message: 'snapshot replay 2' },
+    { id: 35, eventType: 'TASK_FAILED', message: 'snapshot replay 3' }
+  ];
+  second.resolve({ ok: true, json: async () => secondSnapshot });
+  await flushPromises();
+  await flushPromises();
+
+  assert.equal(requests.length, 2);
+  assert.equal(harness.document.querySelector('#stream-state').textContent, '实时');
+  assert.equal(harness.controller.getState().lastEventId, 35);
+});
+
+test('a late healthy refresh cannot overwrite a later recovery generation or reopened stream', async () => {
+  const healthy = deferred();
+  let requestCount = 0;
+  const harness = createHarness(() => {
+    requestCount += 1;
+    if (requestCount === 1) return healthy.promise;
+    return Promise.resolve({ ok: true, json: async () => snapshot('RUNNING') });
+  });
+
+  harness.source.onopen();
+  harness.source.emit('TASK_RUNNING', { id: 40, eventType: 'TASK_RUNNING', message: 'running' });
+  assert.equal(requestCount, 1);
+  harness.source.onerror();
+  harness.source.onerror();
+  await flushPromises();
+  harness.source.onopen();
+  harness.source.emit('STARTED', { id: 41, eventType: 'STARTED', message: 'reopened' });
+
+  healthy.resolve({ ok: true, json: async () => snapshot('QUEUED') });
+  await flushPromises();
+  await flushPromises();
+
+  assert.equal(harness.document.querySelector('#stream-state').textContent, '实时');
+  assert.equal(harness.document.querySelector('#run-state').textContent, '运行中');
+  assert.equal(harness.controller.getState().polling, false);
 });
