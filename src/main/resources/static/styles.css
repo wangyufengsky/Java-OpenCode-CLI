@@ -45,7 +45,7 @@ a:hover {
 }
 
 :focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-primary) 35%, white);
+  outline: 3px solid var(--color-primary);
   outline-offset: 3px;
 }
 
@@ -518,4 +518,24 @@ textarea {
 .event-list span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 1360px) {
+  .app-main {
+    padding: 32px 24px 40px;
+  }
+
+  .dashboard-grid,
+  .run-form {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 16px;
+  }
+
+  .dashboard-grid table {
+    min-width: 620px;
+  }
+
+  .form-row {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
 }

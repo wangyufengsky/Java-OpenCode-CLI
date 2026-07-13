@@ -126,6 +126,17 @@ class ConsoleMvcTest {
                 .doesNotContain("AgentBridge 设置会复制应用默认值")
                 .doesNotContain("rerunTypeSelect.disabled = !rerunMode")
                 .doesNotContain("src/main/resources/smartesb-transactions");
+        String styles = mockMvc.perform(get("/styles.css"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(styles)
+                .contains(":focus-visible {\n  outline: 3px solid var(--color-primary);")
+                .contains("@media (max-width: 1360px)")
+                .contains("grid-template-columns: minmax(0, 1fr) 300px;")
+                .contains("min-width: 620px;")
+                .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
         mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("运行 " + runId)))
