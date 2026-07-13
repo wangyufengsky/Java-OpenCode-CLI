@@ -10,25 +10,60 @@
 
     <section class="metrics">
     <article><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>
-    <article><span>模式</span><strong th:text="${@consoleText.mode(run.mode)}">全量</strong></article>
-    <article><span>重跑</span><strong th:text="${@consoleText.rerunType(run.rerunType)}">-</strong></article>
-    <article><span>运行日期</span><strong th:text="${run.runDate ?: '-'}">-</strong></article>
+    <article><span>任务</span><strong th:text="${summary.succeededTasks + '/' + summary.totalTasks}">0/0</strong></article>
+    <article><span>失败任务</span><strong th:text="${summary.failedTasks}">0</strong></article>
+    <article><span>耗时</span><strong th:text="${summary.durationSeconds + ' 秒'}">0 秒</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title"><h2>运行进度</h2><span th:text="${@consoleText.phase(run.phase)}">状态未知</span></div>
+      <ol class="event-list">
+        <li th:each="stage,iter : ${stages}">
+          <time th:text="${'阶段 ' + (iter.index + 1)}">阶段</time>
+          <strong th:text="${stage.name}">阶段名称</strong>
+          <span th:text="${stage.status}">状态未知</span>
+        </li>
+      </ol>
+    </section>
+
+    <section class="panel" th:if="${run.state.name() == 'FAILED' or summary.failureMessage != null or summary.failedTaskKey != null or summary.lastErrorMessage != null}">
+      <div class="panel-title">
+        <h2>失败摘要</h2>
+        <a class="button primary" th:if="${summary.failedTaskKey != null}" th:href="@{/runs/new(chainId=${run.chainId})}">重跑失败任务</a>
+      </div>
+      <dl>
+        <dt>运行错误</dt>
+        <dd th:text="${summary.failureMessage ?: '未记录'}">未记录</dd>
+        <dt>失败任务</dt>
+        <dd th:text="${summary.failedTaskKey ?: '未记录'}">未记录</dd>
+        <dt>最后错误事件</dt>
+        <dd th:text="${summary.lastErrorMessage ?: '未记录'}">未记录</dd>
+      </dl>
     </section>
 
     <section class="dashboard-grid">
     <article class="panel">
-      <div class="panel-title"><h2>事件流</h2><span id="stream-state">连接中</span></div>
+      <div class="panel-title">
+        <h2>事件流</h2>
+        <nav aria-label="事件筛选">
+          <a th:href="@{/runs/{id}(id=${run.id},eventFilter='all')}" th:attr="aria-current=${eventFilter == 'all'} ? 'page' : null">全部</a>
+          <a th:href="@{/runs/{id}(id=${run.id},eventFilter='failed')}" th:attr="aria-current=${eventFilter == 'failed'} ? 'page' : null">失败</a>
+          <a th:href="@{/runs/{id}(id=${run.id},eventFilter='task')}" th:attr="aria-current=${eventFilter == 'task'} ? 'page' : null">任务</a>
+          <span id="stream-state">连接中</span>
+        </nav>
+      </div>
       <ol id="events" class="event-list">
         <li th:each="event : ${events}" th:attr="data-event-id=${event.id}">
           <time th:text="${event.createdAt}">时间</time>
           <strong th:text="${@consoleText.eventType(event.eventType)}">事件</strong>
           <span th:text="${event.message}">消息</span>
         </li>
+        <li th:if="${events.isEmpty()}"><span class="empty">当前筛选下暂无事件。</span></li>
       </ol>
     </article>
 
     <aside class="panel">
-      <h2>任务状态</h2>
+      <div class="panel-title"><h2>任务状态</h2><span>失败优先</span></div>
       <table>
         <thead><tr><th>任务</th><th>状态</th><th>阶段</th></tr></thead>
         <tbody>

@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 
@@ -42,7 +43,7 @@ class ConsoleMvcTest {
 
     @Test
     void pagesRenderFromPersistedRuns() throws Exception {
-        long runId = repository.createRun(new WorkflowRunSubmission(
+        long succeededRunId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report",
                 "full",
                 null,
@@ -51,13 +52,39 @@ class ConsoleMvcTest {
                 Map.of("project.id", "demo"),
                 null
         ), "run-config.yml");
-        repository.appendEvent(runId, "QUEUED", "运行已进入队列");
+        repository.markRunning(succeededRunId);
+        repository.markSucceeded(succeededRunId);
+
+        long failedRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report",
+                "full",
+                null,
+                null,
+                LocalDate.of(2026, 6, 29),
+                Map.of("project.id", "failed-demo"),
+                null
+        ), "failed-run-config.yml");
+        repository.markRunning(failedRunId);
+        repository.markFailed(failedRunId, "运行失败，请检查失败任务");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                failedRunId,
+                "failed-task",
+                "failed-task",
+                "FAILED",
+                "execution",
+                null,
+                "failed-task 执行失败",
+                Instant.now()
+        ));
+        repository.appendEvent(failedRunId, "TASK_FAILED", "failed-task 执行失败");
 
         mockMvc.perform(get("/"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("AgentBridge 任务控制台")))
                 .andExpect(content().string(containsString("最近运行")))
-                .andExpect(content().string(containsString("代码贡献报告")));
+                .andExpect(content().string(containsString("代码贡献报告")))
+                .andExpect(content().string(containsString("需要关注")))
+                .andExpect(content().string(containsString("成功率")));
         mockMvc.perform(get("/"))
                 .andExpect(content().string(containsString("class=\"app-shell\"")))
                 .andExpect(content().string(containsString("aria-label=\"主导航\"")))
@@ -139,10 +166,13 @@ class ConsoleMvcTest {
                 .contains(".dashboard-grid > aside.panel table {\n  width: 100%;\n  min-width: 0;")
                 .doesNotContain(".dashboard-grid table {\n    min-width: 620px;")
                 .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
-        mockMvc.perform(get("/runs/" + runId))
+        mockMvc.perform(get("/runs/" + failedRunId))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("运行 " + runId)))
-                .andExpect(content().string(containsString("事件流")));
+                .andExpect(content().string(containsString("运行 " + failedRunId)))
+                .andExpect(content().string(containsString("事件流")))
+                .andExpect(content().string(containsString("失败摘要")))
+                .andExpect(content().string(containsString("failed-task")))
+                .andExpect(content().string(containsString("重跑失败任务")));
     }
 
     @Test

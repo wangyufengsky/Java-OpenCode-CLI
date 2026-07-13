@@ -9,10 +9,12 @@
     <div class="page-content">
 
     <section class="metrics">
-    <article><span>运行中</span><strong th:text="${runs.?[state.name() == 'RUNNING'].size()}">0</strong></article>
-    <article><span>排队中</span><strong th:text="${runs.?[state.name() == 'QUEUED'].size()}">0</strong></article>
-    <article><span>已成功</span><strong th:text="${runs.?[state.name() == 'SUCCEEDED'].size()}">0</strong></article>
-    <article><span>已失败</span><strong th:text="${runs.?[state.name() == 'FAILED'].size()}">0</strong></article>
+    <article><span>今日运行</span><strong th:text="${summary.todayRuns}">0</strong></article>
+    <article><span>运行中</span><strong th:text="${summary.running}">0</strong></article>
+    <article><span>排队中</span><strong th:text="${summary.queued}">0</strong></article>
+    <article><span>近 7 天成功率</span><strong th:text="${summary.successRatePercent + '%'}">0%</strong></article>
+    <article><span>已成功</span><strong th:text="${summary.succeeded}">0</strong></article>
+    <article><span>已失败</span><strong th:text="${summary.failed}">0</strong></article>
     </section>
 
     <section class="dashboard-grid">
@@ -40,7 +42,18 @@
 
     <aside class="panel">
       <div class="panel-title">
-        <h2>链路</h2>
+        <h2>需要关注</h2>
+      </div>
+      <ol class="event-list">
+        <li th:each="run : ${summary.attentionRuns}">
+          <time th:text="${run.createdAt}">时间</time>
+          <strong><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${'运行 ' + run.id}">运行</a></strong>
+          <span th:text="${run.failureMessage ?: '未记录失败原因'}">失败原因</span>
+        </li>
+        <li th:if="${summary.attentionRuns.isEmpty()}"><span class="empty">暂无失败运行。</span></li>
+      </ol>
+      <div class="panel-title">
+        <h2>快速开始</h2>
       </div>
       <div class="chain-list">
         <a th:each="chain : ${chains}" th:href="@{/runs/new(chainId=${chain})}">

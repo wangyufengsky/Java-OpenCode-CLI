@@ -6,22 +6,37 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
 @Controller
 public class ConsolePageController {
     private final ChainCatalog chainCatalog;
     private final WorkflowRunRepository repository;
     private final WorkflowScheduleService scheduleService;
+    private final ConsoleViewService viewService;
 
-    public ConsolePageController(ChainCatalog chainCatalog, WorkflowRunRepository repository, WorkflowScheduleService scheduleService) {
+    public ConsolePageController(
+            ChainCatalog chainCatalog,
+            WorkflowRunRepository repository,
+            WorkflowScheduleService scheduleService,
+            ConsoleViewService viewService
+    ) {
         this.chainCatalog = chainCatalog;
         this.repository = repository;
         this.scheduleService = scheduleService;
+        this.viewService = viewService;
     }
 
     @GetMapping("/")
     public String dashboard(Model model) {
         model.addAttribute("chains", chainCatalog.chainIds());
         model.addAttribute("runs", repository.listRuns());
+        model.addAttribute("summary", viewService.dashboard());
         return "dashboard";
     }
 
@@ -34,10 +49,22 @@ public class ConsolePageController {
     }
 
     @GetMapping("/runs/{id}")
-    public String runDetail(@PathVariable long id, Model model) {
-        model.addAttribute("run", repository.findRun(id).orElseThrow());
-        model.addAttribute("events", repository.listEvents(id));
-        model.addAttribute("tasks", repository.listTaskStatuses(id));
+    public String runDetail(
+            @PathVariable long id,
+            @RequestParam(required = false, defaultValue = "all") String eventFilter,
+            Model model
+    ) {
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        List<WorkflowRunEvent> allEvents = repository.listEvents(id);
+        List<WorkflowTaskStatus> tasks = new ArrayList<>(repository.listTaskStatuses(id));
+        tasks.sort(Comparator.comparing((WorkflowTaskStatus task) -> !"FAILED".equalsIgnoreCase(task.state()))
+                .thenComparing(WorkflowTaskStatus::taskKey));
+        model.addAttribute("run", run);
+        model.addAttribute("events", filterEvents(allEvents, eventFilter));
+        model.addAttribute("eventFilter", eventFilter);
+        model.addAttribute("tasks", tasks);
+        model.addAttribute("summary", viewService.runDetail(id));
+        model.addAttribute("stages", classifyStages(run, allEvents, tasks));
         return "run-detail";
     }
 
@@ -54,5 +81,73 @@ public class ConsolePageController {
         model.addAttribute("rerunTypes", WorkflowRerunContract.typeOptions(chainId));
         model.addAttribute("schedules", scheduleService.list());
         return "schedules";
+    }
+
+    private static List<WorkflowRunEvent> filterEvents(List<WorkflowRunEvent> events, String filter) {
+        return switch (filter) {
+            case "failed" -> events.stream().filter(event -> normalized(event.eventType()).contains("FAILED")).toList();
+            case "task" -> events.stream().filter(event -> normalized(event.eventType()).startsWith("TASK_")).toList();
+            default -> events;
+        };
+    }
+
+    private static List<Map<String, String>> classifyStages(
+            WorkflowRunRecord run,
+            List<WorkflowRunEvent> events,
+            List<WorkflowTaskStatus> tasks
+    ) {
+        Set<String> eventTypes = events.stream().map(event -> normalized(event.eventType())).collect(java.util.stream.Collectors.toSet());
+        boolean queuedObserved = run.state() == RunState.QUEUED
+                || eventTypes.stream().anyMatch(type -> type.contains("QUEUED"));
+        boolean executionObserved = run.state() == RunState.RUNNING
+                || eventTypes.stream().anyMatch(type -> type.contains("STARTED") || type.contains("RUNNING"))
+                || tasks.stream().map(WorkflowTaskStatus::phase).anyMatch(ConsolePageController::isExecutionPhase);
+        boolean taskObserved = !tasks.isEmpty() || eventTypes.stream().anyMatch(type -> type.startsWith("TASK_"));
+
+        return List.of(
+                stage("提交", "已观察"),
+                stage("排队", run.state() == RunState.QUEUED ? "进行中" : queuedObserved ? "已观察" : "状态未知"),
+                stage("执行", run.state() == RunState.RUNNING ? "进行中" : executionObserved ? "已观察" : "状态未知"),
+                stage("任务", taskState(tasks, eventTypes, taskObserved)),
+                stage("完成", terminalState(run.state()))
+        );
+    }
+
+    private static Map<String, String> stage(String name, String status) {
+        return Map.of("name", name, "status", status);
+    }
+
+    private static String taskState(List<WorkflowTaskStatus> tasks, Set<String> eventTypes, boolean observed) {
+        if (eventTypes.contains("TASK_FAILED") || tasks.stream().anyMatch(task -> isTaskPhase(task.phase(), "failed", "timeout"))) {
+            return "已失败";
+        }
+        if (eventTypes.contains("TASK_RUNNING") || tasks.stream().anyMatch(task -> isTaskPhase(task.phase(), "running"))) {
+            return "进行中";
+        }
+        if (eventTypes.contains("TASK_SUCCEEDED")
+                || (!tasks.isEmpty() && tasks.stream().allMatch(task -> isTaskPhase(task.phase(), "complete", "completed")))) {
+            return "已完成";
+        }
+        return observed ? "已观察" : "未开始";
+    }
+
+    private static String terminalState(RunState state) {
+        return switch (state) {
+            case SUCCEEDED -> "已完成";
+            case FAILED -> "已失败";
+            default -> "未开始";
+        };
+    }
+
+    private static boolean isExecutionPhase(String phase) {
+        return Set.of("started", "submitted", "running").contains(normalized(phase).toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean isTaskPhase(String phase, String... recognized) {
+        return Set.of(recognized).contains(normalized(phase).toLowerCase(Locale.ROOT));
+    }
+
+    private static String normalized(String value) {
+        return value == null ? "" : value.toUpperCase(Locale.ROOT);
     }
 }
