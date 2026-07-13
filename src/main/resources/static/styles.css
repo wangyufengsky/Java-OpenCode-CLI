@@ -261,6 +261,11 @@ table {
   table-layout: fixed;
 }
 
+.dashboard-grid > aside.panel table {
+  width: 100%;
+  min-width: 0;
+}
+
 th,
 td {
   padding: 12px 10px;
@@ -520,7 +525,7 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 1360px) {
+@media (max-width: 1439px) {
   .app-main {
     padding: 32px 24px 40px;
   }
@@ -531,7 +536,7 @@ textarea {
     gap: 16px;
   }
 
-  .dashboard-grid table {
+  .dashboard-grid > article.panel > table {
     min-width: 620px;
   }
 
