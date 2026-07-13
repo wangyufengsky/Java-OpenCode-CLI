@@ -79,11 +79,11 @@
     return visible;
   }
 
-  const api = { copyDraft, saveUrl, requestSave, applySwitchState, toggleSchedule, filterRows };
-  window.AgentBridgeSchedules = api;
-
+  function createSchedulesController(document, dependencies = {}) {
+  const window = dependencies.window || globalThis.window;
+  let fetchImplementation = dependencies.fetch || window.fetch.bind(window);
   const page = document.querySelector('#schedule-page');
-  if (!page) return;
+  if (!page) return null;
 
   const common = window.ConsoleCommon || { chainConfigDefinitions: {}, rerunTypeDefinitions: {} };
   const list = document.querySelector('#schedule-list');
@@ -115,13 +115,18 @@
   let records = null;
   let returnFocus = null;
   let configSequence = 0;
+  let configAbortController = null;
+  let configLoading = false;
+  let configReady = false;
+  let submitInFlight = false;
+  const toggleInFlight = new Map();
 
   function rows() {
     return Array.from(list.querySelectorAll('tr[data-schedule-id]'));
   }
 
   async function loadRecords() {
-    const response = await window.fetch('/api/schedules');
+    const response = await fetchImplementation('/api/schedules');
     const body = await readBody(response);
     if (!response.ok) throw new Error(body.error || '无法读取定时任务');
     records = body;
@@ -135,6 +140,18 @@
     const target = returnFocus;
     returnFocus = null;
     if (target && typeof target.focus === 'function') target.focus();
+  }
+
+  function syncSaveState() {
+    saveButton.disabled = configLoading || !configReady || submitInFlight;
+    if (configLoading) form.setAttribute('aria-busy', 'true');
+    else form.removeAttribute('aria-busy');
+  }
+
+  function setConfigState(loading, ready) {
+    configLoading = loading;
+    configReady = ready;
+    syncSaveState();
   }
 
   function showError(message) {
@@ -189,8 +206,8 @@
     return control;
   }
 
-  async function defaultsFor(chainId) {
-    const response = await window.fetch(`/api/chains/${encodeURIComponent(chainId)}/defaults`);
+  async function defaultsFor(chainId, signal) {
+    const response = await fetchImplementation(`/api/chains/${encodeURIComponent(chainId)}/defaults`, { signal });
     const body = await readBody(response);
     if (!response.ok) throw new Error(body.error || '默认配置读取失败');
     return body.defaults || {};
@@ -198,10 +215,17 @@
 
   async function renderConfig(values) {
     const sequence = ++configSequence;
-    const definition = common.chainConfigDefinitions[chain.value];
+    if (configAbortController) configAbortController.abort();
+    configAbortController = new AbortController();
+    const chainId = chain.value;
+    const definition = common.chainConfigDefinitions[chainId];
+    setConfigState(true, false);
     configFields.replaceChildren();
     configDescription.textContent = definition ? definition.description : '';
-    if (!definition) return;
+    if (!definition) {
+      if (sequence === configSequence) setConfigState(false, true);
+      return;
+    }
     let resolved = values;
     if (resolved === null || resolved === undefined) {
       const loading = document.createElement('p');
@@ -209,8 +233,9 @@
       loading.textContent = '正在读取链路默认配置…';
       configFields.appendChild(loading);
       try {
-        resolved = await defaultsFor(chain.value);
+        resolved = await defaultsFor(chainId, configAbortController.signal);
       } catch (error) {
+        if (sequence !== configSequence || error.name === 'AbortError') return;
         resolved = {};
         if (sequence === configSequence) showError(`${error.message}，可继续手工填写。`);
       }
@@ -229,6 +254,7 @@
       wrapper.append(title, control, description);
       configFields.appendChild(wrapper);
     });
+    setConfigState(false, true);
   }
 
   function setFrequencyFields() {
@@ -257,7 +283,7 @@
     runAt.value = record?.runAt ? record.runAt.slice(0, 16) : '';
     enabled.checked = record ? Boolean(record.enabled) : true;
     setFrequencyFields();
-    renderConfig(record ? (record.config || {}) : null);
+    return renderConfig(record ? (record.config || {}) : null);
   }
 
   function openDrawer(kind, record, trigger) {
@@ -270,6 +296,25 @@
     backdrop.hidden = false;
     document.body.classList.add('drawer-open');
     drawer.querySelector('select, input, button')?.focus();
+  }
+
+  function updateCachedRecord(scheduleId, updated) {
+    if (!records || !updated) return;
+    const index = records.findIndex((item) => String(item.id) === String(scheduleId));
+    if (index >= 0) records[index] = { ...records[index], ...updated };
+  }
+
+  function toggle(button, scheduleId) {
+    const key = String(scheduleId);
+    if (toggleInFlight.has(key)) return toggleInFlight.get(key);
+    const operation = toggleSchedule(button, scheduleId, pageMessage, fetchImplementation)
+      .then((updated) => {
+        updateCachedRecord(scheduleId, updated);
+        return updated;
+      })
+      .finally(() => toggleInFlight.delete(key));
+    toggleInFlight.set(key, operation);
+    return operation;
   }
 
   function readControl(control) {
@@ -313,7 +358,7 @@
     const toggle = event.target.closest('.schedule-switch');
     if (toggle) {
       try {
-        await toggleSchedule(toggle, row.dataset.scheduleId, pageMessage);
+        await toggle(toggle, row.dataset.scheduleId);
       } catch (_error) {
         // toggleSchedule already restores the complete visual and accessible state.
       }
@@ -334,7 +379,23 @@
   document.querySelector('#close-schedule-drawer').addEventListener('click', closeDrawer);
   document.querySelector('#cancel-schedule').addEventListener('click', closeDrawer);
   backdrop.addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !drawer.hidden) closeDrawer(); });
+  document.addEventListener('keydown', (event) => {
+    if (drawer.hidden) return;
+    if (event.key === 'Escape') {
+      closeDrawer();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(drawer.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if ((!event.shiftKey && document.activeElement === last) || (event.shiftKey && document.activeElement === first)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  });
   chain.addEventListener('change', () => { renderRerunTypes(''); renderConfig(null); });
   mode.addEventListener('change', updateRerunControls);
   rerunType.addEventListener('change', updateRerunControls);
@@ -342,23 +403,26 @@
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitInFlight || configLoading || !configReady) return;
     clearError();
     if (!form.checkValidity()) {
       form.reportValidity();
       showError('请检查必填项后再保存。');
       return;
     }
-    saveButton.disabled = true;
+    submitInFlight = true;
+    syncSaveState();
     result.textContent = '正在保存…';
     try {
-      await requestSave(idInput.value || null, payload());
+      await requestSave(idInput.value || null, payload(), fetchImplementation);
       result.textContent = '保存成功，正在刷新列表…';
       window.location.reload();
     } catch (error) {
       showError(error.message || '保存失败');
       result.textContent = '草稿已保留，请修改后重试。';
     } finally {
-      saveButton.disabled = false;
+      submitInFlight = false;
+      syncSaveState();
     }
   });
 
@@ -369,4 +433,20 @@
       applySwitchState(button, button.getAttribute('aria-checked') === 'true');
     }
   });
+
+  syncSaveState();
+  return {
+    loadRecords,
+    open: (kind, record, trigger) => openDrawer(kind, kind === 'copy' ? copyDraft(record) : record, trigger),
+    close: closeDrawer,
+    toggle,
+    getRecords: () => records,
+    getState: () => ({ configLoading, configReady, submitInFlight }),
+    setFetch: (nextFetch) => { fetchImplementation = nextFetch; }
+  };
+  }
+
+  const api = { copyDraft, saveUrl, requestSave, applySwitchState, toggleSchedule, filterRows, createSchedulesController };
+  window.AgentBridgeSchedules = api;
+  api.controller = createSchedulesController(document, { window });
 }());

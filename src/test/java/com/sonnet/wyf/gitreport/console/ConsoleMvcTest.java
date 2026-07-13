@@ -37,6 +37,9 @@ class ConsoleMvcTest {
     WorkflowRunRepository repository;
 
     @Autowired
+    WorkflowScheduleRepository scheduleRepository;
+
+    @Autowired
     WebApplicationContext webApplicationContext;
 
     @BeforeEach
@@ -791,6 +794,27 @@ class ConsoleMvcTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.enabled").value(false));
+    }
+
+    @Test
+    void scheduleApiRejectsReenablingAnAlreadyTriggeredOneTimeSchedule() throws Exception {
+        String createResponse = mockMvc.perform(post("/api/schedules")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"git-code-contribution-report","mode":"full",
+                                 "config":{"project.id":"once"},"frequency":"once",
+                                 "runAt":"2026-06-30T06:00","enabled":true}
+                                """))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        long id = new com.fasterxml.jackson.databind.ObjectMapper().readTree(createResponse).get("id").asLong();
+        scheduleRepository.markTriggered(id, Instant.parse("2026-06-29T22:00:00Z"), null, false);
+
+        mockMvc.perform(post("/api/schedules/" + id + "/enabled")
+                        .contentType("application/json")
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("已执行的一次性计划不能重新启用，请复制后创建新计划"));
     }
 
     @Test

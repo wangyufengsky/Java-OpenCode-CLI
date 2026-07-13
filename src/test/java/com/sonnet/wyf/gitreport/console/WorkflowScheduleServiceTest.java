@@ -160,6 +160,43 @@ class WorkflowScheduleServiceTest {
     }
 
     @Test
+    void refusesToReenableAnAlreadyTriggeredOneTimeSchedule() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "once"),
+                "once", null, null, LocalDateTime.of(2026, 6, 30, 6, 0), true
+        ));
+        fixture.service.triggerDueSchedules(Instant.parse("2026-06-30T03:01:00Z"));
+
+        assertThatThrownBy(() -> fixture.service.setEnabled(scheduleId, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("已执行的一次性计划不能重新启用，请复制后创建新计划");
+
+        assertThat(fixture.repository.findSchedule(scheduleId)).get()
+                .satisfies(schedule -> {
+                    assertThat(schedule.enabled()).isFalse();
+                    assertThat(schedule.nextTriggerAt()).isNull();
+                });
+    }
+
+    @Test
+    void refusesToReenableAnAlreadyTriggeredOneTimeScheduleThroughEdit() {
+        Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
+        long scheduleId = fixture.service.create(new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "once"),
+                "once", null, null, LocalDateTime.of(2026, 6, 30, 6, 0), true
+        ));
+        fixture.service.triggerDueSchedules(Instant.parse("2026-06-30T03:01:00Z"));
+
+        assertThatThrownBy(() -> fixture.service.update(scheduleId, new WorkflowScheduleRequest(
+                "demo-chain", "full", null, null, null, Map.of("value", "rescheduled"),
+                "once", null, null, LocalDateTime.of(2026, 7, 1, 6, 0), true
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("已执行的一次性计划不能重新启用，请复制后创建新计划");
+    }
+
+    @Test
     void rejectsUnknownChainAndInvalidFrequency() {
         Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
 
