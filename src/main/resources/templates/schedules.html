@@ -18,6 +18,14 @@
               <span class="visually-hidden">搜索定时任务</span>
               <input id="schedule-search" type="search" placeholder="搜索计划、链路或模式" autocomplete="off">
             </label>
+            <label class="schedule-status-filter" for="schedule-status-filter">
+              <span class="visually-hidden">按启用状态筛选</span>
+              <select id="schedule-status-filter">
+                <option value="all">启用状态：全部</option>
+                <option value="enabled">已启用</option>
+                <option value="disabled">已停用</option>
+              </select>
+            </label>
             <button id="create-schedule" class="button primary" type="button">新建计划</button>
           </div>
         </div>
@@ -30,14 +38,14 @@
             </thead>
             <tbody id="schedule-list">
             <tr th:each="schedule : ${schedules}"
-                th:attr="data-schedule-id=${schedule.id},data-search=${@consoleText.chain(schedule.chainId) + ' ' + schedule.chainId + ' ' + schedule.mode + ' ' + schedule.id}">
+                th:attr="data-schedule-id=${schedule.id},data-enabled=${schedule.enabled},data-search=${@consoleText.scheduleTitle(schedule) + ' ' + schedule.chainId + ' ' + @consoleText.scheduleFrequency(schedule)}">
               <td>
-                <strong th:text="${@consoleText.chain(schedule.chainId) + ' #' + schedule.id}">计划</strong>
+                <strong th:text="${@consoleText.scheduleTitle(schedule)}">计划</strong>
                 <small th:text="${'编号 ' + schedule.id}">编号</small>
               </td>
               <td>
                 <strong th:text="${@consoleText.chain(schedule.chainId)}">链路</strong>
-                <small th:text="${schedule.mode == 'rerun' ? '重跑' : '全量'}">全量</small>
+                <small th:text="${@consoleText.scheduleFrequency(schedule)}">每天 · 06:00</small>
               </td>
               <td>
                 <strong th:text="${@consoleText.frequency(schedule.frequency.name())}">每天</strong>
@@ -135,6 +143,10 @@
       <label class="checkbox-row" for="enabled">
         <input id="enabled" name="enabled" type="checkbox" checked><span>保存后立即启用</span>
       </label>
+      <div id="schedule-save-notice" class="alert c-alert info" role="note">
+        <strong>保存提示</strong>
+        <span>修改将在保存后生效；取消不会更改当前计划。</span>
+      </div>
     </fieldset>
 
     <fieldset class="drawer-section">

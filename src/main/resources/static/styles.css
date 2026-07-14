@@ -780,6 +780,10 @@ textarea {
   width: 280px;
 }
 
+.schedule-status-filter {
+  width: 164px;
+}
+
 .table-scroll {
   overflow-x: auto;
 }

@@ -74,7 +74,7 @@ function response(body, ok = true) {
 function controllerHarness(fetchImplementation, options = {}) {
   const selectors = [
     '#schedule-page', '#schedule-list', '#schedule-search', '#schedule-empty', '#schedule-no-results',
-    '#schedule-page-message', '#schedule-drawer', '#schedule-drawer-backdrop', '#schedule-form',
+    '#schedule-page-message', '#schedule-status-filter', '#schedule-drawer', '#schedule-drawer-backdrop', '#schedule-form',
     '#schedule-drawer-title', '#schedule-drawer-description', '#schedule-form-error', '#schedule-result',
     '#save-schedule', '#schedule-id', '#schedule-chain-id', '#schedule-mode', '#schedule-rerun-type',
     '#schedule-rerun-id', '#schedule-run-date', '#frequency', '#dayOfWeek', '#scheduleTime', '#runAt',
@@ -99,6 +99,7 @@ function controllerHarness(fetchImplementation, options = {}) {
   nodes['#schedule-drawer-backdrop'].hidden = true;
   nodes['#schedule-chain-id'].value = 'alpha';
   nodes['#schedule-mode'].value = 'full';
+  nodes['#schedule-status-filter'].value = 'all';
   nodes['#frequency'].value = 'daily';
   nodes['#dayOfWeek'].value = '1';
   nodes['#scheduleTime'].value = '06:00';
@@ -204,18 +205,18 @@ test('toggle failure restores enabled state, label, visual state and aria attrib
   assert.equal(message.textContent, '数据库暂不可用');
 });
 
-test('search only changes current row visibility and does not call the server', () => {
+test('search and status filters only change current row visibility and do not call the server', () => {
   const { api, fetchCalls } = loadApi();
   const rows = [
-    { dataset: { search: '代码贡献报告 full 7' }, hidden: false },
-    { dataset: { search: '研发周报 rerun 8' }, hidden: false }
+    { dataset: { search: '代码贡献报告 full 7', enabled: 'true' }, hidden: false },
+    { dataset: { search: '研发周报 rerun 8', enabled: 'false' }, hidden: false }
   ];
 
-  const visible = api.filterRows(rows, '周报');
+  const visible = api.filterRows(rows, '', 'enabled');
 
   assert.equal(visible, 1);
-  assert.equal(rows[0].hidden, true);
-  assert.equal(rows[1].hidden, false);
+  assert.equal(rows[0].hidden, false);
+  assert.equal(rows[1].hidden, true);
   assert.equal(fetchCalls.length, 0);
 });
 
@@ -352,6 +353,23 @@ test('copy clears id, edit keeps id, search does not fetch, and drawer traps Tab
   assert.equal(document.activeElement, nodes['#schedule-chain-id']);
   controller.close();
   assert.equal(document.activeElement, nodes['#create-schedule']);
+});
+
+test('drawer closes from Escape and its overlay and restores the trigger focus', async () => {
+  const fetchImplementation = async () => response({ defaults: {} });
+  const { controller, nodes, document } = controllerHarness(fetchImplementation);
+  const trigger = nodes['#create-schedule'];
+
+  controller.open('create', null, trigger);
+  document.dispatch('keydown', { key: 'Escape' });
+  assert.equal(nodes['#schedule-drawer'].hidden, true);
+  assert.equal(nodes['#schedule-drawer-backdrop'].hidden, true);
+  assert.equal(document.activeElement, trigger);
+
+  controller.open('create', null, trigger);
+  nodes['#schedule-drawer-backdrop'].dispatch('click');
+  assert.equal(nodes['#schedule-drawer'].hidden, true);
+  assert.equal(document.activeElement, trigger);
 });
 
 test('controller submits edits to the id URL and copied drafts to the create URL', async () => {
