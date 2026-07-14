@@ -10,6 +10,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ConsoleViewServiceTest {
@@ -88,6 +90,26 @@ class ConsoleViewServiceTest {
         ConsoleViewService service = new ConsoleViewService(repository, CLOCK);
 
         assertThat(service.dashboardMetrics().get(2).trendTone()).isEqualTo("neutral");
+    }
+
+    @Test
+    void dashboardViewDerivesEverySectionFromOneRepositorySnapshot() {
+        WorkflowRunRecord failed = run(5, RunState.FAILED,
+                "2026-07-13T11:45:00Z", "2026-07-13T11:00:00Z", "2026-07-13T11:40:00Z", "采集失败");
+        WorkflowRunRecord running = run(4, RunState.RUNNING,
+                "2026-07-13T10:00:00Z", "2026-07-13T10:00:00Z", null, null);
+        WorkflowRunRepository repository = repositoryWith(List.of(failed, running));
+        ConsoleViewService service = new ConsoleViewService(repository, CLOCK);
+
+        ConsoleDashboardView dashboard = service.dashboardView();
+
+        assertThat(dashboard.metrics()).extracting(ConsoleMetricView::value)
+                .containsExactly("2", "1", "0%", "1");
+        assertThat(dashboard.runs()).extracting(ConsoleRunListItemView::id)
+                .containsExactly(5L, 4L);
+        assertThat(dashboard.attentionRuns()).extracting(ConsoleRunListItemView::id)
+                .containsExactly(5L);
+        verify(repository, times(1)).listRuns();
     }
 
     private static WorkflowRunRepository repositoryWith(List<WorkflowRunRecord> runs) {

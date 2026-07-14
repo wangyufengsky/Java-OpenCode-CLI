@@ -65,6 +65,19 @@ public class ConsoleViewService {
 
     public List<ConsoleMetricView> dashboardMetrics() {
         List<WorkflowRunRecord> runs = repository.listRuns();
+        return dashboardMetrics(runs);
+    }
+
+    public ConsoleDashboardView dashboardView() {
+        List<WorkflowRunRecord> runs = repository.listRuns();
+        return new ConsoleDashboardView(
+                dashboardMetrics(runs),
+                dashboardRuns(runs),
+                dashboardAttentionRuns(runs)
+        );
+    }
+
+    private List<ConsoleMetricView> dashboardMetrics(List<WorkflowRunRecord> runs) {
         LocalDate today = LocalDate.now(clock);
         Instant todayStart = today.atStartOfDay(clock.getZone()).toInstant();
         Instant tomorrowStart = today.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
@@ -103,7 +116,11 @@ public class ConsoleViewService {
     }
 
     public List<ConsoleRunListItemView> dashboardRuns() {
-        return repository.listRuns().stream()
+        return dashboardRuns(repository.listRuns());
+    }
+
+    private List<ConsoleRunListItemView> dashboardRuns(List<WorkflowRunRecord> runs) {
+        return runs.stream()
                 .sorted(Comparator.comparing(WorkflowRunRecord::createdAt).reversed()
                         .thenComparing(Comparator.comparingLong(WorkflowRunRecord::id).reversed()))
                 .limit(8)
@@ -112,7 +129,11 @@ public class ConsoleViewService {
     }
 
     public List<ConsoleRunListItemView> dashboardAttentionRuns() {
-        return repository.listRuns().stream()
+        return dashboardAttentionRuns(repository.listRuns());
+    }
+
+    private List<ConsoleRunListItemView> dashboardAttentionRuns(List<WorkflowRunRecord> runs) {
+        return runs.stream()
                 .filter(run -> run.state() == RunState.FAILED)
                 .sorted(Comparator.comparing(WorkflowRunRecord::createdAt).reversed()
                         .thenComparing(Comparator.comparingLong(WorkflowRunRecord::id).reversed()))
