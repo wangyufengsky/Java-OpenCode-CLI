@@ -80,7 +80,7 @@ function controllerHarness(fetchImplementation, options = {}) {
     '#schedule-rerun-id', '#schedule-run-date', '#frequency', '#dayOfWeek', '#scheduleTime', '#runAt',
     '#enabled', '#schedule-config-fields', '#schedule-config-description', '#create-schedule',
     '#close-schedule-drawer', '#cancel-schedule'
-  ];
+  ].filter((selector) => !(options.omitStatusFilter && selector === '#schedule-status-filter'));
   const nodes = Object.fromEntries(selectors.map((selector) => [selector, new FakeElement(selector.slice(1))]));
   const document = new FakeElement('document');
   document.body = new FakeElement('body');
@@ -99,7 +99,7 @@ function controllerHarness(fetchImplementation, options = {}) {
   nodes['#schedule-drawer-backdrop'].hidden = true;
   nodes['#schedule-chain-id'].value = 'alpha';
   nodes['#schedule-mode'].value = 'full';
-  nodes['#schedule-status-filter'].value = 'all';
+  if (nodes['#schedule-status-filter']) nodes['#schedule-status-filter'].value = 'all';
   nodes['#frequency'].value = 'daily';
   nodes['#dayOfWeek'].value = '1';
   nodes['#scheduleTime'].value = '06:00';
@@ -119,6 +119,12 @@ function controllerHarness(fetchImplementation, options = {}) {
   vm.runInContext(script, context, { filename: 'schedules.js' });
   return { api: window.AgentBridgeSchedules, controller: window.AgentBridgeSchedules.controller, nodes, document };
 }
+
+test('controller initializes when a schedule status filter is omitted', () => {
+  const { controller } = controllerHarness(async () => response([]), { omitStatusFilter: true });
+
+  assert.ok(controller);
+});
 
 async function flush() {
   await new Promise((resolve) => setImmediate(resolve));

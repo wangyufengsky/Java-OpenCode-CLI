@@ -361,13 +361,13 @@
   }
 
   function applyFilters() {
-    const visible = filterRows(rows(), search.value, statusFilter.value);
+    const visible = filterRows(rows(), search.value, statusFilter ? statusFilter.value : 'all');
     noResults.hidden = visible > 0 || rows().length === 0;
     if (empty) empty.hidden = rows().length > 0;
   }
 
   search.addEventListener('input', applyFilters);
-  statusFilter.addEventListener('change', applyFilters);
+  if (statusFilter) statusFilter.addEventListener('change', applyFilters);
 
   list.addEventListener('click', async (event) => {
     const row = event.target.closest('tr[data-schedule-id]');
