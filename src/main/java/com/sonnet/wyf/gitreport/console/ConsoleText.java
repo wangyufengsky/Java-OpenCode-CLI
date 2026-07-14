@@ -2,10 +2,12 @@ package com.sonnet.wyf.gitreport.console;
 
 import org.springframework.stereotype.Component;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 @Component("consoleText")
 public class ConsoleText {
+    private static final DateTimeFormatter SCHEDULE_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final Map<String, String> CHAINS = Map.of(
             "git-code-contribution-report", "代码贡献报告",
             "smartesb-rewrite-code-review", "SmartESB 改造评审",
@@ -99,7 +101,35 @@ public class ConsoleText {
         return FREQUENCIES.getOrDefault(value, value);
     }
 
+    public String scheduleTitle(WorkflowScheduleRecord schedule) {
+        return chain(schedule.chainId()) + " · " + mode(schedule.mode()) + " #" + schedule.id();
+    }
+
+    public String scheduleFrequency(WorkflowScheduleRecord schedule) {
+        if (schedule.frequency() == null) {
+            return "—";
+        }
+        return switch (schedule.frequency()) {
+            case DAILY -> "每天 · " + schedule.runTime();
+            case WEEKLY -> "每周" + weekday(schedule.dayOfWeek()) + " · " + schedule.runTime();
+            case ONCE -> schedule.runAt() == null ? "一次性" : "一次性 · " + SCHEDULE_DATE_TIME.format(schedule.runAt());
+        };
+    }
+
     public String phase(String value) {
         return PHASES.getOrDefault(value, value);
+    }
+
+    private static String weekday(Integer dayOfWeek) {
+        return switch (dayOfWeek == null ? 0 : dayOfWeek) {
+            case 1 -> "一";
+            case 2 -> "二";
+            case 3 -> "三";
+            case 4 -> "四";
+            case 5 -> "五";
+            case 6 -> "六";
+            case 7 -> "日";
+            default -> "";
+        };
     }
 }
