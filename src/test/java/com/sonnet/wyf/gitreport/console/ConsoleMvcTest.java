@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -42,6 +43,9 @@ class ConsoleMvcTest {
 
     @Autowired
     WebApplicationContext webApplicationContext;
+
+    @Autowired
+    JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUpMockMvc() {
@@ -95,7 +99,11 @@ class ConsoleMvcTest {
         mockMvc.perform(get("/"))
                 .andExpect(content().string(containsString("class=\"app-shell\"")))
                 .andExpect(content().string(containsString("class=\"c-metric-card\"")))
+                .andExpect(content().string(containsString("data-tone=\"primary\"")))
+                .andExpect(content().string(containsString("data-tone=\"success\"")))
                 .andExpect(content().string(containsString("class=\"c-table-row\"")))
+                .andExpect(content().string(containsString("<th>耗时</th>")))
+                .andExpect(content().string(containsString("class=\"alert c-alert danger\"")))
                 .andExpect(content().string(containsString("aria-label=\"主导航\"")))
                 .andExpect(content().string(containsString("运行概览")))
                 .andExpect(content().string(containsString("新建运行")))
@@ -227,6 +235,26 @@ class ConsoleMvcTest {
 
         assertThat(Pattern.compile("<tr class=\\\"c-table-row\\\">").matcher(dashboard).results().count())
                 .isEqualTo(8);
+    }
+
+    @Test
+    void dashboardDoesNotRenderFailureAlertWhenPersistedRunsHaveNoFailures() throws Exception {
+        jdbcTemplate.update("delete from workflow_run_events");
+        jdbcTemplate.update("delete from workflow_task_status");
+        jdbcTemplate.update("delete from workflow_runs");
+        repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, LocalDate.of(2026, 7, 13), Map.of(), null
+        ), "healthy-dashboard.yml");
+
+        String dashboard = mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(dashboard)
+                .doesNotContain("class=\"alert c-alert danger\"")
+                .doesNotContain("项失败运行需要处理");
     }
 
     @Test

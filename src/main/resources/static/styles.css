@@ -28,6 +28,12 @@
   .c-metric-card { min-width: 0; padding: 18px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: 0 1px 2px rgb(16 35 63 / 4%); }
   .c-metric-card span { display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 12px; font-weight: 750; }
   .c-metric-card strong { font-size: 24px; line-height: 1.25; }
+  .c-metric-card-detail, .c-metric-card-trend { display: block; margin-top: 6px; color: var(--color-muted); font-size: 12px; line-height: 1.35; }
+  .c-metric-card-trend { color: var(--color-success); font-weight: 700; }
+  .c-metric-card[data-tone="primary"] { border-top: 3px solid var(--color-primary); }
+  .c-metric-card[data-tone="info"] { border-top: 3px solid #0f766e; }
+  .c-metric-card[data-tone="success"] { border-top: 3px solid var(--color-success); }
+  .c-metric-card[data-tone="danger"] { border-top: 3px solid var(--color-danger); }
   .c-button, .c-navigation-item { min-height: var(--control-height); }
   .c-icon { display: inline-grid; width: 20px; height: 20px; place-items: center; }
   .c-alert { border-radius: var(--radius-sm); }
@@ -299,30 +305,12 @@ h2 {
   background: #244bd0;
 }
 
-.metrics article,
 .panel {
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: 0 1px 2px rgb(16 35 63 / 4%);
-}
-
-.metrics article {
-  padding: 18px 20px;
-}
-
-.metrics span {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.metrics strong {
-  font-size: 24px;
-  line-height: 1.25;
 }
 
 .panel {
@@ -405,6 +393,21 @@ tbody tr:last-child td {
   color: var(--color-danger);
 }
 
+.status-badge.warning {
+  background: #fff5e8;
+  color: var(--color-warning);
+}
+
+.status-badge.success {
+  background: #eaf7ef;
+  color: var(--color-success);
+}
+
+.status-badge.danger {
+  background: #fff0ef;
+  color: var(--color-danger);
+}
+
 }
 
 @layer pages {
@@ -412,6 +415,25 @@ tbody tr:last-child td {
 .chain-list {
   display: grid;
   gap: 10px;
+}
+
+.dashboard-empty-state {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.dashboard-empty-state strong {
+  color: var(--color-text);
+  font-size: 18px;
+}
+
+.dashboard-empty-state p {
+  max-width: 360px;
 }
 
 .chain-list a {

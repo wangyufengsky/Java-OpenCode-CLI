@@ -37,14 +37,21 @@
 <div th:fragment="alert(message,tone)" class="alert c-alert" role="alert" th:classappend="${tone}"
      th:text="${message}">提示</div>
 
-<article th:fragment="metricCard(label,value)" class="c-metric-card"><span th:text="${label}">指标</span><strong th:text="${value}">0</strong></article>
+<article th:fragment="metricCard(metric)" class="c-metric-card"
+         th:attr="aria-label=${metric.label + ': ' + metric.value},data-tone=${metric.tone}">
+  <span th:text="${metric.label}">指标</span>
+  <strong th:text="${metric.value}">0</strong>
+  <small class="c-metric-card-detail" th:text="${metric.detail}">说明</small>
+  <small class="c-metric-card-trend" th:if="${!metric.trend.isBlank()}" th:text="${metric.trend}">趋势</small>
+</article>
 
 <tr th:fragment="tableRow(run)" class="c-table-row">
   <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
-  <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
-  <td th:text="${@consoleText.mode(run.mode)}">全量</td>
-  <td><span th:replace="~{fragments/layout :: statusBadge(${@consoleText.state(run.state)}, ${run.state.name().toLowerCase()})}">排队中</span></td>
-  <td th:text="${run.createdAt}">时间</td>
+  <td th:text="${run.chainLabel}">链路</td>
+  <td th:text="${run.modeLabel}">全量</td>
+  <td><span th:replace="~{fragments/layout :: statusBadge(${run.stateLabel}, ${run.stateTone})}">排队中</span></td>
+  <td th:text="${run.createdAtLabel}">时间</td>
+  <td th:text="${run.durationLabel}">耗时</td>
 </tr>
 
 <div th:fragment="progress(value)" class="c-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"

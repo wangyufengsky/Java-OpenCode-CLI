@@ -37,8 +37,9 @@ public class ConsolePageController {
     @GetMapping("/")
     public String dashboard(Model model) {
         model.addAttribute("chains", chainCatalog.chainIds());
-        model.addAttribute("runs", repository.listRuns());
-        model.addAttribute("summary", viewService.dashboard());
+        model.addAttribute("dashboardMetrics", viewService.dashboardMetrics());
+        model.addAttribute("dashboardRuns", viewService.dashboardRuns());
+        model.addAttribute("dashboardAttentionRuns", viewService.dashboardAttentionRuns());
         return "dashboard";
     }
 
