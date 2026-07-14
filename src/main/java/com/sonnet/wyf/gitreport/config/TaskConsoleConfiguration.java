@@ -11,6 +11,7 @@ import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.console.WorkflowExecutionService;
 import com.sonnet.wyf.gitreport.console.WorkflowScheduleRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowScheduleService;
+import com.sonnet.wyf.gitreport.console.WorkflowScheduleServiceFactory;
 import com.sonnet.wyf.gitreport.console.WorkflowRunRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowRunSchema;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
@@ -24,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 import java.nio.file.Files;
 import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Configuration
@@ -91,8 +93,10 @@ public class TaskConsoleConfiguration {
     }
 
     @Bean
-    Clock taskConsoleClock() {
-        return Clock.systemDefaultZone();
+    Clock taskConsoleClock(TaskConsoleProperties properties) {
+        return properties.getClockInstant() == null
+                ? Clock.systemDefaultZone()
+                : Clock.fixed(properties.getClockInstant(), ZoneOffset.UTC);
     }
 
     @Bean
@@ -106,8 +110,17 @@ public class TaskConsoleConfiguration {
             WorkflowRunRepository repository,
             WorkflowEventSink eventSink,
             RunConfigWriter configWriter,
-            AgentBridgeRunnerProperties runnerProperties
+            AgentBridgeRunnerProperties runnerProperties,
+            TaskConsoleProperties consoleProperties
     ) {
+        if (!consoleProperties.isExecutionEnabled()) {
+            return new WorkflowExecutionService(chainCatalog, repository, eventSink, configWriter, runnerProperties) {
+                @Override
+                public long submit(com.sonnet.wyf.gitreport.console.WorkflowRunSubmission submission) {
+                    throw new IllegalStateException("visual-qa disables workflow execution");
+                }
+            };
+        }
         return new WorkflowExecutionService(chainCatalog, repository, eventSink, configWriter, runnerProperties);
     }
 
@@ -116,8 +129,10 @@ public class TaskConsoleConfiguration {
             WorkflowScheduleRepository repository,
             WorkflowExecutionService executionService,
             ChainCatalog chainCatalog,
-            Clock taskConsoleClock
+            Clock taskConsoleClock,
+            TaskConsoleProperties properties,
+            WorkflowScheduleServiceFactory scheduleServiceFactory
     ) {
-        return new WorkflowScheduleService(repository, executionService, chainCatalog, taskConsoleClock);
+        return scheduleServiceFactory.create(repository, executionService, chainCatalog, taskConsoleClock, properties.isSchedulerEnabled());
     }
 }

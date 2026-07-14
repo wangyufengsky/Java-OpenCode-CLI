@@ -93,6 +93,7 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("成功率")));
         mockMvc.perform(get("/"))
                 .andExpect(content().string(containsString("class=\"app-shell\"")))
+                .andExpect(content().string(containsString("class=\"c-metric-card\"")))
                 .andExpect(content().string(containsString("aria-label=\"主导航\"")))
                 .andExpect(content().string(containsString("运行概览")))
                 .andExpect(content().string(containsString("新建运行")))

@@ -21,6 +21,29 @@
   <p class="sidebar-status"><span aria-hidden="true"></span>本地任务控制台</p>
 </aside>
 
+<svg th:fragment="icon(name)" class="c-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+  <path d="M3 8h10M8 3v10" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+</svg>
+
+<a th:fragment="navigationItem(href,label,active)" class="c-navigation-item" th:href="${href}"
+   th:classappend="${active} ? ' active'" th:text="${label}">导航</a>
+
+<button th:fragment="button(label,primary)" class="button c-button" type="button"
+        th:classappend="${primary} ? ' primary'" th:text="${label}">操作</button>
+
+<span th:fragment="statusBadge(label,tone)" class="status-badge c-status-badge" th:classappend="${tone}"
+      th:text="${label}">状态</span>
+
+<div th:fragment="alert(message,tone)" class="alert c-alert" role="alert" th:classappend="${tone}"
+     th:text="${message}">提示</div>
+
+<article th:fragment="metricCard(label,value)" class="c-metric-card"><span th:text="${label}">指标</span><strong th:text="${value}">0</strong></article>
+
+<tr th:fragment="tableRow"><td colspan="1" class="c-table-row">数据行</td></tr>
+
+<div th:fragment="progress(value)" class="c-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+     th:attr="aria-valuenow=${value}"><span th:style="'width:' + ${value} + '%'">0%</span></div>
+
 <header class="page-header" th:fragment="pageHeader(eyebrow,title,description)">
   <div class="page-header-copy">
     <p class="page-eyebrow" th:text="${eyebrow}">页面</p>

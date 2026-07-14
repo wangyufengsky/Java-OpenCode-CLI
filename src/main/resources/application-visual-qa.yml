@@ -1,0 +1,12 @@
+agentbridge-runner:
+  enabled: false
+
+task-console:
+  database-path: "target/visual-qa.sqlite"
+  run-config-dir: "target/visual-qa/run-configs"
+  scheduler-enabled: false
+  execution-enabled: false
+  clock-instant: "2026-07-13T00:00:00Z"
+
+visual-qa:
+  fixtures: "classpath:visual-qa-fixtures.yml"

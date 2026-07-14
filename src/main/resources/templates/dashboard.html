@@ -9,10 +9,10 @@
     <div class="page-content">
 
     <section class="metrics" aria-label="运行指标">
-    <article><span>今日运行</span><strong th:text="${summary.todayRuns}">0</strong></article>
-    <article><span>执行中</span><strong th:text="${summary.running}">0</strong></article>
-    <article><span>近 7 天成功率</span><strong th:text="${summary.successRatePercent + '%'}">0%</strong></article>
-    <article><span>需要关注</span><strong th:text="${summary.attentionRuns.size()}">0</strong></article>
+    <article class="c-metric-card"><span>今日运行</span><strong th:text="${summary.todayRuns}">0</strong></article>
+    <article class="c-metric-card"><span>执行中</span><strong th:text="${summary.running}">0</strong></article>
+    <article class="c-metric-card"><span>近 7 天成功率</span><strong th:text="${summary.successRatePercent + '%'}">0%</strong></article>
+    <article class="c-metric-card"><span>需要关注</span><strong th:text="${summary.attentionRuns.size()}">0</strong></article>
     </section>
 
     <section class="dashboard-grid">

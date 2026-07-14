@@ -20,3 +20,4 @@ agentbridge-runner:
 task-console:
   database-path: "data/agentbridge-task-console.sqlite"
   run-config-dir: "data/run-configs"
+  scheduler-enabled: true
