@@ -77,3 +77,38 @@ python3 scripts/visual-regression.py \
   target/visual-regression/history.png \
   --tolerance 16 --max-diff-ratio 0.02
 ```
+
+## Follow-up quality fix — safe page normalization
+
+### RED evidence
+
+After the quality review, I added MVC coverage for `page=2147483648`, a
+numeric value larger than `long`, and a nonnumeric value. Before changing
+production code, this command failed as expected:
+
+```sh
+mvn -q -Dtest=ConsoleMvcTest,WorkflowRunRepositoryTest test
+```
+
+`ConsoleMvcTest.historyNormalizesNonIntegerPageRequestsWithoutOverflow` saw
+the original Spring `int` binding return HTTP 400 for `2147483648`.
+
+### GREEN evidence
+
+`/history` now binds `page` as text, normalizes it with `long` arithmetic,
+clamps positive values larger than `long` to the final page, and treats
+nonnumeric/negative input as page one. The resolved `ConsolePage` contract
+remains `int`; its total-page value is safely capped, and the repository has a
+`long` offset overload so `(page - 1) * 20` cannot wrap to a negative offset
+and accidentally query page one. The existing `int` repository overload is
+retained for compatibility.
+
+The date-boundary repository test now also proves both `countRuns(filter)` and
+the paged query use the same `from`/`until` predicates.
+
+```sh
+mvn -q -Dtest=ConsoleMvcTest,WorkflowRunRepositoryTest test
+git diff --check
+```
+
+Both commands exited 0.

@@ -113,7 +113,7 @@ public class ConsolePageController {
             @RequestParam(required = false, defaultValue = "") String chainId,
             @RequestParam(name = "from", required = false, defaultValue = "") String createdFrom,
             @RequestParam(name = "until", required = false, defaultValue = "") String createdUntil,
-            @RequestParam(required = false, defaultValue = "1") int page,
+            @RequestParam(required = false, defaultValue = "1") String page,
             Model model
     ) {
         WorkflowRunFilter filter = new WorkflowRunFilter(
@@ -124,12 +124,12 @@ public class ConsolePageController {
                 parseDate(createdUntil)
         );
         long total = repository.countRuns(filter);
-        int totalPages = Math.max(1, (int) Math.ceil(total / (double) HISTORY_PAGE_SIZE));
-        int normalizedPage = Math.min(Math.max(1, page), totalPages);
+        int totalPages = historyTotalPages(total);
+        int normalizedPage = (int) Math.min(normalizedRequestedPage(page), (long) totalPages);
         List<ConsoleRunListItemView> runs = viewService.historyRuns(repository.listRuns(
                 filter,
                 HISTORY_PAGE_SIZE,
-                (normalizedPage - 1) * HISTORY_PAGE_SIZE
+                (long) (normalizedPage - 1) * HISTORY_PAGE_SIZE
         ));
         ConsolePage<ConsoleRunListItemView> historyPage = new ConsolePage<>(
                 normalizedPage, HISTORY_PAGE_SIZE, total, totalPages, runs
@@ -252,6 +252,26 @@ public class ConsolePageController {
             return LocalDate.parse(trimmed(value));
         } catch (DateTimeParseException ignored) {
             return null;
+        }
+    }
+
+    private static int historyTotalPages(long total) {
+        if (total <= 0) {
+            return 1;
+        }
+        long pages = ((total - 1) / HISTORY_PAGE_SIZE) + 1;
+        return (int) Math.min(pages, (long) Integer.MAX_VALUE);
+    }
+
+    private static long normalizedRequestedPage(String value) {
+        String requested = trimmed(value);
+        if (requested.isEmpty()) {
+            return 1;
+        }
+        try {
+            return Math.max(1L, Long.parseLong(requested));
+        } catch (NumberFormatException ignored) {
+            return requested.matches("\\+?\\d+") ? Long.MAX_VALUE : 1;
         }
     }
 

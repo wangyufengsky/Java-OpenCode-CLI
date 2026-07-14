@@ -832,6 +832,41 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void historyNormalizesNonIntegerPageRequestsWithoutOverflow() throws Exception {
+        for (int index = 0; index < 41; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "weekly-engineering-report", "full", null, null, null, Map.of(), null
+            ), "overflow-page-" + index + ".yml");
+        }
+
+        String aboveIntegerMaximum = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "2147483648"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        String giantNumeric = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "999999999999999999999999999999999999999999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        String nonNumeric = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "not-a-page"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(aboveIntegerMaximum).contains("当前第 3 / 3 页");
+        assertThat(giantNumeric).contains("当前第 3 / 3 页");
+        assertThat(nonNumeric).contains("当前第 1 / 3 页");
+    }
+
+    @Test
     void newRunAssetsExposeGroupedDefaultsPreflightAndResilientSubmission() throws Exception {
         String page = mockMvc.perform(get("/runs/new").param("chainId", "project-unit-test-generation"))
                 .andExpect(status().isOk())

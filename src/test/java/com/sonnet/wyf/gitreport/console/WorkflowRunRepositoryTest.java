@@ -144,6 +144,10 @@ class WorkflowRunRepositoryTest {
         assertThat(repository.listRuns(filter))
                 .extracting(WorkflowRunRecord::id)
                 .containsExactly(startDayRunId);
+        assertThat(repository.countRuns(filter)).isEqualTo(1);
+        assertThat(repository.listRuns(filter, 20, 0))
+                .extracting(WorkflowRunRecord::id)
+                .containsExactly(startDayRunId);
     }
 
     @Test

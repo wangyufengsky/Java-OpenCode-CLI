@@ -107,10 +107,14 @@ public class WorkflowRunRepository {
     }
 
     public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter, int limit, int offset) {
+        return listRuns(filter, limit, (long) offset);
+    }
+
+    public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter, int limit, long offset) {
         FilteredRunQuery query = filteredRunQuery(filter);
         List<Object> arguments = new ArrayList<>(query.arguments());
         arguments.add(Math.max(0, limit));
-        arguments.add(Math.max(0, offset));
+        arguments.add(Math.max(0L, offset));
         return jdbcTemplate.query(
                 "select * from workflow_runs" + query.whereClause() + " order by id desc limit ? offset ?",
                 runMapper(),
