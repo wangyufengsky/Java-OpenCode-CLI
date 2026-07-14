@@ -42,7 +42,7 @@ Task 2 change did not submit a final run and did not use a real user SQLite file
 
 ## Changed files
 
-- `ConsoleMetricView.java`, `ConsoleRunListItemView.java`
+- `ConsoleDashboardView.java`, `ConsoleMetricView.java`, `ConsoleRunListItemView.java`
 - `ConsoleViewService.java`, `ConsolePageController.java`
 - `dashboard.html`, `fragments/layout.html`, `styles.css`
 - `ConsoleViewServiceTest.java`, `ConsoleMvcTest.java`
