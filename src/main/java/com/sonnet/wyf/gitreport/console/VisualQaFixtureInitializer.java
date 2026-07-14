@@ -21,21 +21,25 @@ public class VisualQaFixtureInitializer implements ApplicationRunner {
     private static final Instant FIXTURE_INSTANT = Instant.parse("2026-07-13T00:00:00Z");
 
     private final JdbcTemplate jdbcTemplate;
+    private final TaskConsoleProperties properties;
     private final WorkflowRunRepository runRepository;
     private final WorkflowScheduleRepository scheduleRepository;
 
     public VisualQaFixtureInitializer(
             JdbcTemplate jdbcTemplate,
+            TaskConsoleProperties properties,
             WorkflowRunRepository runRepository,
             WorkflowScheduleRepository scheduleRepository
     ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties;
         this.runRepository = runRepository;
         this.scheduleRepository = scheduleRepository;
     }
 
     @Override
     public void run(ApplicationArguments arguments) {
+        VisualQaDatabaseGuard.requireDisposablePath(properties.getDatabasePath());
         jdbcTemplate.update("delete from workflow_run_events");
         jdbcTemplate.update("delete from workflow_task_status");
         jdbcTemplate.update("delete from workflow_schedules");

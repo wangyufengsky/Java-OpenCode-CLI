@@ -14,11 +14,13 @@ import com.sonnet.wyf.gitreport.console.WorkflowScheduleService;
 import com.sonnet.wyf.gitreport.console.WorkflowScheduleServiceFactory;
 import com.sonnet.wyf.gitreport.console.WorkflowRunRepository;
 import com.sonnet.wyf.gitreport.console.WorkflowRunSchema;
+import com.sonnet.wyf.gitreport.console.VisualQaDatabaseGuard;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import org.sqlite.SQLiteDataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -31,7 +33,10 @@ import java.util.List;
 @Configuration
 public class TaskConsoleConfiguration {
     @Bean
-    DataSource taskConsoleDataSource(TaskConsoleProperties properties) throws Exception {
+    DataSource taskConsoleDataSource(TaskConsoleProperties properties, Environment environment) throws Exception {
+        if (environment.matchesProfiles("visual-qa")) {
+            VisualQaDatabaseGuard.requireDisposablePath(properties.getDatabasePath());
+        }
         if (properties.getDatabasePath().getParent() != null) {
             Files.createDirectories(properties.getDatabasePath().getParent());
         }

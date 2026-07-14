@@ -26,8 +26,8 @@
         <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th></tr>
         </thead>
         <tbody>
-        <th:block th:each="run,iter : ${runs}">
-          <tr th:if="${iter.index < 8}" th:replace="~{fragments/layout :: tableRow(${run})}"></tr>
+        <th:block th:each="run,iter : ${runs}" th:if="${iter.index < 8}">
+          <tr th:replace="~{fragments/layout :: tableRow(${run})}"></tr>
         </th:block>
         <tr th:if="${runs.isEmpty()}"><td colspan="5" class="empty">尚无运行记录，前往新建运行开始第一次任务。</td></tr>
         </tbody>

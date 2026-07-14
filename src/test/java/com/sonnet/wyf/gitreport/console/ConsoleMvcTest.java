@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -170,13 +171,15 @@ class ConsoleMvcTest {
                 .contains("@layer shell {")
                 .contains("@layer components {")
                 .contains("@layer pages {")
+                .doesNotContain("html {\n  min-width: 1280px;")
+                .doesNotContain("body {\n  min-width: 1280px;")
                 .contains(":focus-visible {\n  outline: 3px solid var(--color-primary);")
                 .contains("@media (max-width: 1439px)")
                 .contains("grid-template-columns: minmax(0, 1fr) 300px;")
                 .contains(".dashboard-grid > article.panel > table {\n    min-width: 620px;")
-                .contains(".dashboard-grid > aside.panel table {\n  width: 100%;\n  min-width: 0;")
+                .contains("  .dashboard-grid > aside.panel table {\n    width: 100%;\n    min-width: 0;")
                 .doesNotContain(".dashboard-grid table {\n    min-width: 620px;")
-                .contains(".dashboard-grid > aside.panel .event-list li {\n  grid-template-columns: minmax(0, 1fr);")
+                .contains("  .dashboard-grid > aside.panel .event-list li {\n    grid-template-columns: minmax(0, 1fr);")
                 .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
         String failedRunDetail = mockMvc.perform(get("/runs/" + failedRunId))
                 .andExpect(status().isOk())
@@ -205,6 +208,25 @@ class ConsoleMvcTest {
                 .containsPattern("<option value=\"rerun\" selected(?:=\"selected\")?>重跑</option>")
                 .containsPattern("<option value=\"author\" selected(?:=\"selected\")?>作者</option>")
                 .contains("<input id=\"rerunId\" name=\"rerunId\" placeholder=\"多个编号用英文逗号分隔\" value=\"failed-task\">");
+    }
+
+    @Test
+    void dashboardRendersAtMostEightRecentTableRows() throws Exception {
+        for (int index = 0; index < 9; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "git-code-contribution-report", "full", null, null, LocalDate.of(2026, 7, 13),
+                    Map.of("project.id", "dashboard-limit-" + index), null
+            ), "dashboard-limit-" + index + ".yml");
+        }
+
+        String dashboard = mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(Pattern.compile("<tr class=\\\"c-table-row\\\">").matcher(dashboard).results().count())
+                .isEqualTo(8);
     }
 
     @Test

@@ -128,3 +128,28 @@ pages layers; no selector is left outside a layer.
    - Exit 0. Layer assertions, real Dashboard table fragment, repeated stable
      visual-QA IDs, MVC contracts, drawer behavior and same-image comparison
      (`changed_ratio=0.000000`) all passed.
+
+## Third review-fix follow-up (uncommitted)
+
+The Dashboard's iteration limit is now evaluated on its wrapping `th:block`, so
+fragment replacement cannot discard it; a regression creates nine runs and asserts
+exactly eight rendered `.c-table-row` records. The visual-QA database guard runs
+before DataSource directory/database work and again before fixture deletion. It
+allows only the normalized `target/visual-qa.sqlite` path under the visual profile;
+an overridden sentinel path causes context startup to fail without touching the
+file. The page-level `html`/`body` 1280px minimum width has been removed so only
+table containers impose horizontal scrolling. Redundant shell and Dashboard layout
+rules were removed from cross-layer copies; each remains in its intended layer.
+
+### Third review RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=ConsoleMvcTest#dashboardRendersAtMostEightRecentTableRows test`
+   - Exit non-zero before moving `th:if` to the wrapping block: expected 8 rows,
+     observed 339 because `th:replace` discarded the row condition.
+2. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest#visualQaRefusesAnOverriddenNonDisposableDatabaseBeforeItCanBeTouched test`
+   - Exit non-zero before the DataSource guard: overridden visual-QA startup did
+     not throw.
+3. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. Eight-row Dashboard cap, rejected untouched sentinel database,
+     no page-level 1280px width, layered CSS, fixture IDs, drawer behavior and
+     same-image comparison (`changed_ratio=0.000000`) passed.
