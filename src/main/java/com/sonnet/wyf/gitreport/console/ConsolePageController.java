@@ -10,13 +10,17 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 @Controller
 public class ConsolePageController {
+    private static final int HISTORY_PAGE_SIZE = 20;
     private final ChainCatalog chainCatalog;
     private final WorkflowRunRepository repository;
     private final WorkflowScheduleService scheduleService;
@@ -109,6 +113,7 @@ public class ConsolePageController {
             @RequestParam(required = false, defaultValue = "") String chainId,
             @RequestParam(name = "from", required = false, defaultValue = "") String createdFrom,
             @RequestParam(name = "until", required = false, defaultValue = "") String createdUntil,
+            @RequestParam(required = false, defaultValue = "1") int page,
             Model model
     ) {
         WorkflowRunFilter filter = new WorkflowRunFilter(
@@ -118,10 +123,33 @@ public class ConsolePageController {
                 parseDate(createdFrom),
                 parseDate(createdUntil)
         );
-        model.addAttribute("runs", repository.listRuns(filter));
+        long total = repository.countRuns(filter);
+        int totalPages = Math.max(1, (int) Math.ceil(total / (double) HISTORY_PAGE_SIZE));
+        int normalizedPage = Math.min(Math.max(1, page), totalPages);
+        List<ConsoleRunListItemView> runs = viewService.historyRuns(repository.listRuns(
+                filter,
+                HISTORY_PAGE_SIZE,
+                (normalizedPage - 1) * HISTORY_PAGE_SIZE
+        ));
+        ConsolePage<ConsoleRunListItemView> historyPage = new ConsolePage<>(
+                normalizedPage, HISTORY_PAGE_SIZE, total, totalPages, runs
+        );
+        model.addAttribute("runs", historyPage.items());
+        model.addAttribute("historyPage", historyPage);
         model.addAttribute("filter", filter);
         model.addAttribute("chains", chainCatalog.chainIds());
         model.addAttribute("runStates", RunState.values());
+        model.addAttribute("clearFiltersUrl", canonicalUrl("/history", WorkflowRunFilter.empty(), 1, Map.of()));
+        model.addAttribute("previousPageUrl", canonicalUrl("/history", filter, normalizedPage - 1, Map.of()));
+        model.addAttribute("nextPageUrl", canonicalUrl("/history", filter, normalizedPage + 1, Map.of()));
+        Map<Long, String> detailUrls = new LinkedHashMap<>();
+        Map<Long, String> copyUrls = new LinkedHashMap<>();
+        for (ConsoleRunListItemView run : runs) {
+            detailUrls.put(run.id(), canonicalUrl("/runs/" + run.id(), filter, normalizedPage, Map.of()));
+            copyUrls.put(run.id(), canonicalUrl("/runs/new", filter, normalizedPage, Map.of("copyFrom", String.valueOf(run.id()))));
+        }
+        model.addAttribute("historyDetailUrls", detailUrls);
+        model.addAttribute("historyCopyUrls", copyUrls);
         return "history";
     }
 
@@ -224,6 +252,38 @@ public class ConsolePageController {
             return LocalDate.parse(trimmed(value));
         } catch (DateTimeParseException ignored) {
             return null;
+        }
+    }
+
+    private static String canonicalUrl(
+            String path,
+            WorkflowRunFilter filter,
+            int page,
+            Map<String, String> extraParameters
+    ) {
+        List<String> parameters = new ArrayList<>();
+        extraParameters.forEach((name, value) -> addParameter(parameters, name, value));
+        addParameter(parameters, "q", filter.query());
+        if (filter.state() != null) {
+            addParameter(parameters, "state", filter.state().name());
+        }
+        addParameter(parameters, "chainId", filter.chainId());
+        if (filter.createdFrom() != null) {
+            addParameter(parameters, "from", filter.createdFrom().toString());
+        }
+        if (filter.createdUntil() != null) {
+            addParameter(parameters, "until", filter.createdUntil().toString());
+        }
+        if (page > 1) {
+            addParameter(parameters, "page", String.valueOf(page));
+        }
+        return parameters.isEmpty() ? path : path + "?" + String.join("&", parameters);
+    }
+
+    private static void addParameter(List<String> parameters, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            parameters.add(URLEncoder.encode(name, StandardCharsets.UTF_8) + "="
+                    + URLEncoder.encode(value, StandardCharsets.UTF_8));
         }
     }
 }

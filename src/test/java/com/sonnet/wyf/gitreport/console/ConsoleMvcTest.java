@@ -763,8 +763,8 @@ class ConsoleMvcTest {
                 .contains("value=\"2026-07-01\"")
                 .contains("name=\"until\"")
                 .contains("value=\"2026-07-31\"")
-                .contains("href=\"/runs/" + failedRunId + "\">查看详情</a>")
-                .contains("href=\"/runs/new?copyFrom=" + failedRunId + "\">复制配置</a>")
+                .contains("href=\"/runs/" + failedRunId + "?q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">查看详情</a>")
+                .contains("href=\"/runs/new?copyFrom=" + failedRunId + "&amp;q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">复制配置</a>")
                 .doesNotContain("href=\"/runs/" + otherRunId + "\">查看详情</a>");
     }
 
@@ -783,6 +783,52 @@ class ConsoleMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("href=\"/runs/" + runId + "\">查看详情</a>")))
                 .andExpect(content().string(not(containsString("value=\"not-a-state\" selected"))));
+    }
+
+    @Test
+    void historyClampsPagesAndKeepsAllActiveFiltersInCanonicalLinks() throws Exception {
+        for (int index = 0; index < 41; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "weekly-engineering-report", "full", null, null, null, Map.of(), null
+            ), "weekly-page-" + index + ".yml");
+        }
+
+        String history = mockMvc.perform(get("/history")
+                        .param("q", "weekly-page")
+                        .param("state", "QUEUED")
+                        .param("chainId", "weekly-engineering-report")
+                        .param("from", "2026-07-01")
+                        .param("until", "2026-07-31")
+                        .param("page", "999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(history)
+                .contains("当前第 3 / 3 页")
+                .contains("href=\"/history?q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31&amp;page=2\"")
+                .contains("href=\"/runs/new?copyFrom=")
+                .contains("q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31&amp;page=3\"");
+
+        String empty = mockMvc.perform(get("/history").param("q", "no-page-result").param("page", "999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(empty).contains("当前第 1 / 1 页");
+
+        String first = mockMvc.perform(get("/history")
+                        .param("q", "weekly-page")
+                        .param("state", "QUEUED")
+                        .param("chainId", "weekly-engineering-report")
+                        .param("page", "-8"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(first).contains("当前第 1 / 3 页")
+                .contains("href=\"/history?q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;page=2\"");
     }
 
     @Test

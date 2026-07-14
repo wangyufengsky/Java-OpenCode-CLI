@@ -170,6 +170,29 @@ class WorkflowRunRepositoryTest {
         ))).extracting(WorkflowRunRecord::id).containsExactly(underscoreRunId);
     }
 
+    @Test
+    void countsAndPagesRunsAfterAllBoundFilterArguments() {
+        WorkflowRunRepository repository = repository();
+        WorkflowRunFilter filter = new WorkflowRunFilter(
+                "paged-history", RunState.FAILED, "weekly-engineering-report", null, null
+        );
+        for (int index = 0; index < 41; index++) {
+            long runId = repository.createRun(new WorkflowRunSubmission(
+                    "weekly-engineering-report", "full", null, null, null, Map.of(), null
+            ), "paged-history-" + index + ".yml");
+            repository.markFailed(runId, "paged history failure");
+        }
+        repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "paged-history-other-chain.yml");
+
+        assertThat(repository.countRuns(filter)).isEqualTo(41);
+        assertThat(repository.listRuns(filter, 20, 0)).hasSize(20)
+                .allSatisfy(run -> assertThat(run.chainId()).isEqualTo("weekly-engineering-report"));
+        assertThat(repository.listRuns(filter, 20, 20)).hasSize(20);
+        assertThat(repository.listRuns(filter, 20, 40)).hasSize(1);
+    }
+
     private WorkflowRunRepository repository() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         new WorkflowRunSchema(jdbcTemplate).initialize();
