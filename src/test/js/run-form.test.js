@@ -272,6 +272,22 @@ test('submit remains disabled when a newer chain configuration finishes loading'
   assert.equal(harness.nodes.submit.disabled, false);
 });
 
+test('a failed submit clears the busy state and re-enables the run button', async () => {
+  const harness = requestHarness();
+  await initialize(harness);
+
+  const [submission] = harness.nodes.form.dispatch('submit');
+  assert.equal(harness.nodes.form.attributes.get('aria-busy'), 'true');
+  assert.equal(harness.nodes.submit.disabled, true);
+
+  harness.submitReply.resolve(response({ error: '配置校验失败' }, false));
+  await submission;
+
+  assert.equal(harness.nodes.form.attributes.get('aria-busy'), 'false');
+  assert.equal(harness.nodes.submit.disabled, false);
+  assert.equal(harness.nodes.submitResult.textContent, '配置校验失败');
+});
+
 test('a second submit event cannot start another request while the first is pending', async () => {
   const harness = requestHarness();
   await initialize(harness);

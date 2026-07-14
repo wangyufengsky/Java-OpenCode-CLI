@@ -203,6 +203,20 @@ test('STARTED event advances the run state to RUNNING', () => {
   assert.equal(harness.document.querySelector('#run-state').textContent, '运行中');
 });
 
+test('SSE reconnecting state is exposed without changing the event snapshot order', () => {
+  const harness = createHarness();
+  harness.source.emit('STARTED', { id: 11, eventType: 'STARTED', message: 'first' });
+  harness.source.onerror();
+
+  const streamState = harness.document.querySelector('#stream-state');
+  assert.equal(streamState.textContent, '正在重连');
+  assert.equal(streamState.dataset.connectionState, 'reconnecting');
+  assert.deepEqual(
+    harness.document.querySelector('#events').querySelectorAll('li[data-event-id]').map((item) => item.dataset.eventId),
+    ['11']
+  );
+});
+
 test('snapshots fully replace failed-task actions instead of retaining an old rerun id', () => {
   const harness = createHarness();
   const safe = (rerunId) => ({

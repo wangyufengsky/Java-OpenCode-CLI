@@ -45,6 +45,24 @@
   .c-table-row:hover { background: #f9fbfe; }
   .c-progress { height: 8px; overflow: hidden; border-radius: 999px; background: #e1e7ef; }
   .c-progress > span { display: block; height: 100%; background: var(--color-primary); }
+  .c-step-navigation { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .c-step-navigation article { min-width: 0; padding: 13px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+  .c-step-navigation article.is-active { border-color: #b8c8f8; background: #f4f7ff; }
+  .c-step-navigation span, .progress-stages time { display: block; color: var(--color-muted); font-size: 12px; font-weight: 700; }
+  .c-step-navigation strong { display: block; margin-top: 2px; }
+  .c-run-summary { position: sticky; top: 20px; }
+  .c-run-summary dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 8px 12px; margin: 0; }
+  .c-run-summary dt { color: var(--color-muted); font-weight: 700; }
+  .c-run-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+  .c-progress-indicator { overflow: hidden; }
+  .progress-stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 0; margin: 0; list-style: none; }
+  .progress-stages li { min-width: 0; padding-top: 10px; border-top: 3px solid var(--color-border); }
+  .progress-stages li[data-stage-status="进行中"] { border-color: var(--color-primary); }
+  .progress-stages li[data-stage-status="已完成"], .progress-stages li[data-stage-status="已观察"] { border-color: var(--color-success); }
+  .progress-stages li[data-stage-status="已失败"] { border-color: var(--color-danger); }
+  #stream-state[data-connection-state="reconnecting"] { background: #fff5e8; color: var(--color-warning); }
+  #stream-state[data-connection-state="live"] { background: #eaf7ef; color: var(--color-success); }
+  #stream-state[data-connection-state="polling"] { background: #e9efff; color: var(--color-primary); }
 }
 
 @layer pages {
@@ -584,6 +602,36 @@ textarea {
   gap: 14px;
 }
 
+.run-form > .form-main > #submit-result {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+}
+
+.run-form > .form-main > #submit-result:empty,
+.run-form > .form-main > #preflight-alert:empty {
+  display: none;
+}
+
+.run-form > .form-main > #preflight-alert {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  background: #f9fbfe;
+  color: var(--color-muted);
+}
+
+.run-form > .form-main > #preflight-alert[data-tone="success"] {
+  border-color: #bfe5ca;
+  background: #eaf7ef;
+  color: var(--color-success);
+}
+
+.run-form > .form-main > #preflight-alert[data-tone="warning"] {
+  border-color: #f1d2a8;
+  background: #fff5e8;
+  color: var(--color-warning);
+}
+
 .submit-panel ul {
   margin: 0;
   padding-left: 18px;
@@ -880,6 +928,10 @@ textarea {
 
   .form-row {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .progress-stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   }
 }

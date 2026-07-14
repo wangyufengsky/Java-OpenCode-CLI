@@ -14,6 +14,7 @@
   const submitButton = document.querySelector('#submit-run');
   const submitResult = document.querySelector('#submit-result');
   const copyLoadStatus = document.querySelector('#copy-load-status');
+  const preflightAlert = document.querySelector('#preflight-alert');
   const preflightState = new Map();
   let defaults = {};
   let renderSequence = 0;
@@ -265,24 +266,37 @@
     if (!value) {
       if (!control.validationMessage) status.textContent = '';
       preflightState.delete(control.id);
+      if (preflightState.size === 0) setPreflightAlert('');
       return;
     }
     status.textContent = '等待检查路径...';
+    setPreflightAlert('路径预检等待中…', 'neutral');
     const state = { timer: null, controller: null };
     state.timer = window.setTimeout(async () => {
       const controller = new AbortController();
       state.controller = controller;
       status.textContent = '正在检查路径...';
+      setPreflightAlert('正在检查本机路径…', 'neutral');
       try {
         const response = await fetch(`/api/path-preflight?path=${encodeURIComponent(value)}`, { signal: controller.signal });
         if (!response.ok) throw new Error('路径预检服务不可用');
         const body = await response.json();
         status.textContent = body.message || (body.accessible ? '路径可读' : '路径暂不可访问');
+        setPreflightAlert(status.textContent, body.accessible ? 'success' : 'warning');
       } catch (error) {
-        if (error.name !== 'AbortError') status.textContent = '无法完成路径预检；仍可继续提交。';
+        if (error.name !== 'AbortError') {
+          status.textContent = '无法完成路径预检；仍可继续提交。';
+          setPreflightAlert(status.textContent, 'warning');
+        }
       }
     }, 400);
     preflightState.set(control.id, state);
+  }
+
+  function setPreflightAlert(message, tone = 'neutral') {
+    if (!preflightAlert) return;
+    preflightAlert.textContent = message;
+    preflightAlert.dataset.tone = tone;
   }
 
   function renderRerunTypeOptions(chainId, selectedValue = null) {
@@ -393,6 +407,7 @@
     }
 
     submitInFlight = true;
+    runForm.setAttribute('aria-busy', 'true');
     syncSubmitState();
     submitResult.textContent = '正在提交…';
     const payload = {
@@ -419,6 +434,7 @@
       submitResult.textContent = '网络请求失败，已保留当前填写内容。';
     } finally {
       submitInFlight = false;
+      runForm.setAttribute('aria-busy', 'false');
       syncSubmitState();
     }
   });

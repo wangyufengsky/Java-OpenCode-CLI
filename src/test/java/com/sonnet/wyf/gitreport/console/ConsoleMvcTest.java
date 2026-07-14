@@ -507,6 +507,37 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void newRunAndRunDetailRenderTheSharedFigmaCompositionWithoutChangingDomHooks() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "visual-composition.yml");
+
+        String newRun = mockMvc.perform(get("/runs/new"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(newRun)
+                .contains("c-step-navigation")
+                .contains("data-step=\"1\"")
+                .contains("id=\"run-form\"")
+                .contains("id=\"chain-config-fields\"")
+                .contains("id=\"preflight-alert\"")
+                .contains("data-field-error=\"true\"")
+                .contains("c-run-summary")
+                .contains("id=\"submit-run\"");
+
+        String detail = mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail)
+                .contains("c-progress-indicator")
+                .contains("data-progress-steps=\"5\"")
+                .contains("data-connection-state=\"connecting\"")
+                .contains("id=\"events\"")
+                .contains("id=\"task-rows\"")
+                .contains("id=\"rerun-failed-task\"");
+    }
+
+    @Test
     void pagesLoadOnlyTheirScopedScriptsAndLegacyBundleIsRetired() throws Exception {
         long runId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report", "full", null, null, null, Map.of(), null
