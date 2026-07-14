@@ -8,8 +8,8 @@ Implemented the Task Console visual foundation: checked-in Figma PNG baselines a
 
 - Figma file: `7SMWQrlbLmB6yZ1kUbJ26o`.
 - Saved the 14 unique supplied node screenshots under `docs/figma-baselines/components/`; the two duplicate supplied IDs were not duplicated.
-- `get_screenshot` succeeded for every supplied node. Structural `get_metadata` supplied actual component names and variants used in `docs/figma-contract.md`.
-- The Desktop MCP `get_design_context` endpoint remained selection-scoped: it returned complete context for selected node `6:110` (Typography), including the documented Inter/Roboto Mono typography and `#607086`; calls targeted to other supplied IDs returned `You currently have nothing selected.` This was recorded in the contract rather than replaced with fabricated token or variant data. Screenshot measurements and parent-authorized metadata are explicitly distinguished there.
+- `get_screenshot` succeeded for every supplied node. The contract records only screenshot-visible evidence and does not claim raw component values where context was unavailable.
+- The Desktop MCP `get_design_context` endpoint remained selection-scoped: it returned complete context for selected node `6:110` (Typography), including the documented Inter/Roboto Mono typography and `#607086`; calls targeted to other supplied IDs returned `You currently have nothing selected.` This was recorded in the contract rather than replaced with fabricated token or variant data.
 
 ## RED evidence
 
@@ -66,17 +66,17 @@ node --test src/test/js/*.test.js test/js/visual-components.test.js
 
 ## Concern
 
-Figma Desktop context retrieval is limited by the selected layer. The checked-in screenshots and allowed structural metadata still provide durable visual/variant evidence, but a later Figma Desktop session with each component explicitly selected would be needed to replace every `design-context unavailable` annotation with raw context output.
+Figma Desktop context retrieval is limited by the selected layer. The checked-in screenshots provide durable rendered visual evidence, but a later Figma Desktop session with each component explicitly selected would be needed to replace every `design-context unavailable` annotation with raw context output.
 
 ## Commit
 
 This report is included in the Task 1 commit with subject `feat: add console visual foundation`.
 
-## Review-fix follow-up (uncommitted)
+## Review-fix follow-up (committed in `55668bc`)
 
 The review identified a source-contract and visual-QA gap. `docs/figma-contract.md`
 now cites only `get_screenshot` and the selected `get_design_context` result; all
-other raw component values are explicitly unavailable rather than metadata-derived.
+other raw component values are explicitly unavailable rather than inferred.
 It inventories all 11 intended components and six required states, retaining direct
 source blockers for Filter Control, Progress Indicator, and unsupplied state nodes.
 
@@ -88,10 +88,9 @@ fixtures and no-execution guard. The original public four-argument
 `WorkflowScheduleService` constructor is restored. All CSS rules are now inside
 the declared cascade layers, and the rendered shell/control values are 1216px and
 44px. Dashboard now consumes shared navigation, metric-card and status-badge
-fragments. Table and alert fragments remain declared but are not inserted into the
-pre-overhaul Dashboard because their dynamic cell/conditional-alert markup must be
-preserved; their existing selectors/hooks remain intact for the later vertical page
-slices.
+fragments. The later review follow-up made `tableRow(run)` a functional Dashboard
+five-column fragment; conditional alerts remain progressive adoption because no
+existing Dashboard alert can be introduced without changing its page slice.
 
 ### Review-fix RED/GREEN evidence
 
@@ -104,3 +103,28 @@ slices.
    - Exit 0. MVC rendering, visual-QA fixture isolation, public constructor,
      drawer Escape/focus behavior, same-image visual comparison
      (`changed_ratio=0.000000`) and whitespace validation passed.
+
+## Second review-fix follow-up (uncommitted)
+
+This uncommitted follow-up removes every prohibited source claim from the report and
+contract. It resets only the disposable visual-QA SQLite `sqlite_sequence` entries
+after first verifying that the SQLite sequence table exists, so repeated fixture
+startup produces stable run and schedule IDs even when that table is absent.
+`tableRow(run)` now renders the Dashboard's real five-column rows with the existing
+run link and status mapping. CSS is divided into foundations, shell, components and
+pages layers; no selector is left outside a layer.
+
+### Second review RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit non-zero before counter reset: repeated seed run IDs changed from
+     `[21, 20, 19]` to `[24, 23, 22]`.
+2. RED: `mvn -q -Dtest=ConsoleMvcTest test`
+   - Exit non-zero before the table fragment moved iteration scope to a wrapping
+     `th:block`: fragment parameter `run` was null.
+3. GREEN: final focused command is recorded below after the final rerun.
+
+4. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. Layer assertions, real Dashboard table fragment, repeated stable
+     visual-QA IDs, MVC contracts, drawer behavior and same-image comparison
+     (`changed_ratio=0.000000`) all passed.

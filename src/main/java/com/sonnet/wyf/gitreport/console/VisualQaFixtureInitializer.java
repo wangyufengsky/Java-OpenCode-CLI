@@ -40,6 +40,7 @@ public class VisualQaFixtureInitializer implements ApplicationRunner {
         jdbcTemplate.update("delete from workflow_task_status");
         jdbcTemplate.update("delete from workflow_schedules");
         jdbcTemplate.update("delete from workflow_runs");
+        resetAutoincrementCounters();
 
         long succeeded = createRun("visual-succeeded.yml");
         runRepository.markRunning(succeeded);
@@ -83,5 +84,17 @@ public class VisualQaFixtureInitializer implements ApplicationRunner {
                 "git-code-contribution-report", "full", null, null, LocalDate.of(2026, 7, 13),
                 Map.of("project.id", "visual-demo"), null
         ), configPath);
+    }
+
+    private void resetAutoincrementCounters() {
+        Integer sequenceTableCount = jdbcTemplate.queryForObject(
+                "select count(*) from sqlite_master where type='table' and name='sqlite_sequence'",
+                Integer.class
+        );
+        if (sequenceTableCount != null && sequenceTableCount > 0) {
+            jdbcTemplate.update(
+                    "delete from sqlite_sequence where name in ('workflow_runs', 'workflow_schedules', 'workflow_run_events')"
+            );
+        }
     }
 }

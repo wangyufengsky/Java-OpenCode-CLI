@@ -26,13 +26,9 @@
         <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th></tr>
         </thead>
         <tbody>
-        <tr th:each="run,iter : ${runs}" th:if="${iter.index < 8}">
-          <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
-          <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
-          <td th:text="${@consoleText.mode(run.mode)}">全量</td>
-          <td><span th:replace="~{fragments/layout :: statusBadge(${@consoleText.state(run.state)}, ${run.state.name().toLowerCase()})}">排队中</span></td>
-          <td th:text="${run.createdAt}">时间</td>
-        </tr>
+        <th:block th:each="run,iter : ${runs}">
+          <tr th:if="${iter.index < 8}" th:replace="~{fragments/layout :: tableRow(${run})}"></tr>
+        </th:block>
         <tr th:if="${runs.isEmpty()}"><td colspan="5" class="empty">尚无运行记录，前往新建运行开始第一次任务。</td></tr>
         </tbody>
       </table>

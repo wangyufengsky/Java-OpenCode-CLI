@@ -35,19 +35,40 @@
   .c-metric-card strong { font-size: 24px; line-height: 1.25; }
   .c-button, .c-navigation-item { min-height: var(--control-height); }
   .c-icon { display: inline-grid; width: 20px; height: 20px; place-items: center; }
-.c-alert { border-radius: var(--radius-sm); }
+  .c-alert { border-radius: var(--radius-sm); }
 .c-drawer { width: min(480px, calc(100vw - 80px)); }
+  .c-table-row { transition: background-color 120ms ease; }
+  .c-table-row:hover { background: #f9fbfe; }
   .c-progress { height: 8px; overflow: hidden; border-radius: 999px; background: #e1e7ef; }
   .c-progress > span { display: block; height: 100%; background: var(--color-primary); }
 }
 
 @layer pages {
-  .metrics { gap: 16px; }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 20px;
+    align-items: start;
+  }
+  .dashboard-grid > aside.panel table {
+    width: 100%;
+    min-width: 0;
+  }
+  .dashboard-grid > aside.panel .event-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
 }
 
-/* Existing console selectors are deliberately contained in the component layer while
-   page slices migrate to semantic fragments. No selector below is unlayered. */
-@layer components {
+/* Foundation defaults, shell framing, reusable controls, then page composition.
+   No selector below is unlayered. */
+@layer foundations {
 * {
   box-sizing: border-box;
 }
@@ -99,6 +120,10 @@ h2 {
   font-size: 17px;
   line-height: 1.35;
 }
+
+}
+
+@layer shell {
 
 .app-shell {
   display: grid;
@@ -244,6 +269,10 @@ h2 {
 .page-content {
   min-width: 0;
 }
+
+}
+
+@layer components {
 
 .button {
   display: inline-flex;
@@ -407,6 +436,10 @@ tbody tr:last-child td {
   color: var(--color-danger);
 }
 
+}
+
+@layer pages {
+
 .chain-list {
   display: grid;
   gap: 10px;
@@ -446,6 +479,10 @@ tbody tr:last-child td {
 .schedule-list-panel {
   margin-bottom: 20px;
 }
+
+}
+
+@layer components {
 
 label {
   display: grid;
@@ -828,11 +865,16 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+}
+
 @media (max-width: 1439px) {
+  @layer shell {
   .app-main {
     padding: 32px 24px 40px;
   }
+  }
 
+  @layer pages {
   .dashboard-grid,
   .run-form {
     grid-template-columns: minmax(0, 1fr) 300px;
@@ -846,5 +888,5 @@ textarea {
   .form-row {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
-}
+  }
 }

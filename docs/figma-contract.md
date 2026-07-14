@@ -5,8 +5,8 @@ The sole Figma visual sources for this implementation are `get_screenshot` and
 checked in so visual review is reproducible. During collection, Desktop MCP
 returned raw design context only for the explicitly selected Typography frame
 `6:110`; requests for the supplied component IDs returned `desktop selection
-required`. This document never substitutes metadata or inferred raw properties
-for that missing response.
+required`. This document never substitutes inferred raw properties for that
+missing response.
 
 ## Evidence rules and foundations
 
@@ -33,7 +33,7 @@ than silently dropped.
 | Input | `23:2`, captured: `components/23-2.png` | field-state examples visible | semantic form controls; raw dimensions unavailable. |
 | Metric Card | `28:2`, captured: `components/28-2.png` | tone examples visible | `metricCard`, `.c-metric-card`; raw values unavailable. |
 | Filter Control | no supplied component screenshot | **blocker:** no direct node supplied | shared filter styling remains unverified until a Figma screenshot/context is supplied. |
-| Table Row | `40:2`, captured: `components/40-2.png` | row-state examples visible | `tableRow`, `.c-table-row`; raw values unavailable. |
+| Table Row | `40:2`, captured: `components/40-2.png` | row-state examples visible | `tableRow(run)`, `.c-table-row`, consumed by the Dashboard five-column run table; raw values unavailable. |
 | Alert | `44:2`, captured: `components/44-2.png` | tone examples visible | `alert`, `.c-alert`; raw values unavailable. |
 | Drawer Shell | `54:2`, captured: `components/54-2.png` | create/edit/loading examples visible | `.c-drawer` and schedule drawer behavior; exact 480px target remains a later screen validation. |
 | Progress Indicator | no supplied component screenshot | **blocker:** no direct node supplied | `progress`, `.c-progress`; not asserted as Figma parity yet. |

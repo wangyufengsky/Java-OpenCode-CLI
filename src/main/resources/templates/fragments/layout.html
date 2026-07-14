@@ -39,7 +39,13 @@
 
 <article th:fragment="metricCard(label,value)" class="c-metric-card"><span th:text="${label}">指标</span><strong th:text="${value}">0</strong></article>
 
-<tr th:fragment="tableRow"><td colspan="1" class="c-table-row">数据行</td></tr>
+<tr th:fragment="tableRow(run)" class="c-table-row">
+  <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
+  <td th:text="${@consoleText.chain(run.chainId)}">链路</td>
+  <td th:text="${@consoleText.mode(run.mode)}">全量</td>
+  <td><span th:replace="~{fragments/layout :: statusBadge(${@consoleText.state(run.state)}, ${run.state.name().toLowerCase()})}">排队中</span></td>
+  <td th:text="${run.createdAt}">时间</td>
+</tr>
 
 <div th:fragment="progress(value)" class="c-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
      th:attr="aria-valuenow=${value}"><span th:style="'width:' + ${value} + '%'">0%</span></div>
