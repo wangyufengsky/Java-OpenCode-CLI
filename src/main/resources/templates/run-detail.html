@@ -8,17 +8,17 @@
     <header th:replace="~{fragments/layout :: pageHeader('运行详情', ${'运行 ' + run.id + ' / ' + @consoleText.chain(run.chainId)}, ${@consoleText.mode(run.mode) + ' / ' + @consoleText.phase(run.phase)})}"></header>
     <div class="page-content">
 
-    <section id="run-summary" class="metrics">
-    <article><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>
-    <article><span>任务</span><strong id="run-task-progress" th:text="${summary.succeededTasks + '/' + summary.totalTasks}">0/0</strong></article>
-    <article><span>失败任务</span><strong id="run-failed-tasks" th:text="${summary.failedTasks}">0</strong></article>
-    <article><span>耗时</span><strong id="run-duration" th:text="${summary.durationSeconds + ' 秒'}">0 秒</strong></article>
+    <section id="run-summary" class="metrics" aria-label="运行摘要">
+    <article class="c-metric-card" data-tone="info"><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>
+    <article class="c-metric-card" data-tone="primary"><span>任务</span><strong id="run-task-progress" th:text="${summary.succeededTasks + '/' + summary.totalTasks}">0/0</strong></article>
+    <article class="c-metric-card" data-tone="danger"><span>失败任务</span><strong id="run-failed-tasks" th:text="${summary.failedTasks}">0</strong></article>
+    <article class="c-metric-card" data-tone="success"><span>耗时</span><strong id="run-duration" th:text="${summary.durationSeconds + ' 秒'}">0 秒</strong></article>
     </section>
 
-    <section class="panel">
+    <section class="panel c-progress-indicator" data-progress-steps="5" aria-label="五阶段运行进度">
       <div class="panel-title"><h2>运行进度</h2><span th:text="${@consoleText.phase(run.phase)}">状态未知</span></div>
-      <ol class="event-list">
-        <li th:each="stage,iter : ${stages}">
+      <ol class="progress-stages">
+        <li th:each="stage,iter : ${stages}" th:attr="data-stage=${iter.index + 1},data-stage-status=${stage.status}">
           <time th:text="${'阶段 ' + (iter.index + 1)}">阶段</time>
           <strong th:text="${stage.name}">阶段名称</strong>
           <span th:text="${stage.status}">状态未知</span>
@@ -26,12 +26,12 @@
       </ol>
     </section>
 
-    <section id="failure-summary" class="panel"
+    <section id="failure-summary" class="panel alert c-alert danger"
              th:attr="hidden=${run.state.name() == 'FAILED' or summary.failureMessage != null or summary.failedTaskKey != null or summary.lastErrorMessage != null} ? null : 'hidden'">
       <div class="panel-title">
         <h2>失败摘要</h2>
         <span id="failure-actions" th:attr="hidden=${rerunAction.visible} ? null : 'hidden'">
-          <a id="rerun-failed-task" class="button primary"
+          <a id="rerun-failed-task" class="button c-button primary"
              th:attr="hidden=${rerunAction.available} ? null : 'hidden'"
              th:href="${rerunAction.available} ? @{/runs/new(chainId=${run.chainId},mode='rerun',rerunType=${rerunAction.rerunType},rerunId=${rerunAction.rerunId})} : null">重跑失败任务</a>
           <span id="rerun-unavailable-reason"
@@ -64,7 +64,7 @@
             <option value="task" th:selected="${eventFilter == 'task'}">任务</option>
             <option value="failed" th:selected="${eventFilter == 'failed'}">错误</option>
           </select>
-          <span id="stream-state">连接中</span>
+          <span id="stream-state" class="status-badge c-status-badge queued" data-connection-state="connecting">连接中</span>
         </nav>
       </div>
       <ol id="events" class="event-list" th:attr="data-event-filter=${eventFilter}">

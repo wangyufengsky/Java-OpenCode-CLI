@@ -68,11 +68,15 @@
     }
   }
 
-  function filterRows(rows, query) {
+  function filterRows(rows, query, status = 'all') {
     const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
     let visible = 0;
     rows.forEach((row) => {
-      const matches = !normalized || String(row.dataset.search || row.textContent || '').toLocaleLowerCase('zh-CN').includes(normalized);
+      const matchesQuery = !normalized || String(row.dataset.search || row.textContent || '').toLocaleLowerCase('zh-CN').includes(normalized);
+      const matchesStatus = status === 'all'
+        || (status === 'enabled' && row.dataset.enabled === 'true')
+        || (status === 'disabled' && row.dataset.enabled === 'false');
+      const matches = matchesQuery && matchesStatus;
       row.hidden = !matches;
       if (matches) visible += 1;
     });
@@ -88,6 +92,7 @@
   const common = window.ConsoleCommon || { chainConfigDefinitions: {}, rerunTypeDefinitions: {} };
   const list = document.querySelector('#schedule-list');
   const search = document.querySelector('#schedule-search');
+  const statusFilter = document.querySelector('#schedule-status-filter');
   const empty = document.querySelector('#schedule-empty');
   const noResults = document.querySelector('#schedule-no-results');
   const pageMessage = document.querySelector('#schedule-page-message');
@@ -307,10 +312,19 @@
   function toggle(button, scheduleId) {
     const key = String(scheduleId);
     if (toggleInFlight.has(key)) return toggleInFlight.get(key);
+    const row = button.closest('tr[data-schedule-id]');
+    const originalEnabled = row ? row.dataset.enabled : null;
     const operation = toggleSchedule(button, scheduleId, pageMessage, fetchImplementation)
       .then((updated) => {
         updateCachedRecord(scheduleId, updated);
+        if (row && Object.prototype.hasOwnProperty.call(updated, 'enabled')) row.dataset.enabled = String(Boolean(updated.enabled));
+        applyFilters();
         return updated;
+      })
+      .catch((error) => {
+        if (row && originalEnabled !== null) row.dataset.enabled = originalEnabled;
+        applyFilters();
+        throw error;
       })
       .finally(() => toggleInFlight.delete(key));
     toggleInFlight.set(key, operation);
@@ -346,11 +360,14 @@
     };
   }
 
-  search.addEventListener('input', () => {
-    const visible = filterRows(rows(), search.value);
+  function applyFilters() {
+    const visible = filterRows(rows(), search.value, statusFilter ? statusFilter.value : 'all');
     noResults.hidden = visible > 0 || rows().length === 0;
     if (empty) empty.hidden = rows().length > 0;
-  });
+  }
+
+  search.addEventListener('input', applyFilters);
+  if (statusFilter) statusFilter.addEventListener('change', applyFilters);
 
   list.addEventListener('click', async (event) => {
     const row = event.target.closest('tr[data-schedule-id]');

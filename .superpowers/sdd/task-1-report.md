@@ -1,0 +1,155 @@
+# Task 1 — Figma console foundations report
+
+## Outcome
+
+Implemented the Task Console visual foundation: checked-in Figma PNG baselines and contract, component semantic fragments and classes, layered CSS, deterministic `visual-qa` profile, scheduler/execution guards, and a Pillow visual comparator. Production defaults remain scheduler/execution enabled.
+
+## Figma evidence and limitation
+
+- Figma file: `7SMWQrlbLmB6yZ1kUbJ26o`.
+- Saved the 14 unique supplied node screenshots under `docs/figma-baselines/components/`; the two duplicate supplied IDs were not duplicated.
+- `get_screenshot` succeeded for every supplied node. The contract records only screenshot-visible evidence and does not claim raw component values where context was unavailable.
+- The Desktop MCP `get_design_context` endpoint remained selection-scoped: it returned complete context for selected node `6:110` (Typography), including the documented Inter/Roboto Mono typography and `#607086`; calls targeted to other supplied IDs returned `You currently have nothing selected.` This was recorded in the contract rather than replaced with fabricated token or variant data.
+
+## RED evidence
+
+1. `mvn -q -Dtest=ConsoleMvcTest test`
+   - Exit: non-zero.
+   - Expected failure: Dashboard response did not contain `class="c-metric-card"` at `ConsoleMvcTest.pagesRenderFromPersistedRuns`.
+2. `node --test test/js/visual-components.test.js`
+   - Exit: non-zero.
+   - Expected failure: `schedules.html` did not match `class="schedule-drawer c-drawer"`.
+
+The Node test then executes the real schedules controller in a small DOM harness, opens the drawer, dispatches Escape, and verifies both `hidden` state and restored trigger focus.
+
+## GREEN evidence
+
+Focused acceptance command (rerun after final implementation):
+
+```sh
+mvn -q -Dtest=ConsoleMvcTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && python3 scripts/visual-regression.py --help && git diff --check
+```
+
+- Exit: 0.
+- MVC visual contract passed.
+- Node drawer contract: 1/1 passed.
+- Same-image visual comparison: `changed_ratio=0.000000 (0 pixels), tolerance=16`.
+- Comparator help confirms `--tolerance` defaults to 16 and `--max-diff-ratio` defaults to 0.02.
+- `git diff --check` passed.
+
+Full relevant regression commands:
+
+```sh
+mvn -q test
+node --test src/test/js/*.test.js test/js/visual-components.test.js
+```
+
+- Both commands exited 0.
+- Node suite: 21/21 passed.
+
+## Changed files
+
+- `docs/figma-baselines/components/*.png`, `docs/figma-contract.md`
+- `src/main/resources/application-visual-qa.yml`, `src/test/resources/application-visual-qa.yml`, `src/main/resources/application.yml`
+- `TaskConsoleProperties`, `TaskConsoleConfiguration`, `WorkflowScheduleServiceFactory`
+- `styles.css`, `dashboard.html`, `schedules.html`, `fragments/layout.html`
+- `ConsoleMvcTest`, `test/js/visual-components.test.js`
+- `scripts/visual-regression.py`
+
+## Self-review
+
+- No React, Tailwind, Code Connect, external icon library, SQLite schema change, schedule API shape change, or dynamic-chain configuration change.
+- Scheduler execution is conditional; the default remains `true` and `visual-qa` disables it.
+- `visual-qa` uses only `target/visual-qa.sqlite`, a fixed UTC clock, disabled AgentBridge runner, and a no-execution `WorkflowExecutionService` guard.
+- Generated comparison output is restricted to `target/visual-regression/`.
+- Existing page IDs and `data-*` attributes remain unchanged.
+
+## Concern
+
+Figma Desktop context retrieval is limited by the selected layer. The checked-in screenshots provide durable rendered visual evidence, but a later Figma Desktop session with each component explicitly selected would be needed to replace every `design-context unavailable` annotation with raw context output.
+
+## Commit
+
+This report is included in the Task 1 commit with subject `feat: add console visual foundation`.
+
+## Review-fix follow-up (committed in `55668bc`)
+
+The review identified a source-contract and visual-QA gap. `docs/figma-contract.md`
+now cites only `get_screenshot` and the selected `get_design_context` result; all
+other raw component values are explicitly unavailable rather than inferred.
+It inventories all 11 intended components and six required states, retaining direct
+source blockers for Filter Control, Progress Indicator, and unsupplied state nodes.
+
+`VisualQaFixtureInitializer` is active only under `visual-qa`. It clears and seeds
+only `target/visual-qa.sqlite` with three deterministic runs, events/tasks and two
+schedules. Both visual-QA profile files disable AgentBridge, scheduling and workflow
+execution; the focused integration test verifies the fixed clock, database path,
+fixtures and no-execution guard. The original public four-argument
+`WorkflowScheduleService` constructor is restored. All CSS rules are now inside
+the declared cascade layers, and the rendered shell/control values are 1216px and
+44px. Dashboard now consumes shared navigation, metric-card and status-badge
+fragments. The later review follow-up made `tableRow(run)` a functional Dashboard
+five-column fragment; conditional alerts remain progressive adoption because no
+existing Dashboard alert can be introduced without changing its page slice.
+
+### Review-fix RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit non-zero before `VisualQaFixtureInitializer` existed: expected 3 runs,
+     observed 0.
+2. GREEN: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit 0 after initializer, fixed fixture profile and no-execution assertions.
+3. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. MVC rendering, visual-QA fixture isolation, public constructor,
+     drawer Escape/focus behavior, same-image visual comparison
+     (`changed_ratio=0.000000`) and whitespace validation passed.
+
+## Second review-fix follow-up (uncommitted)
+
+This uncommitted follow-up removes every prohibited source claim from the report and
+contract. It resets only the disposable visual-QA SQLite `sqlite_sequence` entries
+after first verifying that the SQLite sequence table exists, so repeated fixture
+startup produces stable run and schedule IDs even when that table is absent.
+`tableRow(run)` now renders the Dashboard's real five-column rows with the existing
+run link and status mapping. CSS is divided into foundations, shell, components and
+pages layers; no selector is left outside a layer.
+
+### Second review RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit non-zero before counter reset: repeated seed run IDs changed from
+     `[21, 20, 19]` to `[24, 23, 22]`.
+2. RED: `mvn -q -Dtest=ConsoleMvcTest test`
+   - Exit non-zero before the table fragment moved iteration scope to a wrapping
+     `th:block`: fragment parameter `run` was null.
+3. GREEN: final focused command is recorded below after the final rerun.
+
+4. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. Layer assertions, real Dashboard table fragment, repeated stable
+     visual-QA IDs, MVC contracts, drawer behavior and same-image comparison
+     (`changed_ratio=0.000000`) all passed.
+
+## Third review-fix follow-up (uncommitted)
+
+The Dashboard's iteration limit is now evaluated on its wrapping `th:block`, so
+fragment replacement cannot discard it; a regression creates nine runs and asserts
+exactly eight rendered `.c-table-row` records. The visual-QA database guard runs
+before DataSource directory/database work and again before fixture deletion. It
+allows only the normalized `target/visual-qa.sqlite` path under the visual profile;
+an overridden sentinel path causes context startup to fail without touching the
+file. The page-level `html`/`body` 1280px minimum width has been removed so only
+table containers impose horizontal scrolling. Redundant shell and Dashboard layout
+rules were removed from cross-layer copies; each remains in its intended layer.
+
+### Third review RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=ConsoleMvcTest#dashboardRendersAtMostEightRecentTableRows test`
+   - Exit non-zero before moving `th:if` to the wrapping block: expected 8 rows,
+     observed 339 because `th:replace` discarded the row condition.
+2. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest#visualQaRefusesAnOverriddenNonDisposableDatabaseBeforeItCanBeTouched test`
+   - Exit non-zero before the DataSource guard: overridden visual-QA startup did
+     not throw.
+3. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. Eight-row Dashboard cap, rejected untouched sentinel database,
+     no page-level 1280px width, layered CSS, fixture IDs, drawer behavior and
+     same-image comparison (`changed_ratio=0.000000`) passed.

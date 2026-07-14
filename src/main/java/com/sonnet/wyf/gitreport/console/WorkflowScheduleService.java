@@ -34,7 +34,7 @@ public class WorkflowScheduleService implements AutoCloseable {
         this(repository, submitter, chainCatalog, clock, true);
     }
 
-    WorkflowScheduleService(
+    public WorkflowScheduleService(
             WorkflowScheduleRepository repository,
             WorkflowRunSubmitter submitter,
             ChainCatalog chainCatalog,

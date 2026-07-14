@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -15,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -41,6 +43,9 @@ class ConsoleMvcTest {
 
     @Autowired
     WebApplicationContext webApplicationContext;
+
+    @Autowired
+    JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUpMockMvc() {
@@ -93,6 +98,16 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("成功率")));
         mockMvc.perform(get("/"))
                 .andExpect(content().string(containsString("class=\"app-shell\"")))
+                .andExpect(content().string(containsString("class=\"c-metric-card\"")))
+                .andExpect(content().string(containsString("data-tone=\"primary\"")))
+                .andExpect(content().string(containsString("data-tone=\"info\"")))
+                .andExpect(content().string(containsString("data-tone=\"success\"")))
+                .andExpect(content().string(containsString("data-tone=\"danger\"")))
+                .andExpect(content().string(containsString("data-trend-tone=\"neutral\"")))
+                .andExpect(content().string(containsString("class=\"c-table-row\"")))
+                .andExpect(content().string(containsString("class=\"table-scroll\"")))
+                .andExpect(content().string(containsString("<th>耗时</th>")))
+                .andExpect(content().string(containsString("class=\"alert c-alert danger\"")))
                 .andExpect(content().string(containsString("aria-label=\"主导航\"")))
                 .andExpect(content().string(containsString("运行概览")))
                 .andExpect(content().string(containsString("新建运行")))
@@ -163,13 +178,22 @@ class ConsoleMvcTest {
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
         assertThat(styles)
+                .contains("@layer foundations, shell, components, pages;")
+                .contains("@layer foundations {")
+                .contains("@layer shell {")
+                .contains("@layer components {")
+                .contains("@layer pages {")
+                .doesNotContain("html {\n  min-width: 1280px;")
+                .doesNotContain("body {\n  min-width: 1280px;")
                 .contains(":focus-visible {\n  outline: 3px solid var(--color-primary);")
                 .contains("@media (max-width: 1439px)")
                 .contains("grid-template-columns: minmax(0, 1fr) 300px;")
-                .contains(".dashboard-grid > article.panel > table {\n    min-width: 620px;")
-                .contains(".dashboard-grid > aside.panel table {\n  width: 100%;\n  min-width: 0;")
+                .contains(".dashboard-grid > article.panel > .table-scroll > table {\n    min-width: 620px;")
+                .contains("  .dashboard-grid > aside.panel table {\n    width: 100%;\n    min-width: 0;")
                 .doesNotContain(".dashboard-grid table {\n    min-width: 620px;")
-                .contains(".dashboard-grid > aside.panel .event-list li {\n  grid-template-columns: minmax(0, 1fr);")
+                .doesNotContain(".panel {\n  padding: 20px;\n  overflow-x: auto;")
+                .contains(".table-scroll {\n  overflow-x: auto;")
+                .contains("  .dashboard-grid > aside.panel .event-list li {\n    grid-template-columns: minmax(0, 1fr);")
                 .contains("grid-template-columns: repeat(2, minmax(140px, 1fr));");
         String failedRunDetail = mockMvc.perform(get("/runs/" + failedRunId))
                 .andExpect(status().isOk())
@@ -198,6 +222,45 @@ class ConsoleMvcTest {
                 .containsPattern("<option value=\"rerun\" selected(?:=\"selected\")?>重跑</option>")
                 .containsPattern("<option value=\"author\" selected(?:=\"selected\")?>作者</option>")
                 .contains("<input id=\"rerunId\" name=\"rerunId\" placeholder=\"多个编号用英文逗号分隔\" value=\"failed-task\">");
+    }
+
+    @Test
+    void dashboardRendersAtMostEightRecentTableRows() throws Exception {
+        for (int index = 0; index < 9; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "git-code-contribution-report", "full", null, null, LocalDate.of(2026, 7, 13),
+                    Map.of("project.id", "dashboard-limit-" + index), null
+            ), "dashboard-limit-" + index + ".yml");
+        }
+
+        String dashboard = mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(Pattern.compile("<tr class=\\\"c-table-row\\\">").matcher(dashboard).results().count())
+                .isEqualTo(8);
+    }
+
+    @Test
+    void dashboardDoesNotRenderFailureAlertWhenPersistedRunsHaveNoFailures() throws Exception {
+        jdbcTemplate.update("delete from workflow_run_events");
+        jdbcTemplate.update("delete from workflow_task_status");
+        jdbcTemplate.update("delete from workflow_runs");
+        repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, LocalDate.of(2026, 7, 13), Map.of(), null
+        ), "healthy-dashboard.yml");
+
+        String dashboard = mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(dashboard)
+                .doesNotContain("class=\"alert c-alert danger\"")
+                .doesNotContain("项失败运行需要处理");
     }
 
     @Test
@@ -444,6 +507,37 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void newRunAndRunDetailRenderTheSharedFigmaCompositionWithoutChangingDomHooks() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "visual-composition.yml");
+
+        String newRun = mockMvc.perform(get("/runs/new"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(newRun)
+                .contains("c-step-navigation")
+                .contains("data-step=\"1\"")
+                .contains("id=\"run-form\"")
+                .contains("id=\"chain-config-fields\"")
+                .contains("id=\"preflight-alert\"")
+                .contains("data-field-error=\"true\"")
+                .contains("c-run-summary")
+                .contains("id=\"submit-run\"");
+
+        String detail = mockMvc.perform(get("/runs/" + runId))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(detail)
+                .contains("c-progress-indicator")
+                .contains("data-progress-steps=\"5\"")
+                .contains("data-connection-state=\"connecting\"")
+                .contains("id=\"events\"")
+                .contains("id=\"task-rows\"")
+                .contains("id=\"rerun-failed-task\"");
+    }
+
+    @Test
     void pagesLoadOnlyTheirScopedScriptsAndLegacyBundleIsRetired() throws Exception {
         long runId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report", "full", null, null, null, Map.of(), null
@@ -669,8 +763,8 @@ class ConsoleMvcTest {
                 .contains("value=\"2026-07-01\"")
                 .contains("name=\"until\"")
                 .contains("value=\"2026-07-31\"")
-                .contains("href=\"/runs/" + failedRunId + "\">查看详情</a>")
-                .contains("href=\"/runs/new?copyFrom=" + failedRunId + "\">复制配置</a>")
+                .contains("href=\"/runs/" + failedRunId + "?q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">查看详情</a>")
+                .contains("href=\"/runs/new?copyFrom=" + failedRunId + "&amp;q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">复制配置</a>")
                 .doesNotContain("href=\"/runs/" + otherRunId + "\">查看详情</a>");
     }
 
@@ -689,6 +783,87 @@ class ConsoleMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("href=\"/runs/" + runId + "\">查看详情</a>")))
                 .andExpect(content().string(not(containsString("value=\"not-a-state\" selected"))));
+    }
+
+    @Test
+    void historyClampsPagesAndKeepsAllActiveFiltersInCanonicalLinks() throws Exception {
+        for (int index = 0; index < 41; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "weekly-engineering-report", "full", null, null, null, Map.of(), null
+            ), "weekly-page-" + index + ".yml");
+        }
+
+        String history = mockMvc.perform(get("/history")
+                        .param("q", "weekly-page")
+                        .param("state", "QUEUED")
+                        .param("chainId", "weekly-engineering-report")
+                        .param("from", "2026-07-01")
+                        .param("until", "2026-07-31")
+                        .param("page", "999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(history)
+                .contains("当前第 3 / 3 页")
+                .contains("href=\"/history?q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31&amp;page=2\"")
+                .contains("href=\"/runs/new?copyFrom=")
+                .contains("q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31&amp;page=3\"");
+
+        String empty = mockMvc.perform(get("/history").param("q", "no-page-result").param("page", "999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(empty).contains("当前第 1 / 1 页");
+
+        String first = mockMvc.perform(get("/history")
+                        .param("q", "weekly-page")
+                        .param("state", "QUEUED")
+                        .param("chainId", "weekly-engineering-report")
+                        .param("page", "-8"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(first).contains("当前第 1 / 3 页")
+                .contains("href=\"/history?q=weekly-page&amp;state=QUEUED&amp;chainId=weekly-engineering-report&amp;page=2\"");
+    }
+
+    @Test
+    void historyNormalizesNonIntegerPageRequestsWithoutOverflow() throws Exception {
+        for (int index = 0; index < 41; index++) {
+            repository.createRun(new WorkflowRunSubmission(
+                    "weekly-engineering-report", "full", null, null, null, Map.of(), null
+            ), "overflow-page-" + index + ".yml");
+        }
+
+        String aboveIntegerMaximum = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "2147483648"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        String giantNumeric = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "999999999999999999999999999999999999999999"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        String nonNumeric = mockMvc.perform(get("/history")
+                        .param("q", "overflow-page")
+                        .param("page", "not-a-page"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(aboveIntegerMaximum).contains("当前第 3 / 3 页");
+        assertThat(giantNumeric).contains("当前第 3 / 3 页");
+        assertThat(nonNumeric).contains("当前第 1 / 3 页");
     }
 
     @Test
@@ -926,7 +1101,10 @@ class ConsoleMvcTest {
         mockMvc.perform(get("/schedules"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("id=\"schedule-search\"")))
+                .andExpect(content().string(containsString("id=\"schedule-status-filter\"")))
                 .andExpect(content().string(containsString("id=\"schedule-drawer\"")))
+                .andExpect(content().string(containsString("id=\"schedule-save-notice\"")))
+                .andExpect(content().string(containsString("代码贡献报告 · 全量 #")))
                 .andExpect(content().string(containsString("data-action=\"edit\"")))
                 .andExpect(content().string(containsString("data-action=\"copy\"")))
                 .andExpect(content().string(containsString("role=\"switch\"")))

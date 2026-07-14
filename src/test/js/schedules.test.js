@@ -74,13 +74,13 @@ function response(body, ok = true) {
 function controllerHarness(fetchImplementation, options = {}) {
   const selectors = [
     '#schedule-page', '#schedule-list', '#schedule-search', '#schedule-empty', '#schedule-no-results',
-    '#schedule-page-message', '#schedule-drawer', '#schedule-drawer-backdrop', '#schedule-form',
+    '#schedule-page-message', '#schedule-status-filter', '#schedule-drawer', '#schedule-drawer-backdrop', '#schedule-form',
     '#schedule-drawer-title', '#schedule-drawer-description', '#schedule-form-error', '#schedule-result',
     '#save-schedule', '#schedule-id', '#schedule-chain-id', '#schedule-mode', '#schedule-rerun-type',
     '#schedule-rerun-id', '#schedule-run-date', '#frequency', '#dayOfWeek', '#scheduleTime', '#runAt',
     '#enabled', '#schedule-config-fields', '#schedule-config-description', '#create-schedule',
     '#close-schedule-drawer', '#cancel-schedule'
-  ];
+  ].filter((selector) => !(options.omitStatusFilter && selector === '#schedule-status-filter'));
   const nodes = Object.fromEntries(selectors.map((selector) => [selector, new FakeElement(selector.slice(1))]));
   const document = new FakeElement('document');
   document.body = new FakeElement('body');
@@ -99,6 +99,7 @@ function controllerHarness(fetchImplementation, options = {}) {
   nodes['#schedule-drawer-backdrop'].hidden = true;
   nodes['#schedule-chain-id'].value = 'alpha';
   nodes['#schedule-mode'].value = 'full';
+  if (nodes['#schedule-status-filter']) nodes['#schedule-status-filter'].value = 'all';
   nodes['#frequency'].value = 'daily';
   nodes['#dayOfWeek'].value = '1';
   nodes['#scheduleTime'].value = '06:00';
@@ -118,6 +119,12 @@ function controllerHarness(fetchImplementation, options = {}) {
   vm.runInContext(script, context, { filename: 'schedules.js' });
   return { api: window.AgentBridgeSchedules, controller: window.AgentBridgeSchedules.controller, nodes, document };
 }
+
+test('controller initializes when a schedule status filter is omitted', () => {
+  const { controller } = controllerHarness(async () => response([]), { omitStatusFilter: true });
+
+  assert.ok(controller);
+});
 
 async function flush() {
   await new Promise((resolve) => setImmediate(resolve));
@@ -204,18 +211,18 @@ test('toggle failure restores enabled state, label, visual state and aria attrib
   assert.equal(message.textContent, '数据库暂不可用');
 });
 
-test('search only changes current row visibility and does not call the server', () => {
+test('search and status filters only change current row visibility and do not call the server', () => {
   const { api, fetchCalls } = loadApi();
   const rows = [
-    { dataset: { search: '代码贡献报告 full 7' }, hidden: false },
-    { dataset: { search: '研发周报 rerun 8' }, hidden: false }
+    { dataset: { search: '代码贡献报告 full 7', enabled: 'true' }, hidden: false },
+    { dataset: { search: '研发周报 rerun 8', enabled: 'false' }, hidden: false }
   ];
 
-  const visible = api.filterRows(rows, '周报');
+  const visible = api.filterRows(rows, '', 'enabled');
 
   assert.equal(visible, 1);
-  assert.equal(rows[0].hidden, true);
-  assert.equal(rows[1].hidden, false);
+  assert.equal(rows[0].hidden, false);
+  assert.equal(rows[1].hidden, true);
   assert.equal(fetchCalls.length, 0);
 });
 
@@ -268,6 +275,41 @@ test('toggle success updates cached record, rejects duplicate clicks, and failur
   controller.setFetch(failed);
   await assert.rejects(controller.toggle(button, '7'), /启用失败/);
   assert.equal(controller.getRecords()[0].enabled, false);
+});
+
+test('successful toggle synchronizes its row enabled dataset and reapplies the active status filter', async () => {
+  const record = { id: 7, chainId: 'alpha', mode: 'full', frequency: 'DAILY', runTime: '06:00:00', enabled: true, config: {} };
+  const fetchImplementation = async () => response({ ...record, enabled: false });
+  const { controller, nodes } = controllerHarness(fetchImplementation);
+  const button = new FakeButton(true);
+  const row = { dataset: { scheduleId: '7', search: '日报计划', enabled: 'true' }, hidden: false, querySelector: () => button };
+  button.row = row;
+  nodes['#schedule-list'].rows = [row];
+  nodes['#schedule-status-filter'].value = 'disabled';
+  nodes['#schedule-status-filter'].dispatch('change');
+  assert.equal(row.hidden, true);
+
+  await controller.toggle(button, '7');
+
+  assert.equal(row.dataset.enabled, 'false');
+  assert.equal(row.hidden, false);
+});
+
+test('failed toggle preserves its row dataset and active status-filter visibility', async () => {
+  const fetchImplementation = async () => response({ error: '停用失败' }, false);
+  const { controller, nodes } = controllerHarness(fetchImplementation);
+  const button = new FakeButton(true);
+  const row = { dataset: { scheduleId: '7', search: '日报计划', enabled: 'true' }, hidden: false, querySelector: () => button };
+  button.row = row;
+  nodes['#schedule-list'].rows = [row];
+  nodes['#schedule-status-filter'].value = 'enabled';
+  nodes['#schedule-status-filter'].dispatch('change');
+  assert.equal(row.hidden, false);
+
+  await assert.rejects(controller.toggle(button, '7'), /停用失败/);
+
+  assert.equal(row.dataset.enabled, 'true');
+  assert.equal(row.hidden, false);
 });
 
 test('delegated schedule switch click calls the enabled endpoint and updates UI plus cache', async () => {
@@ -352,6 +394,23 @@ test('copy clears id, edit keeps id, search does not fetch, and drawer traps Tab
   assert.equal(document.activeElement, nodes['#schedule-chain-id']);
   controller.close();
   assert.equal(document.activeElement, nodes['#create-schedule']);
+});
+
+test('drawer closes from Escape and its overlay and restores the trigger focus', async () => {
+  const fetchImplementation = async () => response({ defaults: {} });
+  const { controller, nodes, document } = controllerHarness(fetchImplementation);
+  const trigger = nodes['#create-schedule'];
+
+  controller.open('create', null, trigger);
+  document.dispatch('keydown', { key: 'Escape' });
+  assert.equal(nodes['#schedule-drawer'].hidden, true);
+  assert.equal(nodes['#schedule-drawer-backdrop'].hidden, true);
+  assert.equal(document.activeElement, trigger);
+
+  controller.open('create', null, trigger);
+  nodes['#schedule-drawer-backdrop'].dispatch('click');
+  assert.equal(nodes['#schedule-drawer'].hidden, true);
+  assert.equal(document.activeElement, trigger);
 });
 
 test('controller submits edits to the id URL and copied drafts to the create URL', async () => {

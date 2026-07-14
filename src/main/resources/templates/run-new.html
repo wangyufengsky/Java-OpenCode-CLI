@@ -7,20 +7,22 @@
   <main class="app-main">
     <header th:replace="~{fragments/layout :: pageHeader('运行管理', '新建运行', '选择工作流、填写所需参数，并在提交前完成路径预检。')}"></header>
     <div class="page-content">
-      <section class="metrics" aria-label="创建运行步骤">
-        <article><span>步骤 1</span><strong>选择工作流</strong></article>
-        <article><span>步骤 2</span><strong>填写配置</strong></article>
-        <article><span>步骤 3</span><strong>确认并运行</strong></article>
+      <section class="c-step-navigation" aria-label="创建运行步骤">
+        <article class="is-active" data-step="1"><span>步骤 1</span><strong>选择工作流</strong></article>
+        <article data-step="2"><span>步骤 2</span><strong>填写配置</strong></article>
+        <article data-step="3"><span>步骤 3</span><strong>确认并运行</strong></article>
       </section>
 
-      <form id="run-form" class="run-form" novalidate
+      <form id="run-form" class="run-form" novalidate aria-busy="false"
             th:attr="data-selected-chain=${chainId},data-selected-mode=${selectedMode},data-selected-rerun-type=${selectedRerunType},data-selected-rerun-id=${selectedRerunId},data-selected-run-date=${selectedRunDate},data-copy-from=${copiedRun == null ? null : copiedRun.id}">
-        <section class="panel form-main">
+        <section class="panel form-main c-form-section">
           <div class="copy-banner" th:if="${copiedRun != null}" role="status">
             <strong th:text="${'复制自运行 #' + copiedRun.id}">复制自运行 #1</strong>
             <span>正在载入原运行配置；链路默认值会先行保留。</span>
           </div>
           <p id="copy-load-status" class="form-message" role="status" aria-live="polite"></p>
+          <p id="preflight-alert" class="form-message alert c-alert" data-tone="neutral" role="status" aria-live="polite"></p>
+          <p id="submit-result" class="form-message alert c-alert danger" data-field-error="true" role="alert" aria-live="polite"></p>
 
           <section aria-labelledby="workflow-title">
             <div class="panel-title">
@@ -84,7 +86,7 @@
           </section>
         </section>
 
-        <aside class="panel submit-panel" style="position: sticky; top: 20px;">
+        <aside class="panel submit-panel c-run-summary">
           <div class="panel-title">
             <div>
               <h2>运行摘要</h2>
@@ -102,8 +104,7 @@
             <li>预检警告不会阻止提交，请在确认后继续。</li>
             <li>只有服务端创建运行成功后才会跳转。</li>
           </ul>
-          <button id="submit-run" class="button primary" type="submit">提交运行</button>
-          <p id="submit-result" class="form-message" role="alert" aria-live="polite"></p>
+          <button id="submit-run" class="button c-button primary" type="submit">提交运行</button>
         </aside>
       </form>
     </div>

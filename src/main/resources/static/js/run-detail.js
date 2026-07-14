@@ -108,7 +108,15 @@
     }
 
     function setStreamState(text) {
-      if (streamState) streamState.textContent = text;
+      if (!streamState) return;
+      streamState.textContent = text;
+      streamState.dataset.connectionState = text === '正在重连'
+        ? 'reconnecting'
+        : text === '实时'
+          ? 'live'
+          : text.includes('刷新')
+            ? 'polling'
+            : 'connecting';
     }
 
     function appendEvent(messageOrEvent, refreshFromLiveEvent = false) {

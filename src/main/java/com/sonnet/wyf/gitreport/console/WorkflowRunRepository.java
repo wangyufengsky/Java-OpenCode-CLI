@@ -92,6 +92,37 @@ public class WorkflowRunRepository {
     }
 
     public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter) {
+        FilteredRunQuery query = filteredRunQuery(filter);
+        return jdbcTemplate.query("select * from workflow_runs" + query.whereClause() + " order by id desc", runMapper(), query.arguments().toArray());
+    }
+
+    public long countRuns(WorkflowRunFilter filter) {
+        FilteredRunQuery query = filteredRunQuery(filter);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from workflow_runs" + query.whereClause(),
+                Long.class,
+                query.arguments().toArray()
+        );
+        return total == null ? 0L : total;
+    }
+
+    public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter, int limit, int offset) {
+        return listRuns(filter, limit, (long) offset);
+    }
+
+    public List<WorkflowRunRecord> listRuns(WorkflowRunFilter filter, int limit, long offset) {
+        FilteredRunQuery query = filteredRunQuery(filter);
+        List<Object> arguments = new ArrayList<>(query.arguments());
+        arguments.add(Math.max(0, limit));
+        arguments.add(Math.max(0L, offset));
+        return jdbcTemplate.query(
+                "select * from workflow_runs" + query.whereClause() + " order by id desc limit ? offset ?",
+                runMapper(),
+                arguments.toArray()
+        );
+    }
+
+    private static FilteredRunQuery filteredRunQuery(WorkflowRunFilter filter) {
         WorkflowRunFilter normalized = filter == null ? WorkflowRunFilter.empty() : filter;
         List<String> conditions = new ArrayList<>();
         List<Object> arguments = new ArrayList<>();
@@ -119,13 +150,8 @@ public class WorkflowRunRepository {
             conditions.add("julianday(created_at) < julianday(?)");
             arguments.add(normalized.createdUntil().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toString());
         }
-
-        StringBuilder sql = new StringBuilder("select * from workflow_runs");
-        if (!conditions.isEmpty()) {
-            sql.append(" where ").append(String.join(" and ", conditions));
-        }
-        sql.append(" order by id desc");
-        return jdbcTemplate.query(sql.toString(), runMapper(), arguments.toArray());
+        String whereClause = conditions.isEmpty() ? "" : " where " + String.join(" and ", conditions);
+        return new FilteredRunQuery(whereClause, List.copyOf(arguments));
     }
 
     public Optional<WorkflowRunRecord> findRun(long id) {
@@ -202,5 +228,8 @@ public class WorkflowRunRepository {
 
     private static Instant parseInstant(String value) {
         return value == null || value.isBlank() ? null : Instant.parse(value);
+    }
+
+    private record FilteredRunQuery(String whereClause, List<Object> arguments) {
     }
 }

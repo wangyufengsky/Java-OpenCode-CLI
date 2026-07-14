@@ -31,6 +31,16 @@ class WorkflowScheduleServiceTest {
     Path tempDir;
 
     @Test
+    void keepsTheOriginalFourArgumentConstructorPublicForExternalCallers() throws Exception {
+        assertThat(WorkflowScheduleService.class.getConstructor(
+                WorkflowScheduleRepository.class,
+                WorkflowRunSubmitter.class,
+                ChainCatalog.class,
+                Clock.class
+        )).isNotNull();
+    }
+
+    @Test
     void createsWeeklyScheduleWithNextTriggerInLocalTime() {
         Fixture fixture = fixture(Instant.parse("2026-06-30T03:00:00Z"));
 

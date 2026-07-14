@@ -154,7 +154,7 @@ function add(document, parent, tagName, id, value = '') {
   return element;
 }
 
-function createHarness(fetchImplementation) {
+function createHarness(fetchImplementation, options = {}) {
   const document = new FakeDocument();
   const form = add(document, document, 'form', 'run-form');
   form.dataset.selectedChain = 'alpha';
@@ -176,13 +176,14 @@ function createHarness(fetchImplementation) {
     submit: add(document, form, 'button', 'submit-run'),
     submitResult: add(document, form, 'p', 'submit-result'),
     copyStatus: add(document, form, 'p', 'copy-load-status'),
+    preflightAlert: add(document, form, 'p', 'preflight-alert'),
     summaryChain: add(document, form, 'span', 'summary-chain'),
     summaryMode: add(document, form, 'span', 'summary-mode'),
     summaryDate: add(document, form, 'span', 'summary-date'),
     summaryProject: add(document, form, 'span', 'summary-project')
   };
 
-  const field = {
+  const field = options.field || {
     key: 'project.name',
     label: '项目名称',
     description: '当前项目名称。',
@@ -205,8 +206,8 @@ function createHarness(fetchImplementation) {
     },
     location,
     history,
-    setTimeout,
-    clearTimeout
+    setTimeout: options.setTimeout || setTimeout,
+    clearTimeout: options.clearTimeout || clearTimeout
   };
   const context = vm.createContext({
     window,
@@ -243,7 +244,7 @@ function requestHarness(options = {}) {
     if (url.includes('/api/chains/')) return Promise.resolve(response({ defaults: { 'project.name': 'Demo' } }));
     throw new Error(`Unexpected request: ${url}`);
   };
-  const harness = createHarness(fetchImplementation);
+  const harness = createHarness(fetchImplementation, options);
   return { ...harness, submitReply, betaReply, getPostCalls: () => postCalls };
 }
 
@@ -258,6 +259,27 @@ async function changeToBeta(harness) {
   await change;
 }
 
+function createFakeTimers() {
+  let nextId = 1;
+  const callbacks = new Map();
+  return {
+    setTimeout(callback) {
+      const id = nextId++;
+      callbacks.set(id, callback);
+      return id;
+    },
+    clearTimeout(id) {
+      callbacks.delete(id);
+    },
+    fireNext() {
+      const next = callbacks.entries().next().value;
+      if (!next) throw new Error('No timer is pending');
+      callbacks.delete(next[0]);
+      next[1]();
+    }
+  };
+}
+
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {
   const harness = requestHarness();
   await initialize(harness);
@@ -270,6 +292,119 @@ test('submit remains disabled when a newer chain configuration finishes loading'
   harness.submitReply.resolve(response({ error: 'failed' }, false));
   await submission;
   assert.equal(harness.nodes.submit.disabled, false);
+});
+
+test('a failed submit clears the busy state and re-enables the run button', async () => {
+  const harness = requestHarness();
+  await initialize(harness);
+
+  const [submission] = harness.nodes.form.dispatch('submit');
+  assert.equal(harness.nodes.form.attributes.get('aria-busy'), 'true');
+  assert.equal(harness.nodes.submit.disabled, true);
+
+  harness.submitReply.resolve(response({ error: '配置校验失败' }, false));
+  await submission;
+
+  assert.equal(harness.nodes.form.attributes.get('aria-busy'), 'false');
+  assert.equal(harness.nodes.submit.disabled, false);
+  assert.equal(harness.nodes.submitResult.textContent, '配置校验失败');
+});
+
+test('a stale path preflight cannot update the alert after switching chains', async () => {
+  const timers = createFakeTimers();
+  const oldPreflight = deferred();
+  const field = {
+    key: 'source.repo',
+    label: '仓库路径',
+    description: '本机仓库路径。',
+    type: 'path',
+    group: 'project',
+    required: false,
+    summary: true
+  };
+  const harness = createHarness((url) => {
+    if (url.includes('/api/chains/alpha/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '/alpha' } }));
+    if (url.includes('/api/chains/beta/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '' } }));
+    if (url.startsWith('/api/path-preflight')) return oldPreflight.promise;
+    throw new Error(`Unexpected request: ${url}`);
+  }, { field, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
+  await flush();
+
+  timers.fireNext();
+  await flush();
+  await changeToBeta(harness);
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+
+  oldPreflight.resolve(response({ accessible: false, message: '旧路径不可访问' }));
+  await flush();
+
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+});
+
+test('a replaced path value prevents its earlier preflight response from writing status', async () => {
+  const timers = createFakeTimers();
+  const firstPreflight = deferred();
+  const field = {
+    key: 'source.repo',
+    label: '仓库路径',
+    description: '本机仓库路径。',
+    type: 'path',
+    group: 'project',
+    required: false,
+    summary: true
+  };
+  const harness = createHarness((url) => {
+    if (url.includes('/api/chains/alpha/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '/first' } }));
+    if (url.startsWith('/api/path-preflight')) return firstPreflight.promise;
+    throw new Error(`Unexpected request: ${url}`);
+  }, { field, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
+  await flush();
+
+  timers.fireNext();
+  await flush();
+  const control = harness.nodes.form.querySelector('#config-source-repo');
+  control.value = '/second';
+  control.dispatch('input');
+  assert.equal(harness.nodes.preflightAlert.textContent, '路径预检等待中…');
+
+  firstPreflight.resolve(response({ accessible: false, message: '旧路径不可访问' }));
+  await flush();
+
+  assert.equal(harness.nodes.preflightAlert.textContent, '路径预检等待中…');
+  assert.notEqual(harness.nodes.form.querySelector('#config-source-repo-validation').textContent, '旧路径不可访问');
+});
+
+test('clearing a path prevents its earlier preflight response from restoring the alert', async () => {
+  const timers = createFakeTimers();
+  const firstPreflight = deferred();
+  const field = {
+    key: 'source.repo',
+    label: '仓库路径',
+    description: '本机仓库路径。',
+    type: 'path',
+    group: 'project',
+    required: false,
+    summary: true
+  };
+  const harness = createHarness((url) => {
+    if (url.includes('/api/chains/alpha/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '/first' } }));
+    if (url.startsWith('/api/path-preflight')) return firstPreflight.promise;
+    throw new Error(`Unexpected request: ${url}`);
+  }, { field, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
+  await flush();
+
+  timers.fireNext();
+  await flush();
+  const control = harness.nodes.form.querySelector('#config-source-repo');
+  control.value = '';
+  control.dispatch('input');
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+
+  firstPreflight.resolve(response({ accessible: false, message: '旧路径不可访问' }));
+  await flush();
+
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+  assert.equal(harness.nodes.form.querySelector('#config-source-repo-validation').textContent, '');
 });
 
 test('a second submit event cannot start another request while the first is pending', async () => {
