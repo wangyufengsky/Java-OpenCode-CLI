@@ -117,3 +117,35 @@ git diff --check
 All commands exit 0. The new Node regression switches chains while the first
 path request is in flight, resolves that old request deliberately despite its
 abort signal, and proves that the blank current chain alert remains unchanged.
+
+## Quality follow-up: same-field preflight replacement
+
+The chain-generation guard did not distinguish an in-flight preflight from a
+new request for the same mounted path input. Two regressions were added first:
+one replaces `/first` with `/second` before resolving the first request, and
+one clears the field before resolving that request. The RED run failed as
+expected because the old response wrote `旧路径不可访问` into the shared alert:
+
+```sh
+node --test src/test/js/run-form.test.js
+```
+
+Each scheduled preflight now owns a state object immediately registered under
+its input ID. The currentness guard requires that exact object to still be the
+mapped state before any status or shared-alert update. Initial preflight
+scheduling is deferred until its dynamic controls are attached to the document,
+so the same guard also covers first render. Replacing a value or clearing it
+therefore supersedes the old state while retaining the existing render
+generation, chain, control-identity and AbortController checks.
+
+GREEN verification:
+
+```sh
+node --test src/test/js/run-form.test.js
+node --check src/main/resources/static/js/run-form.js
+git diff --check
+```
+
+All commands exited 0. The two new regressions prove that an old response can
+neither overwrite the newer request's waiting alert nor restore an alert after
+the field is cleared.

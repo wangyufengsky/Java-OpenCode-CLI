@@ -341,6 +341,72 @@ test('a stale path preflight cannot update the alert after switching chains', as
   assert.equal(harness.nodes.preflightAlert.textContent, '');
 });
 
+test('a replaced path value prevents its earlier preflight response from writing status', async () => {
+  const timers = createFakeTimers();
+  const firstPreflight = deferred();
+  const field = {
+    key: 'source.repo',
+    label: '仓库路径',
+    description: '本机仓库路径。',
+    type: 'path',
+    group: 'project',
+    required: false,
+    summary: true
+  };
+  const harness = createHarness((url) => {
+    if (url.includes('/api/chains/alpha/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '/first' } }));
+    if (url.startsWith('/api/path-preflight')) return firstPreflight.promise;
+    throw new Error(`Unexpected request: ${url}`);
+  }, { field, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
+  await flush();
+
+  timers.fireNext();
+  await flush();
+  const control = harness.nodes.form.querySelector('#config-source-repo');
+  control.value = '/second';
+  control.dispatch('input');
+  assert.equal(harness.nodes.preflightAlert.textContent, '路径预检等待中…');
+
+  firstPreflight.resolve(response({ accessible: false, message: '旧路径不可访问' }));
+  await flush();
+
+  assert.equal(harness.nodes.preflightAlert.textContent, '路径预检等待中…');
+  assert.notEqual(harness.nodes.form.querySelector('#config-source-repo-validation').textContent, '旧路径不可访问');
+});
+
+test('clearing a path prevents its earlier preflight response from restoring the alert', async () => {
+  const timers = createFakeTimers();
+  const firstPreflight = deferred();
+  const field = {
+    key: 'source.repo',
+    label: '仓库路径',
+    description: '本机仓库路径。',
+    type: 'path',
+    group: 'project',
+    required: false,
+    summary: true
+  };
+  const harness = createHarness((url) => {
+    if (url.includes('/api/chains/alpha/defaults')) return Promise.resolve(response({ defaults: { 'source.repo': '/first' } }));
+    if (url.startsWith('/api/path-preflight')) return firstPreflight.promise;
+    throw new Error(`Unexpected request: ${url}`);
+  }, { field, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
+  await flush();
+
+  timers.fireNext();
+  await flush();
+  const control = harness.nodes.form.querySelector('#config-source-repo');
+  control.value = '';
+  control.dispatch('input');
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+
+  firstPreflight.resolve(response({ accessible: false, message: '旧路径不可访问' }));
+  await flush();
+
+  assert.equal(harness.nodes.preflightAlert.textContent, '');
+  assert.equal(harness.nodes.form.querySelector('#config-source-repo-validation').textContent, '');
+});
+
 test('a second submit event cannot start another request while the first is pending', async () => {
   const harness = requestHarness();
   await initialize(harness);
