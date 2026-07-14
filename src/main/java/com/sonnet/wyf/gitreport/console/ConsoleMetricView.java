@@ -9,6 +9,7 @@ public record ConsoleMetricView(
         String value,
         String detail,
         String tone,
-        String trend
+        String trend,
+        String trendTone
 ) {
 }

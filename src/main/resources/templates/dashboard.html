@@ -31,19 +31,21 @@
         <p>创建首个任务后，这里会展示运行状态、耗时和需要处理的问题。</p>
         <a class="button c-button primary" href="/runs/new">新建运行</a>
       </div>
-      <table th:if="${!dashboardRuns.isEmpty()}">
-        <thead>
-        <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th><th>耗时</th></tr>
-        </thead>
-        <tbody>
-        <th:block th:each="run : ${dashboardRuns}">
-          <tr th:replace="~{fragments/layout :: tableRow(${run})}"></tr>
-        </th:block>
-        </tbody>
-      </table>
+      <div th:if="${!dashboardRuns.isEmpty()}" class="table-scroll">
+        <table>
+          <thead>
+          <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th><th>耗时</th></tr>
+          </thead>
+          <tbody>
+          <th:block th:each="run : ${dashboardRuns}">
+            <tr th:replace="~{fragments/layout :: tableRow(${run})}"></tr>
+          </th:block>
+          </tbody>
+        </table>
+      </div>
     </article>
 
-    <aside class="panel">
+    <aside class="panel dashboard-attention-panel">
       <div class="panel-title">
         <h2>需要关注</h2>
       </div>

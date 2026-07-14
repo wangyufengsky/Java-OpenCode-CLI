@@ -63,6 +63,31 @@ class ConsoleViewServiceTest {
         assertThat(successRate.value()).isEqualTo("50%");
         assertThat(successRate.detail()).isEqualTo("近 7 天 1/2 成功");
         assertThat(successRate.trend()).isEqualTo("+50 个百分点");
+        assertThat(successRate.trendTone()).isEqualTo("positive");
+    }
+
+    @Test
+    void dashboardMarksADecliningSuccessRateAsDanger() {
+        WorkflowRunRepository repository = repositoryWith(List.of(
+                run(4, RunState.FAILED, "2026-07-12T08:00:00Z", "2026-07-12T08:00:00Z", "2026-07-12T08:10:00Z", "失败"),
+                run(3, RunState.SUCCEEDED, "2026-07-05T08:00:00Z", "2026-07-05T08:00:00Z", "2026-07-05T08:10:00Z", null)
+        ));
+        ConsoleViewService service = new ConsoleViewService(repository, CLOCK);
+
+        ConsoleMetricView successRate = service.dashboardMetrics().get(2);
+        assertThat(successRate.value()).isEqualTo("0%");
+        assertThat(successRate.trend()).isEqualTo("-100 个百分点");
+        assertThat(successRate.trendTone()).isEqualTo("danger");
+    }
+
+    @Test
+    void dashboardMarksAnInitialSuccessRateTrendAsNeutral() {
+        WorkflowRunRepository repository = repositoryWith(List.of(
+                run(4, RunState.SUCCEEDED, "2026-07-12T08:00:00Z", "2026-07-12T08:00:00Z", "2026-07-12T08:15:00Z", null)
+        ));
+        ConsoleViewService service = new ConsoleViewService(repository, CLOCK);
+
+        assertThat(service.dashboardMetrics().get(2).trendTone()).isEqualTo("neutral");
     }
 
     private static WorkflowRunRepository repositoryWith(List<WorkflowRunRecord> runs) {

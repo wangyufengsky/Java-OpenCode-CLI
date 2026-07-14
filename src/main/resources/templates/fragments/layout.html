@@ -42,7 +42,8 @@
   <span th:text="${metric.label}">指标</span>
   <strong th:text="${metric.value}">0</strong>
   <small class="c-metric-card-detail" th:text="${metric.detail}">说明</small>
-  <small class="c-metric-card-trend" th:if="${!metric.trend.isBlank()}" th:text="${metric.trend}">趋势</small>
+  <small class="c-metric-card-trend" th:if="${!metric.trend.isBlank()}"
+         th:attr="data-trend-tone=${metric.trendTone}" th:text="${metric.trend}">趋势</small>
 </article>
 
 <tr th:fragment="tableRow(run)" class="c-table-row">

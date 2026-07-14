@@ -29,7 +29,10 @@
   .c-metric-card span { display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 12px; font-weight: 750; }
   .c-metric-card strong { font-size: 24px; line-height: 1.25; }
   .c-metric-card-detail, .c-metric-card-trend { display: block; margin-top: 6px; color: var(--color-muted); font-size: 12px; line-height: 1.35; }
-  .c-metric-card-trend { color: var(--color-success); font-weight: 700; }
+  .c-metric-card-trend { font-weight: 700; }
+  .c-metric-card-trend[data-trend-tone="positive"] { color: var(--color-success); }
+  .c-metric-card-trend[data-trend-tone="neutral"] { color: var(--color-muted); }
+  .c-metric-card-trend[data-trend-tone="danger"] { color: var(--color-danger); }
   .c-metric-card[data-tone="primary"] { border-top: 3px solid var(--color-primary); }
   .c-metric-card[data-tone="info"] { border-top: 3px solid #0f766e; }
   .c-metric-card[data-tone="success"] { border-top: 3px solid var(--color-success); }
@@ -315,7 +318,6 @@ h2 {
 
 .panel {
   padding: 20px;
-  overflow-x: auto;
 }
 
 .panel-title {
@@ -872,7 +874,7 @@ textarea {
     gap: 16px;
   }
 
-  .dashboard-grid > article.panel > table {
+  .dashboard-grid > article.panel > .table-scroll > table {
     min-width: 620px;
   }
 

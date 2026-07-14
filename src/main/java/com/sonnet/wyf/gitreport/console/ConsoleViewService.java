@@ -83,20 +83,21 @@ public class ConsoleViewService {
         return List.of(
                 new ConsoleMetricView(
                         "今日运行", String.valueOf(todayRuns),
-                        runs.isEmpty() ? "暂无运行记录" : "今天创建的任务", "primary", ""
+                        runs.isEmpty() ? "暂无运行记录" : "今天创建的任务", "primary", "", "neutral"
                 ),
                 new ConsoleMetricView(
                         "执行中", String.valueOf(running),
-                        queued == 0 ? "暂无排队任务" : "另有 " + queued + " 项排队", "info", ""
+                        queued == 0 ? "暂无排队任务" : "另有 " + queued + " 项排队", "info", "", "neutral"
                 ),
                 new ConsoleMetricView(
                         "近 7 天成功率", successRate + "%",
                         "近 7 天 " + countSucceeded(terminalRuns) + "/" + terminalRuns.size() + " 成功",
-                        "success", successTrend(previousTerminalRuns, successRate, previousSuccessRate)
+                        "success", successTrend(previousTerminalRuns, successRate, previousSuccessRate),
+                        successTrendTone(previousTerminalRuns, successRate, previousSuccessRate)
                 ),
                 new ConsoleMetricView(
                         "需要关注", String.valueOf(failed),
-                        failed == 0 ? "暂无失败运行" : "失败运行需要处理", "danger", ""
+                        failed == 0 ? "暂无失败运行" : "失败运行需要处理", "danger", "", "neutral"
                 )
         );
     }
@@ -203,6 +204,17 @@ public class ConsoleViewService {
             return "较前 7 天持平";
         }
         return (difference > 0 ? "+" : "") + difference + " 个百分点";
+    }
+
+    private static String successTrendTone(List<WorkflowRunRecord> previousRuns, int successRate, int previousSuccessRate) {
+        if (previousRuns.isEmpty()) {
+            return "neutral";
+        }
+        int difference = successRate - previousSuccessRate;
+        if (difference > 0) {
+            return "positive";
+        }
+        return difference < 0 ? "danger" : "neutral";
     }
 
     private static String stateTone(RunState state) {
