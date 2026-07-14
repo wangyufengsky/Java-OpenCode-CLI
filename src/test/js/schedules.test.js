@@ -271,6 +271,41 @@ test('toggle success updates cached record, rejects duplicate clicks, and failur
   assert.equal(controller.getRecords()[0].enabled, false);
 });
 
+test('successful toggle synchronizes its row enabled dataset and reapplies the active status filter', async () => {
+  const record = { id: 7, chainId: 'alpha', mode: 'full', frequency: 'DAILY', runTime: '06:00:00', enabled: true, config: {} };
+  const fetchImplementation = async () => response({ ...record, enabled: false });
+  const { controller, nodes } = controllerHarness(fetchImplementation);
+  const button = new FakeButton(true);
+  const row = { dataset: { scheduleId: '7', search: '日报计划', enabled: 'true' }, hidden: false, querySelector: () => button };
+  button.row = row;
+  nodes['#schedule-list'].rows = [row];
+  nodes['#schedule-status-filter'].value = 'disabled';
+  nodes['#schedule-status-filter'].dispatch('change');
+  assert.equal(row.hidden, true);
+
+  await controller.toggle(button, '7');
+
+  assert.equal(row.dataset.enabled, 'false');
+  assert.equal(row.hidden, false);
+});
+
+test('failed toggle preserves its row dataset and active status-filter visibility', async () => {
+  const fetchImplementation = async () => response({ error: '停用失败' }, false);
+  const { controller, nodes } = controllerHarness(fetchImplementation);
+  const button = new FakeButton(true);
+  const row = { dataset: { scheduleId: '7', search: '日报计划', enabled: 'true' }, hidden: false, querySelector: () => button };
+  button.row = row;
+  nodes['#schedule-list'].rows = [row];
+  nodes['#schedule-status-filter'].value = 'enabled';
+  nodes['#schedule-status-filter'].dispatch('change');
+  assert.equal(row.hidden, false);
+
+  await assert.rejects(controller.toggle(button, '7'), /停用失败/);
+
+  assert.equal(row.dataset.enabled, 'true');
+  assert.equal(row.hidden, false);
+});
+
 test('delegated schedule switch click calls the enabled endpoint and updates UI plus cache', async () => {
   const calls = [];
   const record = { id: 7, chainId: 'alpha', mode: 'full', frequency: 'DAILY', runTime: '06:00:00', enabled: true, config: {} };

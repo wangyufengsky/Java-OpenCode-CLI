@@ -312,10 +312,19 @@
   function toggle(button, scheduleId) {
     const key = String(scheduleId);
     if (toggleInFlight.has(key)) return toggleInFlight.get(key);
+    const row = button.closest('tr[data-schedule-id]');
+    const originalEnabled = row ? row.dataset.enabled : null;
     const operation = toggleSchedule(button, scheduleId, pageMessage, fetchImplementation)
       .then((updated) => {
         updateCachedRecord(scheduleId, updated);
+        if (row && Object.prototype.hasOwnProperty.call(updated, 'enabled')) row.dataset.enabled = String(Boolean(updated.enabled));
+        applyFilters();
         return updated;
+      })
+      .catch((error) => {
+        if (row && originalEnabled !== null) row.dataset.enabled = originalEnabled;
+        applyFilters();
+        throw error;
       })
       .finally(() => toggleInFlight.delete(key));
     toggleInFlight.set(key, operation);

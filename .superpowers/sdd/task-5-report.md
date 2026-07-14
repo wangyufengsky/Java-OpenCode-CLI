@@ -73,3 +73,25 @@ python3 scripts/visual-regression.py \
   target/visual-regression/schedules.png \
   --tolerance 16 --max-diff-ratio 0.02
 ```
+
+## P1 filter synchronization follow-up
+
+RED: Added Node regressions for an active enabled/disabled filter around an
+optimistic schedule switch. Before the fix,
+`successful toggle synchronizes its row enabled dataset and reapplies the active status filter`
+failed because the completed response left the owning row at
+`data-enabled="true"`.
+
+GREEN: `toggle` now preserves the original row dataset while the request is in
+flight, copies `enabled` from the returned schedule record on success, and
+reapplies the active client-side filters. On failure it restores the original
+row dataset and reapplies the same filters. Verified with:
+
+```sh
+node --test src/test/js/schedules.test.js
+node --check src/main/resources/static/js/schedules.js
+git diff --check
+```
+
+All commands exited 0 (13 Node tests passing). No browser visual comparison
+was fabricated; the isolated visual-QA capture blocker above remains.
