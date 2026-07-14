@@ -25,7 +25,7 @@ public class WorkflowScheduleService implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean triggering = new AtomicBoolean(false);
 
-    WorkflowScheduleService(
+    public WorkflowScheduleService(
             WorkflowScheduleRepository repository,
             WorkflowRunSubmitter submitter,
             ChainCatalog chainCatalog,

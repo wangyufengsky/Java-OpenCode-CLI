@@ -71,3 +71,36 @@ Figma Desktop context retrieval is limited by the selected layer. The checked-in
 ## Commit
 
 This report is included in the Task 1 commit with subject `feat: add console visual foundation`.
+
+## Review-fix follow-up (uncommitted)
+
+The review identified a source-contract and visual-QA gap. `docs/figma-contract.md`
+now cites only `get_screenshot` and the selected `get_design_context` result; all
+other raw component values are explicitly unavailable rather than metadata-derived.
+It inventories all 11 intended components and six required states, retaining direct
+source blockers for Filter Control, Progress Indicator, and unsupplied state nodes.
+
+`VisualQaFixtureInitializer` is active only under `visual-qa`. It clears and seeds
+only `target/visual-qa.sqlite` with three deterministic runs, events/tasks and two
+schedules. Both visual-QA profile files disable AgentBridge, scheduling and workflow
+execution; the focused integration test verifies the fixed clock, database path,
+fixtures and no-execution guard. The original public four-argument
+`WorkflowScheduleService` constructor is restored. All CSS rules are now inside
+the declared cascade layers, and the rendered shell/control values are 1216px and
+44px. Dashboard now consumes shared navigation, metric-card and status-badge
+fragments. Table and alert fragments remain declared but are not inserted into the
+pre-overhaul Dashboard because their dynamic cell/conditional-alert markup must be
+preserved; their existing selectors/hooks remain intact for the later vertical page
+slices.
+
+### Review-fix RED/GREEN evidence
+
+1. RED: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit non-zero before `VisualQaFixtureInitializer` existed: expected 3 runs,
+     observed 0.
+2. GREEN: `mvn -q -Dtest=VisualQaFixtureInitializerTest test`
+   - Exit 0 after initializer, fixed fixture profile and no-execution assertions.
+3. GREEN: `mvn -q -Dtest=ConsoleMvcTest,VisualQaFixtureInitializerTest,WorkflowScheduleServiceTest test && node --test test/js/visual-components.test.js && python3 scripts/visual-regression.py docs/figma-baselines/components/0-1.png docs/figma-baselines/components/0-1.png --tolerance 16 --max-diff-ratio 0.02 && git diff --check`
+   - Exit 0. MVC rendering, visual-QA fixture isolation, public constructor,
+     drawer Escape/focus behavior, same-image visual comparison
+     (`changed_ratio=0.000000`) and whitespace validation passed.

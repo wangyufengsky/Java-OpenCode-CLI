@@ -1,3 +1,6 @@
+@layer foundations, shell, components, pages;
+
+@layer foundations {
 :root {
   --color-canvas: #f5f7fb;
   --color-surface: #ffffff;
@@ -14,8 +17,7 @@
   --radius-lg: 16px;
   --sidebar-width: 224px;
 }
-
-@layer foundations, shell, components, pages;
+}
 
 @layer foundations {
   :root { --color-muted: #607086; --control-height: 44px; }
@@ -33,7 +35,8 @@
   .c-metric-card strong { font-size: 24px; line-height: 1.25; }
   .c-button, .c-navigation-item { min-height: var(--control-height); }
   .c-icon { display: inline-grid; width: 20px; height: 20px; place-items: center; }
-  .c-alert { border-radius: var(--radius-sm); }
+.c-alert { border-radius: var(--radius-sm); }
+.c-drawer { width: min(480px, calc(100vw - 80px)); }
   .c-progress { height: 8px; overflow: hidden; border-radius: 999px; background: #e1e7ef; }
   .c-progress > span { display: block; height: 100%; background: var(--color-primary); }
 }
@@ -42,6 +45,9 @@
   .metrics { gap: 16px; }
 }
 
+/* Existing console selectors are deliberately contained in the component layer while
+   page slices migrate to semantic fragments. No selector below is unlayered. */
+@layer components {
 * {
   box-sizing: border-box;
 }
@@ -205,7 +211,7 @@ h2 {
 .app-main {
   min-width: 0;
   width: 100%;
-  max-width: 1376px;
+  max-width: 1216px;
   margin: 0 auto;
   padding: 36px 40px 48px;
 }
@@ -241,7 +247,7 @@ h2 {
 
 .button {
   display: inline-flex;
-  min-height: 40px;
+  min-height: var(--control-height);
   align-items: center;
   justify-content: center;
   padding: 9px 15px;
@@ -453,6 +459,7 @@ select,
 input,
 textarea {
   width: 100%;
+  min-height: var(--control-height);
   padding: 10px 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -697,7 +704,7 @@ textarea {
   z-index: 41;
   top: 0;
   right: 0;
-  width: min(600px, calc(100vw - 80px));
+  width: min(480px, calc(100vw - 80px));
   height: 100vh;
   overflow-y: auto;
   border-left: 1px solid var(--color-border);
@@ -839,4 +846,5 @@ textarea {
   .form-row {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
+}
 }

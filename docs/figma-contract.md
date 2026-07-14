@@ -1,45 +1,74 @@
 # AgentBridge Task Console Figma Contract
 
-This contract uses Figma file `7SMWQrlbLmB6yZ1kUbJ26o`. Screenshots are checked in so visual review is reproducible. The Figma Desktop `get_design_context` bridge was selection-scoped during collection: it returned full context only for the selected typography frame `6:110`; the remaining requested node IDs returned `desktop selection required`. Their names, hierarchy and variant property names were obtained through the permitted structural metadata call; visual values below are from the corresponding Figma screenshots.
+The sole Figma visual sources for this implementation are `get_screenshot` and
+`get_design_context` against file `7SMWQrlbLmB6yZ1kUbJ26o`. Screenshot PNGs are
+checked in so visual review is reproducible. During collection, Desktop MCP
+returned raw design context only for the explicitly selected Typography frame
+`6:110`; requests for the supplied component IDs returned `desktop selection
+required`. This document never substitutes metadata or inferred raw properties
+for that missing response.
 
-## Foundations
+## Evidence rules and foundations
 
-| Token | Figma evidence | Implementation |
+| Item | Direct evidence | Implementation / limitation |
 | --- | --- | --- |
-| Desktop reference | App shell variants: 1440 × 1024 | 224px sidebar + 1216px body |
-| Canvas / surface / border | `#f5f7fb` / `#ffffff` / `#e1e7ef` | `--color-canvas`, `--color-surface`, `--color-border` |
-| Primary / secondary text | `#315fe9` / `#607086` | `--color-primary`, `--color-muted` |
-| Controls | 44px height | `--control-height: 44px` |
-| Radius | 8 / 12 / 16 / full | `--radius-sm/md/lg`, pills use `999px` |
-| Typography | Inter 32/40 bold; 24/32, 20/28 semibold; 16/24 and 14/20 regular; label 14/20 medium, 12/16 semibold; Roboto Mono 13/20 | `styles.css` foundation and existing type rules |
+| Typography context `6:110` | `get_design_context` response | Inter 32/40 bold, 24/32 and 20/28 semibold, 16/24 and 14/20 regular; label 14/20 medium, 12/16 semibold; Roboto Mono 13/20. |
+| Colors from `6:110` | `get_design_context` response | Canvas `#f5f7fb`, text `#172033`, secondary text `#607086`, border `#e1e7ef`. |
+| Shell and control geometry | screenshot-visible and task brief | 1440×1024 reference, 224px sidebar / 1216px body, and 44px controls are implemented. Per-node raw geometry is unverified until each node is selected in Figma. |
+| Radius, stroke, shadow and font on components | not returned for unselected nodes | Implemented from the visual baseline; exact per-node numeric values remain unverified, not fabricated. |
 
-## Component and state mapping
+## Shared component inventory
 
-| Figma node ID | Actual node name / variants | Screenshot evidence | Fragment / CSS mapping |
+Rows marked **captured** have a direct checked-in screenshot. The screenshot is
+evidence of the rendered board and any state labels visibly shown inside it; it
+is not a substitute for unavailable raw design context. Rows marked **blocker**
+are intentionally retained so all intended shared components are tracked rather
+than silently dropped.
+
+| Intended component | Figma source / evidence status | Screenshot-visible states or dimensions | Code mapping and raw-context limitation |
 | --- | --- | --- | --- |
-| `0:1` | 00 Cover | `docs/figma-baselines/components/0-1.png` (1440×900) | direction reference |
-| `5:2` | 01 Getting Started | `docs/figma-baselines/components/5-2.png` (1440×900) | foundations reference |
-| `5:3` | 02 Foundations / Color | `docs/figma-baselines/components/5-3.png` (1440×1100) | `@layer foundations` tokens |
-| `5:4` | 03 Foundations / Typography | `docs/figma-baselines/components/5-4.png` (1440×1160) | typography contract; full selected context `6:110` |
-| `5:5` | 04 Foundations / Spacing & Radius | `docs/figma-baselines/components/5-5.png` (1440×1080) | radius, spacing and desktop shell values |
-| `61:2` | 19 Components / Navigation Item — State=Default, Hover, Active (192×40) | `docs/figma-baselines/components/61-2.png` (1360×480) | `navigationItem`, `.c-navigation-item` |
-| `10:2` | 11 Components / Button — Style=Primary/Secondary/Danger × State=Default/Hover/Disabled (84×44) | `docs/figma-baselines/components/10-2.png` (1104×288) | `button`, `.c-button`; 44px control token |
-| `14:2` | 12 Components / Status Badge — State=Queued, Running, Succeeded, Failed (62×24) | `docs/figma-baselines/components/14-2.png` (1120×516) | `statusBadge`, `.c-status-badge` |
-| `23:2` | 13 Components / Input — State=Default, Focus, Error, Disabled (320×100) | `docs/figma-baselines/components/23-2.png` (2056×574) | existing semantic form controls and CSS foundations |
-| `28:2` | 14 Components / Metric Card — Tone=Neutral, Primary, Success, Warning, Danger (240×136) | `docs/figma-baselines/components/28-2.png` (1968×544) | `metricCard`, `.c-metric-card` |
-| `40:2` | Components / Table Row — State=Default, Hover, Selected, Attention | `docs/figma-baselines/components/40-2.png` (1200×1152) | `tableRow`, `.c-table-row` |
-| `44:2` | 17 Components / Alert — Tone=Info, Success, Warning, Danger | `docs/figma-baselines/components/44-2.png` (1400×828) | `alert`, `.c-alert` |
-| `54:2` | 18 Components / Drawer Shell — Mode=Create/Edit × State=Default/Loading | `docs/figma-baselines/components/54-2.png` (2200×2160) | `.c-drawer`, schedules dialog contract |
-| `73:4` | 21 Components / App Shell — Active=Dashboard, NewRun, History, Schedules, None | `docs/figma-baselines/components/73-4.png` (2976×4256) | `.app-shell`, `@layer shell` |
+| Navigation Item | `61:2`, captured: `components/61-2.png` | state labels visible in board | `navigationItem`, `.c-navigation-item`; raw properties unavailable. |
+| Button | `10:2`, captured: `components/10-2.png` | state/style labels visible; 44px control contract | `button`, `.c-button`; exact variants unavailable. |
+| Status Badge | `14:2`, captured: `components/14-2.png` | status examples visible | `statusBadge`, `.c-status-badge`; exact colors/radius unavailable. |
+| Input | `23:2`, captured: `components/23-2.png` | field-state examples visible | semantic form controls; raw dimensions unavailable. |
+| Metric Card | `28:2`, captured: `components/28-2.png` | tone examples visible | `metricCard`, `.c-metric-card`; raw values unavailable. |
+| Filter Control | no supplied component screenshot | **blocker:** no direct node supplied | shared filter styling remains unverified until a Figma screenshot/context is supplied. |
+| Table Row | `40:2`, captured: `components/40-2.png` | row-state examples visible | `tableRow`, `.c-table-row`; raw values unavailable. |
+| Alert | `44:2`, captured: `components/44-2.png` | tone examples visible | `alert`, `.c-alert`; raw values unavailable. |
+| Drawer Shell | `54:2`, captured: `components/54-2.png` | create/edit/loading examples visible | `.c-drawer` and schedule drawer behavior; exact 480px target remains a later screen validation. |
+| Progress Indicator | no supplied component screenshot | **blocker:** no direct node supplied | `progress`, `.c-progress`; not asserted as Figma parity yet. |
+| App Shell | `73:4`, captured: `components/73-4.png` | navigation arrangements visible | `.app-shell`, shell layer; per-node raw context unavailable. |
 
-The supplied list has 14 unique IDs because two supplied entries were duplicates. It covers Navigation Item, Button, Status Badge, Input, Metric Card, Table Row, Alert, Drawer Shell and App Shell; no separately supplied Progress Indicator node was available, so the `progress` fragment is a semantic primitive only and is not asserted as a distinct Figma component.
+Supporting supplied screenshots are kept as collection references, not asserted
+as component evidence: `0:1`, `5:2`, `5:3`, `5:4`, and `5:5`. All available
+capture files live under `docs/figma-baselines/components/`.
+
+## State baseline inventory
+
+| Required state baseline | Evidence status | Implementation status |
+| --- | --- | --- |
+| Loading | blocker: no supplied state-node screenshot/context | represented by component loading attributes where applicable; visual parity pending source. |
+| Empty | blocker: no supplied state-node screenshot/context | existing `.empty` semantic state retained; visual parity pending source. |
+| No Results | blocker: no supplied state-node screenshot/context | history slice will map it once source is supplied. |
+| API Failure | blocker: no supplied state-node screenshot/context | `.c-alert` supports the state; exact visual values unverified. |
+| SSE Reconnecting | blocker: no supplied state-node screenshot/context | existing DOM behavior is preserved; visual values unverified. |
+| Field Validation Error | screenshot-visible input error examples in `23:2` | existing validation hooks are preserved; raw context unavailable. |
 
 ## Visual QA profile
 
-Activate `visual-qa` to use `target/visual-qa.sqlite`, a fixed UTC clock, disabled scheduler, disabled AgentBridge runner, and visual fixture location. The regular production defaults retain the real database path and enabled scheduler. Compare a baseline and rendered image with:
+Activate `visual-qa` only for local screenshots. It uses
+`target/visual-qa.sqlite`, fixed UTC clock `2026-07-13T00:00:00Z`, disabled
+scheduler, disabled AgentBridge runner and disabled workflow execution.
+`VisualQaFixtureInitializer` deletes and reseeds only that disposable database
+with three fixed runs, events/tasks and two schedules at application startup.
+It never opens the normal SQLite path and does not invoke final run submission.
+
+Compare a baseline and rendered image with:
 
 ```sh
 python3 scripts/visual-regression.py baseline.png actual.png --tolerance 16 --max-diff-ratio 0.02
 ```
 
-Only generated diff artifacts are written under `target/visual-regression/`.
+The comparator evaluates RGB per-channel tolerance and fails over a 2% changed
+pixel ratio. Its generated comparison artifacts are restricted to
+`target/visual-regression/`.

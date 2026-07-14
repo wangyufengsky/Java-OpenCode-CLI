@@ -13,10 +13,10 @@
     <span class="brand-copy"><strong>AgentBridge</strong><small>任务控制台</small></span>
   </a>
   <nav class="side-navigation" aria-label="主导航">
-    <a href="/" th:classappend="${activeItem == 'dashboard'} ? ' active'">运行概览</a>
-    <a href="/runs/new" th:classappend="${activeItem == 'new-run'} ? ' active'">新建运行</a>
-    <a href="/history" th:classappend="${activeItem == 'history'} ? ' active'">运行历史</a>
-    <a href="/schedules" th:classappend="${activeItem == 'schedules'} ? ' active'">定时任务</a>
+    <a th:replace="~{fragments/layout :: navigationItem('/', '运行概览', ${activeItem == 'dashboard'})}">运行概览</a>
+    <a th:replace="~{fragments/layout :: navigationItem('/runs/new', '新建运行', ${activeItem == 'new-run'})}">新建运行</a>
+    <a th:replace="~{fragments/layout :: navigationItem('/history', '运行历史', ${activeItem == 'history'})}">运行历史</a>
+    <a th:replace="~{fragments/layout :: navigationItem('/schedules', '定时任务', ${activeItem == 'schedules'})}">定时任务</a>
   </nav>
   <p class="sidebar-status"><span aria-hidden="true"></span>本地任务控制台</p>
 </aside>

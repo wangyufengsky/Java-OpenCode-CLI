@@ -7,6 +7,3 @@ task-console:
   scheduler-enabled: false
   execution-enabled: false
   clock-instant: "2026-07-13T00:00:00Z"
-
-visual-qa:
-  fixtures: "classpath:visual-qa-fixtures.yml"
