@@ -119,6 +119,10 @@ public class ConsoleViewService {
         return dashboardRuns(repository.listRuns());
     }
 
+    public List<ConsoleRunListItemView> historyRuns(List<WorkflowRunRecord> runs) {
+        return runs.stream().map(this::toDashboardRun).toList();
+    }
+
     private List<ConsoleRunListItemView> dashboardRuns(List<WorkflowRunRecord> runs) {
         return runs.stream()
                 .sorted(Comparator.comparing(WorkflowRunRecord::createdAt).reversed()
