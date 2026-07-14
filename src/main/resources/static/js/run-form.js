@@ -22,6 +22,7 @@
   let configLoading = false;
   let configReady = false;
   let submitInFlight = false;
+  let preflightAlertControlId = null;
 
   chainSelect.value = runForm.dataset.selectedChain || chainSelect.value;
   modeSelect.value = runForm.dataset.selectedMode || modeSelect.value;
@@ -69,6 +70,7 @@
 
   async function renderConfigFields(chainId) {
     const sequence = ++renderSequence;
+    clearPreflightStates();
     const copySnapshot = copiedConfigPending ? runForm.dataset.copyFrom : '';
     copiedConfigPending = false;
     const definition = chainConfigDefinitions[chainId];
@@ -134,7 +136,7 @@
       fields.forEach((definitionField) => {
         const value = Object.prototype.hasOwnProperty.call(values, definitionField.key)
           ? values[definitionField.key] : undefined;
-        grid.appendChild(createConfigField(definitionField, value));
+        grid.appendChild(createConfigField(definitionField, value, sequence, chainId));
       });
       group.appendChild(grid);
       configFields.appendChild(group);
@@ -167,7 +169,7 @@
     return response.json();
   }
 
-  function createConfigField(definitionField, value) {
+  function createConfigField(definitionField, value, generation, chainId) {
     const wrapper = document.createElement('label');
     wrapper.className = `config-field config-field-${definitionField.type}`;
     wrapper.htmlFor = fieldId(definitionField.key);
@@ -194,20 +196,20 @@
     restore.addEventListener('click', () => {
       setControlValue(control, definitionField.type, defaults[definitionField.key]);
       validateControl(control, definitionField.label);
-      if (shouldPreflight(definitionField)) schedulePreflight(control, validation);
+      if (shouldPreflight(definitionField)) schedulePreflight(control, validation, generation, chainId);
       updateSummary();
     });
     actions.append(badge, document.createTextNode(' '), restore);
     control.setAttribute('aria-describedby', `${description.id} ${validation.id}`);
     control.addEventListener('input', () => {
       validateControl(control, definitionField.label);
-      if (shouldPreflight(definitionField)) schedulePreflight(control, validation);
+      if (shouldPreflight(definitionField)) schedulePreflight(control, validation, generation, chainId);
       updateSummary();
     });
     control.addEventListener('change', updateSummary);
     wrapper.append(title, control, description, actions, validation);
     if (shouldPreflight(definitionField) && readValue(control, definitionField.type)) {
-      schedulePreflight(control, validation);
+      schedulePreflight(control, validation, generation, chainId);
     }
     return wrapper;
   }
@@ -256,47 +258,89 @@
       || definitionField.type === 'path';
   }
 
-  function schedulePreflight(control, status) {
+  function schedulePreflight(control, status, generation = renderSequence, chainId = chainSelect.value) {
     const existing = preflightState.get(control.id);
     if (existing) {
-      clearTimeout(existing.timer);
-      existing.controller?.abort();
+      cancelPreflightState(existing);
     }
     const value = control.value.trim();
     if (!value) {
       if (!control.validationMessage) status.textContent = '';
       preflightState.delete(control.id);
-      if (preflightState.size === 0) setPreflightAlert('');
+      clearPreflightAlert(control.id);
       return;
     }
     status.textContent = '等待检查路径...';
-    setPreflightAlert('路径预检等待中…', 'neutral');
+    setPreflightAlert('路径预检等待中…', 'neutral', control.id);
     const state = { timer: null, controller: null };
     state.timer = window.setTimeout(async () => {
+      if (!isCurrentPreflight(control, generation, chainId)) {
+        releasePreflightState(control.id, state);
+        return;
+      }
       const controller = new AbortController();
       state.controller = controller;
+      if (!isCurrentPreflight(control, generation, chainId)) {
+        controller.abort();
+        releasePreflightState(control.id, state);
+        return;
+      }
       status.textContent = '正在检查路径...';
-      setPreflightAlert('正在检查本机路径…', 'neutral');
+      setPreflightAlert('正在检查本机路径…', 'neutral', control.id);
       try {
         const response = await fetch(`/api/path-preflight?path=${encodeURIComponent(value)}`, { signal: controller.signal });
+        if (!isCurrentPreflight(control, generation, chainId)) return;
         if (!response.ok) throw new Error('路径预检服务不可用');
         const body = await response.json();
+        if (!isCurrentPreflight(control, generation, chainId)) return;
         status.textContent = body.message || (body.accessible ? '路径可读' : '路径暂不可访问');
-        setPreflightAlert(status.textContent, body.accessible ? 'success' : 'warning');
+        setPreflightAlert(status.textContent, body.accessible ? 'success' : 'warning', control.id);
       } catch (error) {
-        if (error.name !== 'AbortError') {
+        if (isCurrentPreflight(control, generation, chainId) && error.name !== 'AbortError') {
           status.textContent = '无法完成路径预检；仍可继续提交。';
-          setPreflightAlert(status.textContent, 'warning');
+          setPreflightAlert(status.textContent, 'warning', control.id);
         }
+      } finally {
+        releasePreflightState(control.id, state);
       }
     }, 400);
     preflightState.set(control.id, state);
   }
 
-  function setPreflightAlert(message, tone = 'neutral') {
+  function clearPreflightStates() {
+    preflightState.forEach((state) => cancelPreflightState(state));
+    preflightState.clear();
+    preflightAlertControlId = null;
+    setPreflightAlert('');
+  }
+
+  function cancelPreflightState(state) {
+    window.clearTimeout(state.timer);
+    state.controller?.abort();
+  }
+
+  function releasePreflightState(controlId, state) {
+    if (preflightState.get(controlId) === state) preflightState.delete(controlId);
+  }
+
+  function isCurrentPreflight(control, generation, chainId) {
+    return generation === renderSequence
+      && chainId === chainSelect.value
+      && document.querySelector(`#${control.id}`) === control;
+  }
+
+  function clearPreflightAlert(controlId) {
+    if (preflightAlertControlId === controlId) {
+      preflightAlertControlId = null;
+      setPreflightAlert('');
+    }
+  }
+
+  function setPreflightAlert(message, tone = 'neutral', controlId = null) {
     if (!preflightAlert) return;
     preflightAlert.textContent = message;
     preflightAlert.dataset.tone = tone;
+    if (message) preflightAlertControlId = controlId;
   }
 
   function renderRerunTypeOptions(chainId, selectedValue = null) {

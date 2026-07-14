@@ -82,3 +82,38 @@ capture or Pillow comparison was claimed. In particular, no baseline was
 compared with itself. A later visual-QA pass must capture `/runs/new` and a
 fixed `/runs/{id}` under `visual-qa`, save those images beneath
 `target/visual-regression/`, then run the documented comparator.
+
+## Quality follow-up: stale preflight isolation
+
+The original composition update left a race at the dynamic-field boundary: a
+path-preflight callback for a detached field could still write the shared alert
+after a chain switch. The following RED test was added first and failed because
+the alert retained `正在检查本机路径…` after switching to a new chain with a blank
+current field:
+
+```sh
+node --test src/test/js/run-form.test.js
+```
+
+`renderConfigFields` now cancels every pending debounce timer and aborts every
+active preflight controller before replacing dynamic fields. Each preflight
+callback carries its render generation, chain ID and control identity; delayed
+callbacks and async responses return without mutating detached controls or the
+shared alert. State removal is identity-checked so an old request cannot remove
+a newer request with the same field ID. Clearing the current path field clears
+the alert it owns.
+
+GREEN verification:
+
+```sh
+mvn -q -Dtest=ConsoleMvcTest test
+node --test src/test/js/run-form.test.js
+node --test src/test/js/run-detail.test.js
+node --check src/main/resources/static/js/run-form.js
+node --check src/main/resources/static/js/run-detail.js
+git diff --check
+```
+
+All commands exit 0. The new Node regression switches chains while the first
+path request is in flight, resolves that old request deliberately despite its
+abort signal, and proves that the blank current chain alert remains unchanged.
