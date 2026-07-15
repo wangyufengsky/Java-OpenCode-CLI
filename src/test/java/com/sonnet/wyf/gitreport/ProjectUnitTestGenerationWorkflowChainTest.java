@@ -65,18 +65,13 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                         oldChinesePhrase("额外", "产物")
                 );
         assertThat(client.toolNames).containsSubsequence(
-                "list_tests", "get_compilation_errors", "run_command"
+                "list_tests", "get_compilation_errors", "run_tests", "read_run_output"
         );
-        assertThat(client.toolNames).doesNotContain("run_tests", "get_coverage");
-        assertThat(client.commands).allSatisfy(command -> assertThat(command)
-                .contains("test")
-                .doesNotContain(
-                        "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get",
-                        "org.jacoco:org.jacoco.agent",
-                        "-javaagent:",
-                        "target/jacoco.exec",
-                        "org.jacoco:jacoco-maven-plugin"
-                ));
+        assertThat(client.toolNames).doesNotContain("run_command", "get_coverage");
+        assertThat(client.runTestTargets).containsExactly(
+                "com.acme.order.OrderServiceTest", "com.acme.user.UserHelperTest"
+        );
+        assertThat(client.runTestModules).containsExactly("", "");
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/order/OrderServiceTest.java")).exists();
         assertThat(properties.getProject().getRepo().resolve("src/test/java/com/acme/user/UserHelperTest.java")).exists();
         assertThat(properties.getPaths().getOut().resolve("verification.json")).doesNotExist();
@@ -393,6 +388,8 @@ class ProjectUnitTestGenerationWorkflowChainTest {
         protected final CopyOnWriteArrayList<String> prompts = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> toolNames = new CopyOnWriteArrayList<>();
         protected final CopyOnWriteArrayList<String> commands = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> runTestTargets = new CopyOnWriteArrayList<>();
+        protected final CopyOnWriteArrayList<String> runTestModules = new CopyOnWriteArrayList<>();
 
         FakeAgentBridgeClient(ProjectUnitTestGenerationProperties properties) {
             super(objectMapper);
@@ -424,8 +421,21 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 case "list_tests" -> listTests(arguments);
                 case "get_compilation_errors" -> json(Map.of("errors", List.of()), "No compilation errors");
                 case "run_command" -> runCommand(arguments);
+                case "run_tests" -> runTests(arguments);
+                case "read_run_output" -> json(Map.of(), "=== Summary: 1 passed, 0 failed, 0 ignored (1 total) ===");
                 default -> json(Map.of(), "");
             };
+        }
+
+        protected ToolResponse runTests(JsonNode arguments) {
+            runTestTargets.add(arguments.path("target").asText());
+            runTestModules.add(arguments.path("module").asText());
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.put("isError", false);
+            raw.putArray("content").addObject()
+                    .put("type", "text")
+                    .put("text", "Test Results: (See detailed results in the IDE's Run panel)");
+            return new ToolResponse(raw, "Test Results: (See detailed results in the IDE's Run panel)", objectMapper.createObjectNode());
         }
 
         protected ToolResponse runCommand(JsonNode arguments) {

@@ -12,6 +12,8 @@ import java.net.http.HttpResponse;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -19,9 +21,12 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
+    private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong requestIds = new AtomicLong();
+    private final Object mcpSessionLock = new Object();
+    private final Map<URI, McpSession> mcpSessions = new HashMap<>();
 
     public AgentBridgeClient(ObjectMapper objectMapper) {
         this(objectMapper, localAgentBridgeHttpClient());
@@ -73,6 +78,7 @@ public class AgentBridgeClient {
     }
 
     public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) throws IOException, InterruptedException {
+        McpSession session = mcpSession(mcpUrl);
         ObjectNode params = objectMapper.createObjectNode();
         params.put("name", name);
         params.set("arguments", arguments == null ? objectMapper.createObjectNode() : arguments);
@@ -82,7 +88,7 @@ public class AgentBridgeClient {
         body.put("method", "tools/call");
         body.set("params", params);
 
-        HttpResponse<String> response = sendJson(mcpUrl, body, toolCallTimeout(arguments));
+        HttpResponse<String> response = sendJson(mcpUrl, body, toolCallTimeout(arguments), session);
         requireSuccess(response, "AgentBridge MCP tools/call failed: " + name);
         JsonNode root = objectMapper.readTree(response.body());
         if (root.hasNonNull("error")) {
@@ -98,12 +104,64 @@ public class AgentBridgeClient {
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body, Duration timeout) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(uri)
+        return sendJson(uri, body, timeout, null);
+    }
+
+    private HttpResponse<String> sendJson(URI uri, JsonNode body, Duration timeout, McpSession session) throws IOException, InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri)
                 .timeout(timeout)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                .header("Accept", "application/json, text/event-stream");
+        if (session != null) {
+            request.header("Mcp-Session-Id", session.id())
+                    .header("MCP-Protocol-Version", session.protocolVersion());
+        }
+        return httpClient.send(request.POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private McpSession mcpSession(URI mcpUrl) throws IOException, InterruptedException {
+        synchronized (mcpSessionLock) {
+            McpSession existing = mcpSessions.get(mcpUrl);
+            if (existing != null) {
+                return existing;
+            }
+            McpSession initialized = initializeMcpSession(mcpUrl);
+            mcpSessions.put(mcpUrl, initialized);
+            return initialized;
+        }
+    }
+
+    private McpSession initializeMcpSession(URI mcpUrl) throws IOException, InterruptedException {
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("protocolVersion", MCP_CLIENT_PROTOCOL_VERSION);
+        params.set("capabilities", objectMapper.createObjectNode());
+        ObjectNode clientInfo = params.putObject("clientInfo");
+        clientInfo.put("name", "java-opencode-cli");
+        clientInfo.put("version", "1.0");
+
+        ObjectNode initialize = objectMapper.createObjectNode();
+        initialize.put("jsonrpc", "2.0");
+        initialize.put("id", requestIds.incrementAndGet());
+        initialize.put("method", "initialize");
+        initialize.set("params", params);
+        HttpResponse<String> response = sendJson(mcpUrl, initialize, Duration.ofSeconds(30));
+        requireSuccess(response, "AgentBridge MCP initialize failed");
+
+        String sessionId = response.headers().firstValue("Mcp-Session-Id")
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException("AgentBridge MCP initialize did not return Mcp-Session-Id"));
+        String protocolVersion = objectMapper.readTree(response.body()).path("result").path("protocolVersion")
+                .asText(MCP_CLIENT_PROTOCOL_VERSION);
+        McpSession session = new McpSession(sessionId, protocolVersion);
+
+        ObjectNode initialized = objectMapper.createObjectNode();
+        initialized.put("jsonrpc", "2.0");
+        initialized.put("method", "notifications/initialized");
+        initialized.set("params", objectMapper.createObjectNode());
+        HttpResponse<String> notificationResponse = sendJson(mcpUrl, initialized, Duration.ofSeconds(30), session);
+        requireSuccess(notificationResponse, "AgentBridge MCP initialization notification failed");
+        return session;
     }
 
     private Duration toolCallTimeout(JsonNode arguments) {
@@ -157,6 +215,9 @@ public class AgentBridgeClient {
     }
 
     public record ToolResponse(JsonNode rawResult, String text, JsonNode structured) {
+    }
+
+    private record McpSession(String id, String protocolVersion) {
     }
 
     private static HttpClient localAgentBridgeHttpClient() {

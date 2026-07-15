@@ -72,17 +72,28 @@ class AgentBridgeClientTest {
         server.createContext("/mcp", exchange -> {
             JsonNode request = objectMapper.readTree(body(exchange));
             requests.add(request);
-            respond(exchange, 200, """
-                    {
-                      "jsonrpc": "2.0",
-                      "id": 1,
-                      "result": {
-                        "content": [
-                          {"type": "text", "text": "{\\"ok\\":true,\\"tests\\":[\\"OrderServiceTest\\"]}"}
-                        ]
-                      }
-                    }
-                    """);
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "test-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 1,
+                          "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                        }
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "test-session", "");
+                case "tools/call" -> respondWithSession(exchange, 200, "test-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 2,
+                          "result": {
+                            "content": [
+                              {"type": "text", "text": "{\\"ok\\":true,\\"tests\\":[\\"OrderServiceTest\\"]}"}
+                            ]
+                          }
+                        }
+                        """);
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
         });
         server.start();
 
@@ -92,12 +103,57 @@ class AgentBridgeClientTest {
                 objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
         );
 
-        assertThat(requests).hasSize(1);
-        assertThat(requests.get(0).path("method").asText()).isEqualTo("tools/call");
-        assertThat(requests.get(0).path("params").path("name").asText()).isEqualTo("list_tests");
+        assertThat(requests).hasSize(3);
+        assertThat(requests.get(2).path("method").asText()).isEqualTo("tools/call");
+        assertThat(requests.get(2).path("params").path("name").asText()).isEqualTo("list_tests");
         assertThat(response.text()).contains("OrderServiceTest");
         assertThat(response.structured().path("ok").asBoolean()).isTrue();
         assertThat(response.structured().path("tests")).hasSize(1);
+    }
+
+    @Test
+    void initializesMcpTransportBeforeCallingTools() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        List<String> sessionHeaders = new ArrayList<>();
+        List<String> protocolHeaders = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            requests.add(request);
+            sessionHeaders.add(exchange.getRequestHeaders().getFirst("Mcp-Session-Id"));
+            protocolHeaders.add(exchange.getRequestHeaders().getFirst("MCP-Protocol-Version"));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "test-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 1,
+                          "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                        }
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "test-session", "");
+                case "tools/call" -> respondWithSession(exchange, 200, "test-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 2,
+                          "result": {"content": [{"type": "text", "text": "{\\"tests\\":[\\"OrderServiceTest\\"]}"}]}
+                        }
+                        """);
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
+        );
+
+        assertThat(response.structured().path("tests")).hasSize(1);
+        assertThat(requests).extracting(request -> request.path("method").asText())
+                .containsExactly("initialize", "notifications/initialized", "tools/call");
+        assertThat(sessionHeaders).containsExactly(null, "test-session", "test-session");
+        assertThat(protocolHeaders).containsExactly(null, "2025-11-25", "2025-11-25");
     }
 
     @Test
@@ -143,9 +199,22 @@ class AgentBridgeClientTest {
         }
     }
 
+    private void respondWithSession(HttpExchange exchange, int status, String sessionId, String body) throws IOException {
+        exchange.getResponseHeaders().set("Mcp-Session-Id", sessionId);
+        respond(exchange, status, body);
+    }
+
     private static final class CapturingHttpClient extends HttpClient {
+        private static final String INITIALIZE_RESPONSE = """
+                {
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                }
+                """;
         private final String responseBody;
         private HttpRequest lastRequest;
+        private int requestCount;
 
         private CapturingHttpClient(String responseBody) {
             this.responseBody = responseBody;
@@ -202,6 +271,8 @@ class AgentBridgeClientTest {
                 java.net.http.HttpResponse.BodyHandler<T> responseBodyHandler
         ) {
             this.lastRequest = request;
+            requestCount++;
+            String body = requestCount == 1 ? INITIALIZE_RESPONSE : requestCount == 2 ? "" : responseBody;
             return new java.net.http.HttpResponse<>() {
                 @Override
                 public int statusCode() {
@@ -220,12 +291,14 @@ class AgentBridgeClientTest {
 
                 @Override
                 public HttpHeaders headers() {
-                    return HttpHeaders.of(Map.of(), (name, value) -> true);
+                    return HttpHeaders.of(requestCount == 1
+                            ? Map.of("Mcp-Session-Id", List.of("test-session"))
+                            : Map.of(), (name, value) -> true);
                 }
 
                 @Override
                 public T body() {
-                    return (T) responseBody;
+                    return (T) body;
                 }
 
                 @Override
