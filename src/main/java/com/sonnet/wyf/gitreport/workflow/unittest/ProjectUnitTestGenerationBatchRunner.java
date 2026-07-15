@@ -28,6 +28,9 @@ import javax.xml.parsers.DocumentBuilderFactory;
 public class ProjectUnitTestGenerationBatchRunner {
     public static final String RESULTS_JSON = "agentbridge-results.json";
     private static final Pattern IDEA_TEST_SUCCESS = Pattern.compile("(?im)^=== Summary:\\s*[1-9]\\d* passed,\\s*0 failed");
+    private static final Pattern IDEA_TEST_ZERO_EXIT = Pattern.compile(
+            "(?im)(?:Process finished with exit code\\s+0|进程已结束，退出代码为\\s*0)(?!\\d)"
+    );
 
     private final AgentBridgeClient client;
     private final ProjectUnitTestGenerationPromptBuilder promptBuilder;
@@ -276,7 +279,8 @@ public class ProjectUnitTestGenerationBatchRunner {
     ) {
         return !run.rawResult().path("isError").asBoolean(false)
                 && !output.rawResult().path("isError").asBoolean(false)
-                && IDEA_TEST_SUCCESS.matcher(output.text()).find();
+                && (IDEA_TEST_SUCCESS.matcher(output.text()).find()
+                || IDEA_TEST_ZERO_EXIT.matcher(output.text()).find());
     }
 
     private boolean commandSucceeded(AgentBridgeClient.ToolResponse response) {

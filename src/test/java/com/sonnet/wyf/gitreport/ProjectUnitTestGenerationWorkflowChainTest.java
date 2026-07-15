@@ -102,6 +102,44 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void acceptsIdeaRunOutputWithChineseZeroExitCode() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new ZeroExitCodeIdeaClient(properties)).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void acceptsIdeaRunOutputWithEnglishZeroExitCode() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new EnglishZeroExitCodeIdeaClient(properties)).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void rejectsIdeaRunOutputWithNonZeroExitCode() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(1);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        assertThatThrownBy(() -> chain(properties, new NonZeroExitCodeIdeaClient(properties)).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("目标测试类运行失败");
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `0`", "failed: `1`");
+    }
+
+    @Test
     void precheckPassSkipsPrompt() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
@@ -422,7 +460,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                 case "get_compilation_errors" -> json(Map.of("errors", List.of()), "No compilation errors");
                 case "run_command" -> runCommand(arguments);
                 case "run_tests" -> runTests(arguments);
-                case "read_run_output" -> json(Map.of(), "=== Summary: 1 passed, 0 failed, 0 ignored (1 total) ===");
+                case "read_run_output" -> json(Map.of(), readRunOutput());
                 default -> json(Map.of(), "");
             };
         }
@@ -436,6 +474,10 @@ class ProjectUnitTestGenerationWorkflowChainTest {
                     .put("type", "text")
                     .put("text", "Test Results: (See detailed results in the IDE's Run panel)");
             return new ToolResponse(raw, "Test Results: (See detailed results in the IDE's Run panel)", objectMapper.createObjectNode());
+        }
+
+        protected String readRunOutput() {
+            return "=== Summary: 1 passed, 0 failed, 0 ignored (1 total) ===";
         }
 
         protected ToolResponse runCommand(JsonNode arguments) {
@@ -544,6 +586,39 @@ class ProjectUnitTestGenerationWorkflowChainTest {
 
         @Override
         protected void createTargetTest(String prompt) {
+        }
+    }
+
+    private class ZeroExitCodeIdeaClient extends FakeAgentBridgeClient {
+        ZeroExitCodeIdeaClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected String readRunOutput() {
+            return "进程已结束，退出代码为 0";
+        }
+    }
+
+    private class NonZeroExitCodeIdeaClient extends FakeAgentBridgeClient {
+        NonZeroExitCodeIdeaClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected String readRunOutput() {
+            return "进程已结束，退出代码为 1";
+        }
+    }
+
+    private class EnglishZeroExitCodeIdeaClient extends FakeAgentBridgeClient {
+        EnglishZeroExitCodeIdeaClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected String readRunOutput() {
+            return "Process finished with exit code 0";
         }
     }
 
