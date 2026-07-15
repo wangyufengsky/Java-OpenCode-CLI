@@ -140,6 +140,49 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void retriesInterruptedListTestsBeforeStartingAgent() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        InterruptedListThenRecoveryClient client = new InterruptedListThenRecoveryClient(properties);
+
+        chain(properties, client).run(request("full", "", ""));
+
+        assertThat(client.listTestCalls).isGreaterThanOrEqualTo(3);
+        assertThat(client.prompts).hasSize(1);
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void reportsPersistentInterruptedListTestsAsMcpFailure() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(1);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        PersistentInterruptedListClient client = new PersistentInterruptedListClient(properties);
+
+        assertThatThrownBy(() -> chain(properties, client).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("IDE/MCP 调用中断或失败")
+                .hasMessageContaining("list_tests");
+        assertThat(client.listTestCalls).isGreaterThanOrEqualTo(6);
+    }
+
+    @Test
+    void retriesInterruptedCompilationCheckBeforeStartingAgent() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        InterruptedCompilationThenRecoveryClient client = new InterruptedCompilationThenRecoveryClient(properties);
+
+        chain(properties, client).run(request("full", "", ""));
+
+        assertThat(client.compilationCheckCalls).isGreaterThanOrEqualTo(3);
+        assertThat(client.prompts).hasSize(1);
+    }
+
+    @Test
     void precheckPassSkipsPrompt() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         writeSource(properties.getProject().getRepo());
@@ -563,6 +606,65 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             ObjectNode raw = objectMapper.createObjectNode();
             raw.set("structuredContent", structured);
             return new ToolResponse(raw, text, structured);
+        }
+
+        protected ToolResponse interrupted(String tool) {
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.put("isError", true);
+            raw.putArray("content").addObject()
+                    .put("type", "text")
+                    .put("text", "Error [INTERNAL_ERROR]: java.lang.InterruptedException: " + tool);
+            return new ToolResponse(raw, "Error [INTERNAL_ERROR]: java.lang.InterruptedException: " + tool,
+                    objectMapper.createObjectNode());
+        }
+    }
+
+    private class InterruptedListThenRecoveryClient extends FakeAgentBridgeClient {
+        private int listTestCalls;
+
+        InterruptedListThenRecoveryClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) {
+            if ("list_tests".equals(name) && ++listTestCalls == 1) {
+                return interrupted(name);
+            }
+            return super.callTool(mcpUrl, name, arguments);
+        }
+    }
+
+    private class PersistentInterruptedListClient extends FakeAgentBridgeClient {
+        private int listTestCalls;
+
+        PersistentInterruptedListClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) {
+            if ("list_tests".equals(name)) {
+                listTestCalls++;
+                return interrupted(name);
+            }
+            return super.callTool(mcpUrl, name, arguments);
+        }
+    }
+
+    private class InterruptedCompilationThenRecoveryClient extends FakeAgentBridgeClient {
+        private int compilationCheckCalls;
+
+        InterruptedCompilationThenRecoveryClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) {
+            if ("get_compilation_errors".equals(name) && ++compilationCheckCalls == 1) {
+                return interrupted(name);
+            }
+            return super.callTool(mcpUrl, name, arguments);
         }
     }
 

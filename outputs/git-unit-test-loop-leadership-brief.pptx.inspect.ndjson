@@ -1,0 +1,272 @@
+{"kind":"deck","id":"pr/c903b9","name":"Deck"}
+{"kind":"layout","layoutId":"/ppt/slideMasters/slideMaster1.xml","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"/ppt/slideLayouts/slideLayout1.xml","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/y90nupkv","slide":1,"title":"LEADERSHIP BRIEF · 2026","textShapes":13}
+{"kind":"shape","id":"sh/i1w3yp8f","slide":1,"bbox":[72,74,112,8]}
+{"kind":"textbox","id":"sh/547294r6","slide":1,"text":"LEADERSHIP BRIEF · 2026","textPreview":"LEADERSHIP BRIEF · 2026","textChars":23,"textLines":1,"bbox":[72,108,420,24]}
+{"kind":"textbox","id":"sh/k3yl0zql","slide":1,"text":"AI 助手稳定完成\n重复研发工作","textPreview":"AI 助手稳定完成 | 重复研发工作","textChars":16,"textLines":2,"bbox":[72,168,720,142]}
+{"kind":"textbox","id":"sh/7qp4be9c","slide":1,"text":"AI 助手，是能调用工具、按规则交付结果的 AI 执行助手。项目用可检查、可重试的 Loop，把一次回答变成可验收的工作结果。","textPreview":"AI 助手，是能调用工具、按规则交付结果的 AI 执行助手。项目用可检查、可重试的 Loop，把一次回答变成可验收的工作结果。","textChars":63,"textLines":1,"bbox":[76,342,720,60]}
+{"kind":"shape","id":"sh/65g3298r","slide":1,"bbox":[842,164,150,126]}
+{"kind":"textbox","id":"sh/ts7md4r2","slide":1,"text":"流程","textPreview":"流程","textChars":2,"textLines":1,"bbox":[860,186,114,34]}
+{"kind":"textbox","id":"sh/sryl4zqx","slide":1,"text":"明确边界","textPreview":"明确边界","textChars":4,"textLines":1,"bbox":[858,235,118,24]}
+{"kind":"shape","id":"sh/fu94fe98","slide":1,"bbox":[1020,164,150,126]}
+{"kind":"textbox","id":"sh/utg3698n","slide":1,"text":"AI 助手","textPreview":"AI 助手","textChars":5,"textLines":1,"bbox":[1038,186,114,34]}
+{"kind":"textbox","id":"sh/wn6dc7eh","slide":1,"text":"分析与生成","textPreview":"分析与生成","textChars":5,"textLines":1,"bbox":[1036,235,118,24]}
+{"kind":"shape","id":"sh/hofulsf2","slide":1,"bbox":[842,320,150,126]}
+{"kind":"textbox","id":"sh/ul4vaxgb","slide":1,"text":"验收","textPreview":"验收","textChars":2,"textLines":1,"bbox":[860,342,114,34]}
+{"kind":"textbox","id":"sh/vmdcj2xw","slide":1,"text":"检查真实结果","textPreview":"检查真实结果","textChars":6,"textLines":1,"bbox":[858,391,118,24]}
+{"kind":"shape","id":"sh/4r6dg7et","slide":1,"bbox":[1020,320,150,126]}
+{"kind":"textbox","id":"sh/5sfepcfe","slide":1,"text":"Loop","textPreview":"Loop","textChars":4,"textLines":1,"bbox":[1038,342,114,34]}
+{"kind":"textbox","id":"sh/ipovexwn","slide":1,"text":"有界重试","textPreview":"有界重试","textChars":4,"textLines":1,"bbox":[1036,391,118,24]}
+{"kind":"textbox","id":"sh/3qxwn2x8","slide":1,"text":"面向技术管理者 · 9 页独立阅读简版","textPreview":"面向技术管理者 · 9 页独立阅读简版","textChars":19,"textLines":1,"bbox":[72,606,650,24]}
+{"kind":"textbox","id":"sh/sfqdkrep","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1160,666,48,18]}
+{"kind":"notes","id":"nt/y90nupkv","slide":1,"text":""}
+{"kind":"slide","id":"sl/hwbqtkby","slide":2,"title":"为什么需要","textShapes":12}
+{"kind":"textbox","id":"sh/mxgjm5s7","slide":2,"text":"为什么需要","textPreview":"为什么需要","textChars":5,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/9072xkry","slide":2,"text":"两类重复工作，长期占用研发时间","textPreview":"两类重复工作，长期占用研发时间","textChars":15,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/ozy1ofad","slide":2,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/b29kza94","slide":2,"text":"大量时间花在收集、整理、编写、运行和返工上；任务越多，口径与质量越难稳定。","textPreview":"大量时间花在收集、整理、编写、运行和返工上；任务越多，口径与质量越难稳定。","textChars":37,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/a10jqpsj","slide":2,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/x4r21kru","slide":2,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/w3i1sfa9","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/r65knqtk","slide":2,"bbox":[76,198,520,300]}
+{"kind":"shape","id":"sh/q5wjelsz","slide":2,"bbox":[76,198,7,300]}
+{"kind":"shape","id":"sh/ove9o7yd","slide":2,"bbox":[98,216,136,30]}
+{"kind":"textbox","id":"sh/9wnqhczy","slide":2,"text":"重复工作 01","textPreview":"重复工作 01","textChars":7,"textLines":1,"bbox":[108,222,116,18]}
+{"kind":"textbox","id":"sh/mtwrmxg7","slide":2,"text":"代码贡献报告（Git）","textPreview":"代码贡献报告（Git）","textChars":11,"textLines":1,"bbox":[100,260,472,34]}
+{"kind":"textbox","id":"sh/nu58f2hs","slide":2,"text":"人工收集提交、核对作者、归纳贡献、汇总报告。周期长，口径容易不一致。","textPreview":"人工收集提交、核对作者、归纳贡献、汇总报告。周期长，口径容易不一致。","textChars":34,"textLines":1,"bbox":[100,308,472,174]}
+{"kind":"shape","id":"sh/wjy9sry9","slide":2,"bbox":[684,198,520,300]}
+{"kind":"shape","id":"sh/xk7qlczu","slide":2,"bbox":[684,198,7,300]}
+{"kind":"shape","id":"sh/ahwrqhgj","slide":2,"bbox":[706,216,136,30]}
+{"kind":"textbox","id":"sh/bip8jmho","slide":2,"text":"重复工作 02","textPreview":"重复工作 02","textChars":7,"textLines":1,"bbox":[716,222,116,18]}
+{"kind":"textbox","id":"sh/cnupgny5","slide":2,"text":"单元测试补齐","textPreview":"单元测试补齐","textChars":6,"textLines":1,"bbox":[708,260,472,34]}
+{"kind":"textbox","id":"sh/do3q9szq","slide":2,"text":"人工读代码、写测试、运行、定位错误、反复修正。重复度高，常被业务需求挤压。","textPreview":"人工读代码、写测试、运行、定位错误、反复修正。重复度高，常被业务需求挤压。","textChars":37,"textLines":1,"bbox":[708,308,472,174]}
+{"kind":"shape","id":"sh/t8byxkn2","slide":2,"bbox":[340,548,600,30]}
+{"kind":"textbox","id":"sh/s72xofmh","slide":2,"text":"共同问题：重复劳动多、交付标准不一、过程难追溯、失败后返工成本高。","textPreview":"共同问题：重复劳动多、交付标准不一、过程难追溯、失败后返工成本高。","textChars":33,"textLines":1,"bbox":[350,554,580,18]}
+{"kind":"notes","id":"nt/hwbqtkby","slide":2,"text":""}
+{"kind":"slide","id":"sl/ofy9wn61","slide":3,"title":"LOOP 是什么","textShapes":14}
+{"kind":"textbox","id":"sh/by1svqlc","slide":3,"text":"LOOP 是什么","textPreview":"LOOP 是什么","textChars":8,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/cza94vmx","slide":3,"text":"Loop 就是：做一次、检查、反馈、再做一次","textPreview":"Loop 就是：做一次、检查、反馈、再做一次","textChars":22,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/d0jax03i","slide":3,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/298ryl4v","slide":3,"text":"像员工交作业、主管检查、退回修改、验收通过；重试有上限，超限转人工。","textPreview":"像员工交作业、主管检查、退回修改、验收通过；重试有上限，超限转人工。","textChars":34,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/3ah8rqlg","slide":3,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/obq90bml","slide":3,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/pcjqtg36","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/m5cra54z","slide":3,"bbox":[70,250,210,92]}
+{"kind":"textbox","id":"sh/n6ls3alk","slide":3,"text":"提交任务","textPreview":"提交任务","textChars":4,"textLines":1,"bbox":[84,267,182,26]}
+{"kind":"textbox","id":"sh/n2l4fq98","slide":3,"text":"说清目标与范围","textPreview":"说清目标与范围","textChars":7,"textLines":1,"bbox":[82,300,186,24]}
+{"kind":"shape","id":"sh/m1c3mlsn","slide":3,"bbox":[294,294,60,4]}
+{"kind":"shape","id":"sh/943mhgre","slide":3,"bbox":[352,287,16,18]}
+{"kind":"shape","id":"sh/83ulovat","slide":3,"bbox":[366,250,210,92]}
+{"kind":"textbox","id":"sh/v6l4jq94","slide":3,"text":"AI 助手执行","textPreview":"AI 助手执行","textChars":7,"textLines":1,"bbox":[380,267,182,26]}
+{"kind":"textbox","id":"sh/a5c3ql8z","slide":3,"text":"调用工具交付结果","textPreview":"调用工具交付结果","textChars":8,"textLines":1,"bbox":[378,300,186,24]}
+{"kind":"shape","id":"sh/x8nml0ra","slide":3,"bbox":[590,294,60,4]}
+{"kind":"shape","id":"sh/w7ulsvqp","slide":3,"bbox":[648,287,16,18]}
+{"kind":"shape","id":"sh/ja54na9g","slide":3,"bbox":[662,250,210,92]}
+{"kind":"textbox","id":"sh/i9w3u58v","slide":3,"text":"检查结果","textPreview":"检查结果","textChars":4,"textLines":1,"bbox":[676,267,182,26]}
+{"kind":"textbox","id":"sh/e10f2twf","slide":3,"text":"按规则真实验收","textPreview":"按规则真实验收","textChars":7,"textLines":1,"bbox":[674,300,186,24]}
+{"kind":"shape","id":"sh/f29gbyx0","slide":3,"bbox":[886,294,60,4]}
+{"kind":"shape","id":"sh/03ix43e5","slide":3,"bbox":[944,287,16,18]}
+{"kind":"shape","id":"sh/14ryd8fq","slide":3,"bbox":[958,250,230,92]}
+{"kind":"textbox","id":"sh/6d0fytg3","slide":3,"text":"反馈或结束","textPreview":"反馈或结束","textChars":5,"textLines":1,"bbox":[972,267,202,26]}
+{"kind":"textbox","id":"sh/re9g7yxo","slide":3,"text":"通过即结束；不通过再改","textPreview":"通过即结束；不通过再改","textChars":11,"textLines":1,"bbox":[970,300,206,24]}
+{"kind":"shape","id":"sh/sfix03y9","slide":3,"bbox":[364,430,640,78]}
+{"kind":"textbox","id":"sh/tgry9ofu","slide":3,"text":"关键不是无限重试：每条链路都有次数上限；达到上限仍未通过，就停止并交给人工处理。","textPreview":"关键不是无限重试：每条链路都有次数上限；达到上限仍未通过，就停止并交给人工处理。","textChars":40,"textLines":1,"bbox":[394,452,580,40]}
+{"kind":"notes","id":"nt/ofy9wn61","slide":3,"text":""}
+{"kind":"slide","id":"sl/jyx0ra1s","slide":4,"title":"项目能力","textShapes":16}
+{"kind":"textbox","id":"sh/e9sj2tsv","slide":4,"text":"项目能力","textPreview":"项目能力","textChars":4,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/1cj2d8b6","slide":4,"text":"项目不是再加一个 AI，而是给 AI 配上流程、验收和刹车","textPreview":"项目不是再加一个 AI，而是给 AI 配上流程、验收和刹车","textChars":29,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/0ba143al","slide":4,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/rm1k7yt4","slide":4,"text":"程序负责规则和验收，AI 助手负责分析和生成；全过程有记录，可回看、可重跑。","textPreview":"程序负责规则和验收，AI 助手负责分析和生成；全过程有记录，可回看、可重跑。","textChars":38,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/ql8jytsj","slide":4,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/doj29oba","slide":4,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/sna103ap","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/3ihk3et8","slide":4,"bbox":[72,244,160,92]}
+{"kind":"textbox","id":"sh/ih8ju9sn","slide":4,"text":"接收任务","textPreview":"接收任务","textChars":4,"textLines":1,"bbox":[86,261,132,26]}
+{"kind":"textbox","id":"sh/kbm987y5","slide":4,"text":"明确要做什么","textPreview":"明确要做什么","textChars":6,"textLines":1,"bbox":[84,294,136,24]}
+{"kind":"shape","id":"sh/5cva1cfq","slide":4,"bbox":[242,288,58,4]}
+{"kind":"shape","id":"sh/i94r6xgz","slide":4,"bbox":[298,281,16,18]}
+{"kind":"shape","id":"sh/jadsz2xk","slide":4,"bbox":[318,244,160,92]}
+{"kind":"textbox","id":"sh/w72947yt","slide":4,"text":"限定范围","textPreview":"限定范围","textChars":4,"textLines":1,"bbox":[332,261,132,26]}
+{"kind":"textbox","id":"sh/x8vaxsfe","slide":4,"text":"控制对象与预算","textPreview":"控制对象与预算","textChars":7,"textLines":1,"bbox":[330,294,136,24]}
+{"kind":"shape","id":"sh/a5kr2xg3","slide":4,"bbox":[488,288,58,4]}
+{"kind":"shape","id":"sh/v6tsv2xo","slide":4,"bbox":[544,281,16,18]}
+{"kind":"shape","id":"sh/g36tgryd","slide":4,"bbox":[564,244,160,92]}
+{"kind":"textbox","id":"sh/h4fa9wfy","slide":4,"text":"调用 AI 助手","textPreview":"调用 AI 助手","textChars":8,"textLines":1,"bbox":[578,261,132,26]}
+{"kind":"textbox","id":"sh/p0batw72","slide":4,"text":"读、分析、生成","textPreview":"读、分析、生成","textChars":7,"textLines":1,"bbox":[576,294,136,24]}
+{"kind":"shape","id":"sh/oz29krqh","slide":4,"bbox":[734,288,58,4]}
+{"kind":"shape","id":"sh/3ytsrmpw","slide":4,"bbox":[790,281,16,18]}
+{"kind":"shape","id":"sh/2xkrih8b","slide":4,"bbox":[810,244,160,92]}
+{"kind":"textbox","id":"sh/1wbapc7q","slide":4,"text":"检查产物","textPreview":"检查产物","textChars":4,"textLines":1,"bbox":[824,261,132,26]}
+{"kind":"textbox","id":"sh/gv29g7q5","slide":4,"text":"验证文件和结果","textPreview":"验证文件和结果","textChars":7,"textLines":1,"bbox":[822,294,136,24]}
+{"kind":"shape","id":"sh/fu9sn2p0","slide":4,"bbox":[980,288,58,4]}
+{"kind":"shape","id":"sh/et0reh8f","slide":4,"bbox":[1036,281,16,18]}
+{"kind":"shape","id":"sh/tsrqlc7u","slide":4,"bbox":[1056,244,160,92]}
+{"kind":"textbox","id":"sh/sri9s7q9","slide":4,"text":"重试或退出","textPreview":"重试或退出","textChars":5,"textLines":1,"bbox":[1070,261,132,26]}
+{"kind":"textbox","id":"sh/ilwf69kv","slide":4,"text":"失败超限，转人工","textPreview":"失败超限，转人工","textChars":8,"textLines":1,"bbox":[1068,294,136,24]}
+{"kind":"shape","id":"sh/jm5gze1g","slide":4,"bbox":[318,432,650,96]}
+{"kind":"textbox","id":"sh/knex8j21","slide":4,"text":"管理者获得的是可控的工作流程：有输入、有记录、有验收、有止损。","textPreview":"管理者获得的是可控的工作流程：有输入、有记录、有验收、有止损。","textChars":31,"textLines":1,"bbox":[354,458,578,46]}
+{"kind":"notes","id":"nt/jyx0ra1s","slide":4,"text":""}
+{"kind":"slide","id":"sl/i107q5of","slide":5,"title":"GIT 场景","textShapes":21}
+{"kind":"textbox","id":"sh/qd0bahob","slide":5,"text":"GIT 场景","textPreview":"GIT 场景","textChars":6,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/dgbulwnm","slide":5,"text":"代码贡献报告：从提交记录到个人报告、团队总览","textPreview":"代码贡献报告：从提交记录到个人报告、团队总览","textChars":22,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/cf2tcr61","slide":5,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/z2tcnm5s","slide":5,"text":"先确定统计范围，再读取真实提交、逐人归纳贡献；检查无缺失后，形成统一口径的团队报告。","textPreview":"先确定统计范围，再读取真实提交、逐人归纳贡献；检查无缺失后，形成统一口径的团队报告。","textChars":42,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/yhkbe1o7","slide":5,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/l4bupwny","slide":5,"text":"代码贡献报告","textPreview":"代码贡献报告","textChars":6,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/032tgr6d","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/n6dcr65o","slide":5,"bbox":[72,194,240,104]}
+{"kind":"textbox","id":"sh/m5kbi1oj","slide":5,"text":"先定范围","textPreview":"先定范围","textChars":4,"textLines":1,"bbox":[92,211,200,42]}
+{"kind":"textbox","id":"sh/w32dkbuh","slide":5,"text":"仓库、人员和时间段","textPreview":"仓库、人员和时间段","textChars":9,"textLines":1,"bbox":[92,260,200,22]}
+{"kind":"shape","id":"sh/x4vedgvm","slide":5,"bbox":[336,194,240,104]}
+{"kind":"textbox","id":"sh/ahkvi1cb","slide":5,"text":"再读提交","textPreview":"再读提交","textChars":4,"textLines":1,"bbox":[356,211,200,42]}
+{"kind":"textbox","id":"sh/v2twb6dw","slide":5,"text":"收集真实改动与作者","textPreview":"收集真实改动与作者","textChars":9,"textLines":1,"bbox":[356,260,200,22]}
+{"kind":"shape","id":"sh/k7mxovud","slide":5,"bbox":[600,194,240,104]}
+{"kind":"textbox","id":"sh/58vehgvy","slide":5,"text":"逐人出报告","textPreview":"逐人出报告","textChars":5,"textLines":1,"bbox":[620,211,200,42]}
+{"kind":"textbox","id":"sh/i54fmlc7","slide":5,"text":"说明每个人做了什么","textPreview":"说明每个人做了什么","textChars":9,"textLines":1,"bbox":[620,260,200,22]}
+{"kind":"shape","id":"sh/j6dwfqds","slide":5,"bbox":[864,194,240,104]}
+{"kind":"textbox","id":"sh/sb6xsvu9","slide":5,"text":"检查后汇总","textPreview":"检查后汇总","textChars":5,"textLines":1,"bbox":[884,211,200,42]}
+{"kind":"textbox","id":"sh/tcfel0vu","slide":5,"text":"缺谁补谁，形成团队总览","textPreview":"缺谁补谁，形成团队总览","textChars":11,"textLines":1,"bbox":[884,260,200,22]}
+{"kind":"shape","id":"sh/hgrmpwj2","slide":5,"bbox":[84,390,210,92]}
+{"kind":"textbox","id":"sh/gfi5grih","slide":5,"text":"输入任务范围","textPreview":"输入任务范围","textChars":6,"textLines":1,"bbox":[98,407,182,26]}
+{"kind":"textbox","id":"sh/fe94nm1w","slide":5,"text":"指定仓库、时间和统计人员","textPreview":"指定仓库、时间和统计人员","textChars":12,"textLines":1,"bbox":[96,440,186,24]}
+{"kind":"shape","id":"sh/ud0ne10b","slide":5,"bbox":[304,434,55,4]}
+{"kind":"shape","id":"sh/pkr6tgjy","slide":5,"bbox":[357,427,16,18]}
+{"kind":"shape","id":"sh/4ji5kbid","slide":5,"bbox":[380,390,210,92]}
+{"kind":"textbox","id":"sh/3i94r61s","slide":5,"text":"读取提交记录","textPreview":"读取提交记录","textChars":6,"textLines":1,"bbox":[394,407,182,26]}
+{"kind":"textbox","id":"sh/2h0ni107","slide":5,"text":"以代码事实为依据，不凭主观填写","textPreview":"以代码事实为依据，不凭主观填写","textChars":15,"textLines":1,"bbox":[392,440,186,24]}
+{"kind":"shape","id":"sh/5o7mhcju","slide":5,"bbox":[600,434,55,4]}
+{"kind":"shape","id":"sh/kny587i9","slide":5,"bbox":[653,427,16,18]}
+{"kind":"shape","id":"sh/atcjidg7","slide":5,"bbox":[676,390,210,92]}
+{"kind":"textbox","id":"sh/vu5kbihc","slide":5,"text":"生成个人报告","textPreview":"生成个人报告","textChars":6,"textLines":1,"bbox":[690,407,182,26]}
+{"kind":"textbox","id":"sh/wve1knyx","slide":5,"text":"逐人说明改动、贡献和影响","textPreview":"逐人说明改动、贡献和影响","textChars":12,"textLines":1,"bbox":[688,440,186,24]}
+{"kind":"shape","id":"sh/xwn2dszi","slide":5,"bbox":[896,434,55,4]}
+{"kind":"shape","id":"sh/ihw3mxg3","slide":5,"bbox":[949,427,16,18]}
+{"kind":"shape","id":"sh/ji5kf2ho","slide":5,"bbox":[972,390,210,92]}
+{"kind":"textbox","id":"sh/kjelony9","slide":5,"text":"检查并汇总","textPreview":"检查并汇总","textChars":5,"textLines":1,"bbox":[986,407,182,26]}
+{"kind":"textbox","id":"sh/5kn2hszu","slide":5,"text":"发现缺失只补对应人员，最后生成团队报告","textPreview":"发现缺失只补对应人员，最后生成团队报告","textChars":19,"textLines":1,"bbox":[984,440,186,24]}
+{"kind":"notes","id":"nt/i107q5of","slide":5,"text":""}
+{"kind":"slide","id":"sl/x8f69ofe","slide":6,"title":"单元测试场景","textShapes":22}
+{"kind":"textbox","id":"sh/lkrqp4ra","slide":6,"text":"单元测试场景","textPreview":"单元测试场景","textChars":6,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/yhg7epsj","slide":6,"text":"自动补齐单元测试：从读代码到运行验收，失败自动修正","textPreview":"自动补齐单元测试：从读代码到运行验收，失败自动修正","textChars":25,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/zi98nu94","slide":6,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/87ipkzal","slide":6,"text":"每次只处理一个明确代码范围；测试写完立即运行，失败原因自动带入下一轮，最多 5 轮后转人工。","textPreview":"每次只处理一个明确代码范围；测试写完立即运行，失败原因自动带入下一轮，最多 5 轮后转人工。","textChars":46,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/98rqt4r6","slide":6,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/ml07i9sv","slide":6,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/7m98ru9g","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/oryp8fah","slide":6,"bbox":[72,190,240,104]}
+{"kind":"textbox","id":"sh/pc76hkr2","slide":6,"text":"选择代码单元","textPreview":"选择代码单元","textChars":6,"textLines":1,"bbox":[92,207,200,42]}
+{"kind":"textbox","id":"sh/h4bupgn6","slide":6,"text":"每批处理一个明确范围","textPreview":"每批处理一个明确范围","textChars":10,"textLines":1,"bbox":[92,256,200,22]}
+{"kind":"shape","id":"sh/w32twb6l","slide":6,"bbox":[336,190,240,104]}
+{"kind":"textbox","id":"sh/v2tcn650","slide":6,"text":"读取后写测试","textPreview":"读取后写测试","textChars":6,"textLines":1,"bbox":[356,207,200,42]}
+{"kind":"textbox","id":"sh/u1kbu1ov","slide":6,"text":"根据真实代码生成测试","textPreview":"根据真实代码生成测试","textChars":10,"textLines":1,"bbox":[356,256,200,22]}
+{"kind":"shape","id":"sh/5svutgni","slide":6,"bbox":[600,190,240,104]}
+{"kind":"textbox","id":"sh/47mt0b6x","slide":6,"text":"运行并修正","textPreview":"运行并修正","textChars":5,"textLines":1,"bbox":[620,207,200,42]}
+{"kind":"textbox","id":"sh/j6dcr65c","slide":6,"text":"失败原因带入下一轮","textPreview":"失败原因带入下一轮","textChars":9,"textLines":1,"bbox":[620,256,200,22]}
+{"kind":"shape","id":"sh/i54bylor","slide":6,"bbox":[864,190,240,104]}
+{"kind":"textbox","id":"sh/twfux0ne","slide":6,"text":"最多 5 轮","textPreview":"最多 5 轮","textChars":6,"textLines":1,"bbox":[884,207,200,42]}
+{"kind":"textbox","id":"sh/svmt4v6t","slide":6,"text":"仍失败则停止并转人工","textPreview":"仍失败则停止并转人工","textChars":10,"textLines":1,"bbox":[884,256,200,22]}
+{"kind":"shape","id":"sh/cbe5g3ih","slide":6,"bbox":[116,358,300,186]}
+{"kind":"shape","id":"sh/dcnm98zm","slide":6,"bbox":[116,358,7,186]}
+{"kind":"shape","id":"sh/qpwnet0b","slide":6,"bbox":[138,376,136,30]}
+{"kind":"textbox","id":"sh/bq547yhw","slide":6,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[148,382,116,18]}
+{"kind":"textbox","id":"sh/0fy5k3id","slide":6,"text":"理解要测什么","textPreview":"理解要测什么","textChars":6,"textLines":1,"bbox":[140,420,252,34]}
+{"kind":"textbox","id":"sh/lg76d8zy","slide":6,"text":"先读真实代码，识别关键逻辑和边界。","textPreview":"先读真实代码，识别关键逻辑和边界。","textChars":17,"textLines":1,"bbox":[140,468,252,60]}
+{"kind":"shape","id":"sh/ydgnit07","slide":6,"bbox":[490,358,300,186]}
+{"kind":"shape","id":"sh/zep4byhs","slide":6,"bbox":[490,358,7,186]}
+{"kind":"shape","id":"sh/gju58ji9","slide":6,"bbox":[512,376,136,30]}
+{"kind":"textbox","id":"sh/1k3mhozu","slide":6,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[522,382,116,18]}
+{"kind":"textbox","id":"sh/jet8nm1c","slide":6,"text":"生成并运行测试","textPreview":"生成并运行测试","textChars":7,"textLines":1,"bbox":[514,420,252,34]}
+{"kind":"textbox","id":"sh/idk7ehkr","slide":6,"text":"写好后立即编译、执行，用真实结果验收。","textPreview":"写好后立即编译、执行，用真实结果验收。","textChars":19,"textLines":1,"bbox":[514,468,252,60]}
+{"kind":"shape","id":"sh/50bqpcj2","slide":6,"bbox":[864,358,300,186]}
+{"kind":"shape","id":"sh/4f2pgr2h","slide":6,"bbox":[864,358,7,186]}
+{"kind":"shape","id":"sh/va98j210","slide":6,"bbox":[886,376,136,30]}
+{"kind":"textbox","id":"sh/u907axkf","slide":6,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[896,382,116,18]}
+{"kind":"textbox","id":"sh/hcrqlcj6","slide":6,"text":"失败自动修正","textPreview":"失败自动修正","textChars":6,"textLines":1,"bbox":[888,420,252,34]}
+{"kind":"textbox","id":"sh/wbipc72l","slide":6,"text":"把错误交给下一轮；最多 5 轮，仍失败转人工。","textPreview":"把错误交给下一轮；最多 5 轮，仍失败转人工。","textChars":23,"textLines":1,"bbox":[888,468,252,60]}
+{"kind":"notes","id":"nt/x8f69ofe","slide":6,"text":""}
+{"kind":"slide","id":"sl/gnmp4jqx","slide":7,"title":"为什么采用 LOOP","textShapes":12}
+{"kind":"textbox","id":"sh/batcbq94","slide":7,"text":"为什么采用 LOOP","textPreview":"为什么采用 LOOP","textChars":10,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/cb2tkvap","slide":7,"text":"传统 AI 像“反复炼丹”，Loop 把结果变成可验收的交付","textPreview":"传统 AI 像“反复炼丹”，Loop 把结果变成可验收的交付","textChars":30,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/dcbud0ra","slide":7,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/ydkbm5sv","slide":7,"text":"传统 Prompt + Skill 依赖人工反复试；Loop 把完整性检查、质量验收和失败重试交给流程。","textPreview":"传统 Prompt + Skill 依赖人工反复试；Loop 把完整性检查、质量验收和失败重试交给流程。","textChars":52,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/zedcfa9g","slide":7,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/kzmdova1","slide":7,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/l0vuh0rm","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/eh0ba1sr","slide":7,"bbox":[76,198,520,300]}
+{"kind":"shape","id":"sh/fi9c369c","slide":7,"bbox":[76,198,7,300]}
+{"kind":"shape","id":"sh/baxkjqlk","slide":7,"bbox":[98,216,136,30]}
+{"kind":"textbox","id":"sh/a9ojq5kz","slide":7,"text":"传统 AI 模式","textPreview":"传统 AI 模式","textChars":8,"textLines":1,"bbox":[108,222,116,18]}
+{"kind":"textbox","id":"sh/xcz2l03q","slide":7,"text":"像炼丹：靠人反复试","textPreview":"像炼丹：靠人反复试","textChars":9,"textLines":1,"bbox":[100,260,472,34]}
+{"kind":"textbox","id":"sh/cbq1sv25","slide":7,"text":"人输入指令并等待结果；质量不满意就改提示词再来一次。AI 可能生成一半就停止，半成品和漏项需要人工发现、补跑和拼接。","textPreview":"人输入指令并等待结果；质量不满意就改提示词再来一次。AI 可能生成一半就停止，半成品和漏项需要人工发现、补跑和拼接。","textChars":58,"textLines":1,"bbox":[100,308,472,174]}
+{"kind":"shape","id":"sh/n6x0fqlo","slide":7,"bbox":[684,198,520,300]}
+{"kind":"shape","id":"sh/25ojml43","slide":7,"bbox":[684,198,7,300]}
+{"kind":"shape","id":"sh/p8fih03e","slide":7,"bbox":[706,216,136,30]}
+{"kind":"textbox","id":"sh/o761ov2t","slide":7,"text":"Loop 模式","textPreview":"Loop 模式","textChars":7,"textLines":1,"bbox":[716,222,116,18]}
+{"kind":"textbox","id":"sh/f2d0b6lc","slide":7,"text":"像流水线：检查后再交付","textPreview":"像流水线：检查后再交付","textChars":11,"textLines":1,"bbox":[708,260,472,34]}
+{"kind":"textbox","id":"sh/eh4jil4r","slide":7,"text":"每轮自动检查文件是否齐全、结果是否通过；不合格就带着明确问题继续修正。达到次数上限才转人工，过程、失败原因和最终状态都有记录。","textPreview":"每轮自动检查文件是否齐全、结果是否通过；不合格就带着明确问题继续修正。达到次数上限才转人工，过程、失败原因和最终状态都有记录。","textChars":63,"textLines":1,"bbox":[708,308,472,174]}
+{"kind":"shape","id":"sh/id4ju1oz","slide":7,"bbox":[340,548,600,30]}
+{"kind":"textbox","id":"sh/jedkn654","slide":7,"text":"改善重点：少靠运气和手工盯守，降低半成品与漏项，把人工从“反复试”转成“最后确认”。","textPreview":"改善重点：少靠运气和手工盯守，降低半成品与漏项，把人工从“反复试”转成“最后确认”。","textChars":42,"textLines":1,"bbox":[350,554,580,18]}
+{"kind":"notes","id":"nt/gnmp4jqx","slide":7,"text":""}
+{"kind":"slide","id":"sl/fu1gfa1s","slide":8,"title":"效率测算","textShapes":21}
+{"kind":"textbox","id":"sh/elkf2pg7","slide":8,"text":"效率测算","textPreview":"效率测算","textChars":4,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/18byd4zy","slide":8,"text":"场景测算·人工工时预计减少 60%–80%","textPreview":"场景测算·人工工时预计减少 60%–80%","textChars":21,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/g72x4zyd","slide":8,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/ri9g7uhw","slide":8,"text":"这是人工投入测算，不是任务总历时，也不是生产实测。实际结果受代码复杂度、历史测试基础和验收标准影响。","textPreview":"这是人工投入测算，不是任务总历时，也不是生产实测。实际结果受代码复杂度、历史测试基础和验收标准影响。","textChars":50,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/6h0fypgb","slide":8,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/tkby9kzm","slide":8,"text":"Loop 领导版 · 效率测算","textPreview":"Loop 领导版 · 效率测算","textChars":15,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/sjix0zy1","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/je9g3ahk","slide":8,"bbox":[72,194,240,104]}
+{"kind":"textbox","id":"sh/id0fu50z","slide":8,"text":"4 小时","textPreview":"4 小时","textChars":4,"textLines":1,"bbox":[92,211,200,42]}
+{"kind":"textbox","id":"sh/o7ydoret","slide":8,"text":"Git 人工整理","textPreview":"Git 人工整理","textChars":8,"textLines":1,"bbox":[92,260,200,22]}
+{"kind":"shape","id":"sh/98rehwve","slide":8,"bbox":[336,194,240,104]}
+{"kind":"textbox","id":"sh/m5gvmhwn","slide":8,"text":"0.8–1.5 小时","textPreview":"0.8–1.5 小时","textChars":10,"textLines":1,"bbox":[356,211,200,42]}
+{"kind":"textbox","id":"sh/n6pwfmd8","slide":8,"text":"Git 人工复核","textPreview":"Git 人工复核","textChars":8,"textLines":1,"bbox":[356,260,200,22]}
+{"kind":"shape","id":"sh/0jydkreh","slide":8,"bbox":[600,194,240,104]}
+{"kind":"textbox","id":"sh/1k7edwv2","slide":8,"text":"1.5 小时","textPreview":"1.5 小时","textChars":6,"textLines":1,"bbox":[620,211,200,42]}
+{"kind":"textbox","id":"sh/ehgvihwr","slide":8,"text":"单测人工 / 单元","textPreview":"单测人工 / 单元","textChars":9,"textLines":1,"bbox":[620,260,200,22]}
+{"kind":"shape","id":"sh/zipwbmdc","slide":8,"bbox":[864,194,240,104]}
+{"kind":"textbox","id":"sh/kfixwbe1","slide":8,"text":"0.3–0.6","textPreview":"0.3–0.6","textChars":7,"textLines":1,"bbox":[884,211,200,42]}
+{"kind":"textbox","id":"sh/lgbepgvm","slide":8,"text":"小时 / 单元","textPreview":"小时 / 单元","textChars":7,"textLines":1,"bbox":[884,260,200,22]}
+{"kind":"shape","id":"sh/tw7e9gnq","slide":8,"bbox":[84,390,210,92]}
+{"kind":"textbox","id":"sh/svydgb65","slide":8,"text":"Git 传统方式","textPreview":"Git 传统方式","textChars":8,"textLines":1,"bbox":[98,407,182,26]}
+{"kind":"textbox","id":"sh/7u5w765k","slide":8,"text":"约 4 小时","textPreview":"约 4 小时","textChars":6,"textLines":1,"bbox":[96,440,186,24]}
+{"kind":"shape","id":"sh/6twve1oz","slide":8,"bbox":[304,434,55,4]}
+{"kind":"shape","id":"sh/5sne5wne","slide":8,"bbox":[357,427,16,18]}
+{"kind":"shape","id":"sh/kredcr6t","slide":8,"bbox":[380,390,210,92]}
+{"kind":"textbox","id":"sh/jq5w365o","slide":8,"text":"Git Loop 方式","textPreview":"Git Loop 方式","textChars":11,"textLines":1,"bbox":[394,407,182,26]}
+{"kind":"textbox","id":"sh/i5wva1o3","slide":8,"text":"人工约 0.8–1.5 小时","textPreview":"人工约 0.8–1.5 小时","textChars":14,"textLines":1,"bbox":[392,440,186,24]}
+{"kind":"shape","id":"sh/x4ne1wni","slide":8,"bbox":[600,434,55,4]}
+{"kind":"shape","id":"sh/w3ed8r6x","slide":8,"bbox":[653,427,16,18]}
+{"kind":"shape","id":"sh/m9sb2x4v","slide":8,"bbox":[676,390,210,92]}
+{"kind":"textbox","id":"sh/na1sb2lg","slide":8,"text":"单测传统方式","textPreview":"单测传统方式","textChars":6,"textLines":1,"bbox":[690,407,182,26]}
+{"kind":"textbox","id":"sh/8bat47ml","slide":8,"text":"约 1.5 小时/单元","textPreview":"约 1.5 小时/单元","textChars":11,"textLines":1,"bbox":[688,440,186,24]}
+{"kind":"shape","id":"sh/9w3uds36","slide":8,"bbox":[896,434,55,4]}
+{"kind":"shape","id":"sh/y5sbed4j","slide":8,"bbox":[949,427,16,18]}
+{"kind":"shape","id":"sh/z61s7il4","slide":8,"bbox":[972,390,210,92]}
+{"kind":"textbox","id":"sh/07atgnmp","slide":8,"text":"单测 Loop 方式","textPreview":"单测 Loop 方式","textChars":10,"textLines":1,"bbox":[986,407,182,26]}
+{"kind":"textbox","id":"sh/l8ja9s3a","slide":8,"text":"人工约 0.3–0.6 小时/单元","textPreview":"人工约 0.3–0.6 小时/单元","textChars":17,"textLines":1,"bbox":[984,440,186,24]}
+{"kind":"notes","id":"nt/fu1gfa1s","slide":8,"text":""}
+{"kind":"slide","id":"sl/udsvah03","slide":9,"title":"下一步","textShapes":12}
+{"kind":"textbox","id":"sh/eponml43","slide":9,"text":"下一步","textPreview":"下一步","textChars":3,"textLines":1,"bbox":[64,28,300,20]}
+{"kind":"textbox","id":"sh/1cfmhgne","slide":9,"text":"先小范围试点，用真实数据验证价值","textPreview":"先小范围试点，用真实数据验证价值","textChars":16,"textLines":1,"bbox":[64,54,1110,50]}
+{"kind":"shape","id":"sh/0b65obm9","slide":9,"bbox":[64,116,1152,1]}
+{"kind":"textbox","id":"sh/nex4jq5k","slide":9,"text":"从 1 个仓库和 1 个小包开始，运行 2–4 周，再决定是否扩大范围。","textPreview":"从 1 个仓库和 1 个小包开始，运行 2–4 周，再决定是否扩大范围。","textChars":36,"textLines":1,"bbox":[64,126,1100,28]}
+{"kind":"shape","id":"sh/mdonql4z","slide":9,"bbox":[64,678,1152,1]}
+{"kind":"textbox","id":"sh/9gzml0nq","slide":9,"text":"Loop 项目领导简版","textPreview":"Loop 项目领导简版","textChars":11,"textLines":1,"bbox":[64,686,420,18]}
+{"kind":"textbox","id":"sh/ofq5svm5","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1164,682,52,22]}
+{"kind":"shape","id":"sh/bih4na5w","slide":9,"bbox":[76,198,520,300]}
+{"kind":"shape","id":"sh/ah8nu54b","slide":9,"bbox":[76,198,7,300]}
+{"kind":"shape","id":"sh/oza1gfyh","slide":9,"bbox":[98,216,136,30]}
+{"kind":"textbox","id":"sh/p0ji9kf2","slide":9,"text":"为什么值得试","textPreview":"为什么值得试","textChars":6,"textLines":1,"bbox":[108,222,116,18]}
+{"kind":"textbox","id":"sh/2xsjepgb","slide":9,"text":"管理价值","textPreview":"管理价值","textChars":4,"textLines":1,"bbox":[100,260,472,34]}
+{"kind":"textbox","id":"sh/3y107axw","slide":9,"text":"减少重复投入；统一交付口径；过程可追溯；失败有上限；关键结果仍由人工确认。","textPreview":"减少重复投入；统一交付口径；过程可追溯；失败有上限；关键结果仍由人工确认。","textChars":37,"textLines":1,"bbox":[100,308,472,174]}
+{"kind":"shape","id":"sh/cnu1kzyd","slide":9,"bbox":[684,198,520,300]}
+{"kind":"shape","id":"sh/do3id4fy","slide":9,"bbox":[684,198,7,300]}
+{"kind":"shape","id":"sh/qlcjipgn","slide":9,"bbox":[706,216,136,30]}
+{"kind":"textbox","id":"sh/bml0buxs","slide":9,"text":"如何验证","textPreview":"如何验证","textChars":4,"textLines":1,"bbox":[716,222,116,18]}
+{"kind":"textbox","id":"sh/0ru1ozyp","slide":9,"text":"试点关注四个指标","textPreview":"试点关注四个指标","textChars":8,"textLines":1,"bbox":[708,260,472,34]}
+{"kind":"textbox","id":"sh/lsn2h4fa","slide":9,"text":"人工工时、交付成功率、人工接管率、返工率。用真实数据比较试点前后变化。","textPreview":"人工工时、交付成功率、人工接管率、返工率。用真实数据比较试点前后变化。","textChars":35,"textLines":1,"bbox":[708,308,472,174]}
+{"kind":"shape","id":"sh/98ji147e","slide":9,"bbox":[340,548,600,30]}
+{"kind":"textbox","id":"sh/87a18zqt","slide":9,"text":"建议决策：批准小范围试点，以结果决定扩展，不以概念决定投入。","textPreview":"建议决策：批准小范围试点，以结果决定扩展，不以概念决定投入。","textChars":30,"textLines":1,"bbox":[350,554,580,18]}
+{"kind":"notes","id":"nt/udsvah03","slide":9,"text":""}

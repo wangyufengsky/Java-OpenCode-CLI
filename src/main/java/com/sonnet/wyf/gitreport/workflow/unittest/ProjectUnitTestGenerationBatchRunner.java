@@ -27,6 +27,8 @@ import javax.xml.parsers.DocumentBuilderFactory;
 
 public class ProjectUnitTestGenerationBatchRunner {
     public static final String RESULTS_JSON = "agentbridge-results.json";
+    private static final int MCP_READ_RETRY_ATTEMPTS = 3;
+    private static final Duration MCP_READ_RETRY_DELAY = Duration.ofSeconds(1);
     private static final Pattern IDEA_TEST_SUCCESS = Pattern.compile("(?im)^=== Summary:\\s*[1-9]\\d* passed,\\s*0 failed");
     private static final Pattern IDEA_TEST_ZERO_EXIT = Pattern.compile(
             "(?im)(?:Process finished with exit code\\s+0|进程已结束，退出代码为\\s*0)(?!\\d)"
@@ -146,12 +148,18 @@ public class ProjectUnitTestGenerationBatchRunner {
         int threshold = threshold(batch, properties);
 
         List<String> failures = new ArrayList<>();
-        if (!hasRecognizedTest(client.callTool(mcpUrl, "list_tests", objectMapper.createObjectNode()
-                .put("file_pattern", Path.of(targetTestFile).getFileName().toString())))) {
+        AgentBridgeClient.ToolResponse tests = callReadOnlyToolWithRetry(mcpUrl, "list_tests", objectMapper.createObjectNode()
+                .put("file_pattern", Path.of(targetTestFile).getFileName().toString()));
+        if (isToolFailure(tests)) {
+            failures.add(toolFailureSummary("list_tests", tests));
+        } else if (!hasRecognizedTest(tests)) {
             failures.add("测试类不存在或 IDE 未识别: " + targetTestFile);
         }
-        if (!hasNoCompilationErrors(client.callTool(mcpUrl, "get_compilation_errors", objectMapper.createObjectNode()
-                .put("path", targetTestFile)))) {
+        AgentBridgeClient.ToolResponse compilation = callReadOnlyToolWithRetry(mcpUrl, "get_compilation_errors", objectMapper.createObjectNode()
+                .put("path", targetTestFile));
+        if (isToolFailure(compilation)) {
+            failures.add(toolFailureSummary("get_compilation_errors", compilation));
+        } else if (!hasNoCompilationErrors(compilation)) {
             failures.add("目标测试类存在编译错误: " + targetTestFile);
         }
         Coverage coverage = new Coverage(-1);
@@ -177,11 +185,16 @@ public class ProjectUnitTestGenerationBatchRunner {
                         "run_tests",
                         runTestsArguments(properties, testClass, module)
                 );
-                AgentBridgeClient.ToolResponse output = run.rawResult().path("isError").asBoolean(false)
-                        ? run
-                        : client.callTool(mcpUrl, "read_run_output", readRunOutputArguments());
-                if (!ideaTestSucceeded(run, output)) {
-                    failures.add("目标测试类运行失败: " + testClass + " " + output.text());
+                if (isToolFailure(run)) {
+                    failures.add(toolFailureSummary("run_tests", run));
+                } else {
+                    AgentBridgeClient.ToolResponse output = callReadOnlyToolWithRetry(
+                            mcpUrl, "read_run_output", readRunOutputArguments());
+                    if (isToolFailure(output)) {
+                        failures.add(toolFailureSummary("read_run_output", output));
+                    } else if (!ideaTestSucceeded(run, output)) {
+                        failures.add("目标测试类运行失败: " + testClass + " " + output.text());
+                    }
                 }
             }
             if (failures.isEmpty() && requireCoverage) {
@@ -198,6 +211,39 @@ public class ProjectUnitTestGenerationBatchRunner {
             return new Acceptance(true, "accepted: " + testClass + suffix);
         }
         return new Acceptance(false, String.join("; ", failures));
+    }
+
+    private AgentBridgeClient.ToolResponse callReadOnlyToolWithRetry(
+            URI mcpUrl,
+            String name,
+            ObjectNode arguments
+    ) throws Exception {
+        AgentBridgeClient.ToolResponse response = null;
+        for (int attempt = 1; attempt <= MCP_READ_RETRY_ATTEMPTS; attempt++) {
+            response = client.callTool(mcpUrl, name, arguments);
+            if (!isTransientMcpFailure(response) || attempt == MCP_READ_RETRY_ATTEMPTS) {
+                return response;
+            }
+            Thread.sleep(MCP_READ_RETRY_DELAY.toMillis());
+        }
+        return response;
+    }
+
+    private boolean isToolFailure(AgentBridgeClient.ToolResponse response) {
+        return response == null || response.rawResult().path("isError").asBoolean(false);
+    }
+
+    private boolean isTransientMcpFailure(AgentBridgeClient.ToolResponse response) {
+        if (!isToolFailure(response)) {
+            return false;
+        }
+        String text = response == null ? "" : response.text().toLowerCase(Locale.ROOT);
+        return text.contains("interrupted") || text.contains("cancelled") || text.contains("canceled");
+    }
+
+    private String toolFailureSummary(String tool, AgentBridgeClient.ToolResponse response) {
+        String text = response == null ? "没有返回结果" : response.text();
+        return "IDE/MCP 调用中断或失败: " + tool + " " + text;
     }
 
     private boolean hasRecognizedTest(AgentBridgeClient.ToolResponse response) {
