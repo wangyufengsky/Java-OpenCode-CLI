@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
@@ -71,34 +73,47 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
     public void run(WorkflowRunRequest request) throws Exception {
         SmartEsbCodeReaderProperties properties = configLoader.load(configDir(request), id(), SmartEsbCodeReaderProperties.class);
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
-        if ("full".equals(mode)) {
-            Path out = preparation.prepare(properties, true);
-            runTasks(properties, request, out, loadTasks(out, "module"), false);
-            ensureOutputsReady(properties, request, out, "module");
-            runTasks(properties, request, out, loadTasks(out, "transaction"), false);
-            ensureOutputsReady(properties, request, out, "transaction");
-            runIndex(properties, request, out);
-            return;
-        }
-        if (!"rerun".equals(mode)) {
-            throw new IllegalArgumentException("smartesb-code-reader mode must be one of: full, rerun");
-        }
-        Path out = outputPath(properties);
-        if (!Files.exists(out.resolve("index_inputs.json"))) {
-            out = preparation.prepare(properties, true);
-        }
-        if ("module".equals(request.rerunType())) {
-            runTasks(properties, request, out, tasksByName(loadTasks(out, "module"), "module", request.rerunIds()), true);
-            ensureOutputsReady(properties, request, out, "module");
-            runIndex(properties, request, out);
-        } else if ("transaction".equals(request.rerunType())) {
-            runTasks(properties, request, out, tasksByName(loadTasks(out, "transaction"), "transaction", request.rerunIds()), true);
-            ensureOutputsReady(properties, request, out, "transaction");
-            runIndex(properties, request, out);
-        } else if ("index".equals(request.rerunType())) {
-            runIndex(properties, request, out);
-        } else {
-            throw new IllegalArgumentException("smartesb-code-reader rerun.type must be one of: module, transaction, index");
+        Path stableOut = outputPath(properties);
+        var workspace = WorkflowArtifactWorkspace.start(
+                objectMapper, id(), request, stableOut, "rerun".equals(mode)
+        );
+        Path out = workspace.bundleRoot();
+        Path configuredLocalOut = properties.getLocalOut();
+        properties.setLocalOut(out);
+        try (var ignored = WorkflowArtifactContext.open(workspace)) {
+            if ("full".equals(mode)) {
+                preparation.prepare(properties, true);
+                runTasks(properties, request, out, loadTasks(out, "module"), false);
+                ensureOutputsReady(properties, request, out, "module");
+                runTasks(properties, request, out, loadTasks(out, "transaction"), false);
+                ensureOutputsReady(properties, request, out, "transaction");
+                runIndex(properties, request, out);
+            } else if (!"rerun".equals(mode)) {
+                throw new IllegalArgumentException("smartesb-code-reader mode must be one of: full, rerun");
+            } else {
+                if (!Files.exists(out.resolve("index_inputs.json"))) {
+                    preparation.prepare(properties, true);
+                }
+                if ("module".equals(request.rerunType())) {
+                    runTasks(properties, request, out, tasksByName(loadTasks(out, "module"), "module", request.rerunIds()), true);
+                    ensureOutputsReady(properties, request, out, "module");
+                    runIndex(properties, request, out);
+                } else if ("transaction".equals(request.rerunType())) {
+                    runTasks(properties, request, out, tasksByName(loadTasks(out, "transaction"), "transaction", request.rerunIds()), true);
+                    ensureOutputsReady(properties, request, out, "transaction");
+                    runIndex(properties, request, out);
+                } else if ("index".equals(request.rerunType())) {
+                    runIndex(properties, request, out);
+                } else {
+                    throw new IllegalArgumentException("smartesb-code-reader rerun.type must be one of: module, transaction, index");
+                }
+            }
+            workspace.publish("index.md");
+        } catch (Exception exception) {
+            workspace.markFailed(exception.getMessage());
+            throw exception;
+        } finally {
+            properties.setLocalOut(configuredLocalOut);
         }
     }
 
@@ -143,7 +158,12 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
         return () -> {
             String type = task.get("review_type").toString();
             String name = taskName(task);
-            Path runDir = out.resolve("runs").resolve(type + "-" + SmartEsbCodeReaderPreparation.slugify(name));
+            Path runDir = WorkflowArtifactContext
+                    .nextTaskAttempt(
+                            type + ":" + name,
+                            out.resolve("runs").resolve(type + "-" + SmartEsbCodeReaderPreparation.slugify(name))
+                    )
+                    .root();
             try {
                 Files.createDirectories(runDir);
                 Path promptFile = runDir.resolve("worker-prompt.md");
@@ -180,7 +200,9 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
     ) throws Exception {
         completionGate.ensureComplete(
                 "SmartESB code-reader " + type,
-                out.resolve("runs").resolve("incomplete-" + type + "s.json"),
+                WorkflowArtifactContext.diagnosticPath(
+                        out.resolve("runs").resolve("incomplete-" + type + "s.json")
+                ),
                 () -> incompleteOutputs(out, type),
                 (incomplete, rerunRound, maxRerunRounds) -> runTasks(properties, request, out, tasksByIncomplete(out, type, incomplete), true)
         );
@@ -206,7 +228,9 @@ public class SmartEsbCodeReaderWorkflowChain implements WorkflowChain {
     }
 
     private void runIndex(SmartEsbCodeReaderProperties properties, WorkflowRunRequest request, Path out) throws Exception {
-        Path runDir = out.resolve("runs").resolve("index");
+        Path runDir = WorkflowArtifactContext
+                .nextSynthesisAttempt("smartesb-code-reader-index", out.resolve("runs").resolve("index"))
+                .root();
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("synthesis-prompt.md");
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));

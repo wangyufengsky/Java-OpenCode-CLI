@@ -1,5 +1,7 @@
 package com.sonnet.wyf.gitreport.runner;
 
+import com.sonnet.wyf.gitreport.artifact.WorkflowExecutionIds;
+
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
@@ -10,10 +12,29 @@ public record WorkflowRunRequest(
         String rerunId,
         LocalDate runDate,
         AgentBridgeSettings agentBridge,
-        String configDir
+        String configDir,
+        String executionId,
+        Long consoleRunId
 ) {
+    public WorkflowRunRequest {
+        executionId = executionId == null || executionId.isBlank()
+                ? WorkflowExecutionIds.newExecutionId()
+                : executionId.trim();
+    }
+
     public WorkflowRunRequest(String mode, String rerunType, String rerunId, LocalDate runDate, AgentBridgeSettings agentBridge) {
-        this(mode, rerunType, rerunId, runDate, agentBridge, "");
+        this(mode, rerunType, rerunId, runDate, agentBridge, "", "", null);
+    }
+
+    public WorkflowRunRequest(
+            String mode,
+            String rerunType,
+            String rerunId,
+            LocalDate runDate,
+            AgentBridgeSettings agentBridge,
+            String configDir
+    ) {
+        this(mode, rerunType, rerunId, runDate, agentBridge, configDir, "", null);
     }
 
     public LocalDate effectiveRunDate() {

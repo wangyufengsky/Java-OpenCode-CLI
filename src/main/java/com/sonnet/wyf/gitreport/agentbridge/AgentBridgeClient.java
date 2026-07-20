@@ -137,7 +137,7 @@ public class AgentBridgeClient {
         params.put("protocolVersion", MCP_CLIENT_PROTOCOL_VERSION);
         params.set("capabilities", objectMapper.createObjectNode());
         ObjectNode clientInfo = params.putObject("clientInfo");
-        clientInfo.put("name", "java-opencode-cli");
+        clientInfo.put("name", "java-agentbridge-cli");
         clientInfo.put("version", "1.0");
 
         ObjectNode initialize = objectMapper.createObjectNode();

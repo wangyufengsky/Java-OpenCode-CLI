@@ -47,20 +47,20 @@ class SmartEsbPreparationTest {
         assertThat(dayOut.resolve("summary.md")).content()
                 .contains("## 交易/模块审查状态", "{{SUMMARY_TRANSACTION_ROWS}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:summary -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
+        assertThat(dayOut.resolve("reports/transactions/CaRolloutRepeal/review.md")).content()
                 .contains("# 交易重构代码审查：CaRolloutRepeal", "{{FINDING_ROWS}}", "{{SUMMARY}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:review -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/mapping-matrix.md")).content()
+        assertThat(dayOut.resolve("reports/transactions/CaRolloutRepeal/mapping-matrix.md")).content()
                 .contains("8583 字段/来源", "{{MAPPING_ROWS}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:mapping-matrix -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/sections/06-code-standard.md")).content()
+        assertThat(dayOut.resolve("reports/transactions/CaRolloutRepeal/sections/06-code-standard.md")).content()
                 .contains("# 代码规范审查", "{{CODE_STANDARD_REVIEW}}")
                 .doesNotContain("<!-- OPENCODE_APPEND:06-code-standard -->");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/summary.json")).content().isEqualTo("{}\n");
+        assertThat(dayOut.resolve("reports/transactions/CaRolloutRepeal/summary.json")).content().isEqualTo("{}\n");
 
         JsonNode task = objectMapper.readTree(dayOut.resolve("tasks/transaction-CaRolloutRepeal.json").toFile());
         assertThat(task.path("task_path").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\tasks\\transaction-CaRolloutRepeal.json");
-        assertThat(task.at("/output/review_md").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\reports\\CaRolloutRepeal\\review.md");
+        assertThat(task.at("/output/review_md").asText()).isEqualTo("D:\\review-output\\smartesb\\2026-06-16\\reports\\transactions\\CaRolloutRepeal\\review.md");
         assertThat(task.at("/output_placeholders/code_standard_md/0").asText()).isEqualTo("{{CODE_STANDARD_REVIEW}}");
         assertThat(task.has("output_markers")).isFalse();
         assertThat(task.at("/skill/reader_hint").asText()).contains("当前 AgentBridge 环境可用能力");
@@ -115,7 +115,7 @@ class SmartEsbPreparationTest {
         assertThat(localOut).isEqualTo(dayOut);
         JsonNode task = objectMapper.readTree(dayOut.resolve("tasks/transaction-CaRolloutRepeal.json").toFile());
         assertThat(task.path("task_path").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/tasks/transaction-CaRolloutRepeal.json");
-        assertThat(task.at("/output/review_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/reports/CaRolloutRepeal/review.md");
+        assertThat(task.at("/output/review_md").asText()).isEqualTo("/home/wangyufeng/review-output/smartesb/2026-06-16/reports/transactions/CaRolloutRepeal/review.md");
         assertThat(task.at("/documents/mapping_8583_to_json").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/8583 to json.md");
         assertThat(task.at("/documents/old_8583_doc").asText()).isEqualTo("/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md");
         assertThat(task.at("/documents/legacy_index").isMissingNode()).isTrue();
@@ -128,7 +128,7 @@ class SmartEsbPreparationTest {
         assertThat(task.has("old_project")).isFalse();
         assertThat(task.at("/skill/writer_hint").asText()).contains("路径载荷指定的目标文件");
         assertThat(task.toString()).doesNotContain("intellij-index", "intellij-idea");
-        assertThat(dayOut.resolve("reports/CaRolloutRepeal/review.md")).content()
+        assertThat(dayOut.resolve("reports/transactions/CaRolloutRepeal/review.md")).content()
                 .contains(
                         "- 重构项目：`/home/wangyufeng/upfs-nl-json`",
                         "- old-8583-doc：`/home/wangyufeng/upfs-nl-json/doc/docment/old-8583.md`",
@@ -168,10 +168,10 @@ class SmartEsbPreparationTest {
         Path dayOut = tempDir.resolve("mirror/2026-06-24");
         assertThat(localOut).isEqualTo(dayOut);
         assertThat(dayOut.resolve("tasks/module-BaseChnConvReqMsgSop.json")).exists();
-        assertThat(dayOut.resolve("reports/BaseChnConvReqMsgSop/review.md")).content()
+        assertThat(dayOut.resolve("reports/modules/BaseChnConvReqMsgSop/review.md")).content()
                 .contains("# 模块代码审查：BaseChnConvReqMsgSop", "{{FINDING_ROWS}}", "{{SUMMARY}}")
                 .doesNotContain("交易重构代码审查");
-        assertThat(dayOut.resolve("reports/BaseChnConvReqMsgSop/mapping-matrix.md")).content()
+        assertThat(dayOut.resolve("reports/modules/BaseChnConvReqMsgSop/mapping-matrix.md")).content()
                 .contains("模块职责/依赖", "{{MAPPING_ROWS}}")
                 .doesNotContain("8583 字段/来源");
 

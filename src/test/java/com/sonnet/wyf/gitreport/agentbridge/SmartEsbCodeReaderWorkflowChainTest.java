@@ -5,6 +5,7 @@ import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
@@ -71,13 +72,15 @@ class SmartEsbCodeReaderWorkflowChainTest {
         );
         assertThat(taskRunner.prompts).anySatisfy(prompt -> assertThat(prompt)
                 .contains("SmartESB code-reader 模块阅读任务")
-                .contains("task_json_path: " + properties.getLocalOut().resolve("tasks/module-BaseConvert8583CUPS.json")));
+                .contains("/runs/run-")
+                .contains("/bundle/tasks/module-BaseConvert8583CUPS.json"));
         assertThat(taskRunner.prompts).anySatisfy(prompt -> assertThat(prompt)
                 .contains("SmartESB code-reader 交易阅读任务")
-                .contains("task_json_path: " + properties.getLocalOut().resolve("tasks/transaction-CaConsume.json")));
+                .contains("/runs/run-")
+                .contains("/bundle/tasks/transaction-CaConsume.json"));
         assertThat(properties.getLocalOut().resolve("tasks/batches")).doesNotExist();
-        assertThat(properties.getLocalOut().resolve("runs/incomplete-modules.json")).content().contains("\"state\" : \"completed\"");
-        assertThat(properties.getLocalOut().resolve("runs/incomplete-transactions.json")).content().contains("\"state\" : \"completed\"");
+        assertThat(findDiagnostic(properties.getLocalOut(), "incomplete-modules.json")).content().contains("\"state\" : \"completed\"");
+        assertThat(findDiagnostic(properties.getLocalOut(), "incomplete-transactions.json")).content().contains("\"state\" : \"completed\"");
     }
 
     @Test
@@ -168,17 +171,24 @@ class SmartEsbCodeReaderWorkflowChainTest {
         public AgentBridgeRunResult runUntilValidated(ValidatedAgentBridgeTaskSpec spec) throws Exception {
             titles.add(spec.title());
             prompts.add(Files.readString(spec.promptFile()));
+            Path out = WorkflowArtifactContext.current().bundleRoot();
             if (spec.title().endsWith("-index")) {
-                Files.writeString(spec.runDir().getParent().getParent().resolve("index.md"), "# 索引\n完成\n");
+                Files.writeString(out.resolve("index.md"), "# 索引\n完成\n");
             } else {
                 String prompt = Files.readString(spec.promptFile());
                 if (prompt.contains("review_type: module")) {
-                    writeCompletedTaskOutput(spec.runDir().getParent().getParent().resolve("modules/BaseConvert8583CUPS"), "module", "BaseConvert8583CUPS");
+                    writeCompletedTaskOutput(out.resolve("modules/BaseConvert8583CUPS"), "module", "BaseConvert8583CUPS");
                 } else {
-                    writeCompletedTaskOutput(spec.runDir().getParent().getParent().resolve("transactions/CaConsume"), "transaction", "CaConsume");
+                    writeCompletedTaskOutput(out.resolve("transactions/CaConsume"), "transaction", "CaConsume");
                 }
             }
             return new AgentBridgeRunResult("task-" + spec.title(), spec.webBaseUrl().toString(), false, true, "idle", true, "", 0);
+        }
+    }
+
+    private Path findDiagnostic(Path root, String filename) throws IOException {
+        try (var paths = Files.walk(root.resolve("runs"))) {
+            return paths.filter(path -> path.getFileName().toString().equals(filename)).findFirst().orElseThrow();
         }
     }
 

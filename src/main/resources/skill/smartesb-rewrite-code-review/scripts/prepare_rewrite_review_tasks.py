@@ -12,19 +12,19 @@ from typing import Any
 
 
 TOP_LEVEL_OUTPUT_MARKERS = {
-    "index_md": "<!-- OPENCODE_APPEND:index -->",
-    "summary_md": "<!-- OPENCODE_APPEND:summary -->",
+    "index_md": "<!-- AGENTBRIDGE_APPEND:index -->",
+    "summary_md": "<!-- AGENTBRIDGE_APPEND:summary -->",
 }
 
 TRANSACTION_OUTPUT_MARKERS = {
-    "review_md": "<!-- OPENCODE_APPEND:review -->",
-    "matrix_md": "<!-- OPENCODE_APPEND:mapping-matrix -->",
-    "findings_md": "<!-- OPENCODE_APPEND:01-findings -->",
-    "code_chains_md": "<!-- OPENCODE_APPEND:02-code-chains -->",
-    "protocol_review_md": "<!-- OPENCODE_APPEND:03-protocol-review -->",
-    "behavior_review_md": "<!-- OPENCODE_APPEND:04-behavior-review -->",
-    "verification_md": "<!-- OPENCODE_APPEND:05-verification -->",
-    "code_standard_md": "<!-- OPENCODE_APPEND:06-code-standard -->",
+    "review_md": "<!-- AGENTBRIDGE_APPEND:review -->",
+    "matrix_md": "<!-- AGENTBRIDGE_APPEND:mapping-matrix -->",
+    "findings_md": "<!-- AGENTBRIDGE_APPEND:01-findings -->",
+    "code_chains_md": "<!-- AGENTBRIDGE_APPEND:02-code-chains -->",
+    "protocol_review_md": "<!-- AGENTBRIDGE_APPEND:03-protocol-review -->",
+    "behavior_review_md": "<!-- AGENTBRIDGE_APPEND:04-behavior-review -->",
+    "verification_md": "<!-- AGENTBRIDGE_APPEND:05-verification -->",
+    "code_standard_md": "<!-- AGENTBRIDGE_APPEND:06-code-standard -->",
 }
 
 

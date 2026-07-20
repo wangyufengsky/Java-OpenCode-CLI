@@ -60,7 +60,8 @@ class WeeklyEngineeringReportWorkflowChainTest {
                 new WeeklyEvidenceBuilder(objectMapper, new GitStatsCollector(new CommandExecutor(), new CommentLineCounter(), new WorkloadScoreCalculator(), objectMapper)),
                 new WeeklyEvidenceValidator(objectMapper),
                 fakeReviewRunner(),
-                new WeeklyReportRenderer(objectMapper)
+                new WeeklyReportRenderer(objectMapper),
+                objectMapper
         );
     }
 

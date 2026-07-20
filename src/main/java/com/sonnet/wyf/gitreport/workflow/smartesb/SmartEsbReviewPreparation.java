@@ -66,6 +66,16 @@ public class SmartEsbReviewPreparation {
         }
         String logicalOut = appendLogical(properties.getOut(), plan.date().toString());
         Path out = properties.getLocalOut() == null ? Path.of(logicalOut) : properties.getLocalOut().resolve(plan.date().toString());
+        return prepare(properties, plan, logicalOut, out, overwrite);
+    }
+
+    public Path prepare(
+            SmartEsbRewriteProperties properties,
+            SmartEsbDailyTransactionPlan plan,
+            String logicalOut,
+            Path out,
+            boolean overwrite
+    ) throws IOException {
         if (Files.exists(out) && anyChild(out) && !overwrite) {
             throw new IllegalStateException("SmartESB output already exists and is not empty: " + out);
         }
@@ -128,13 +138,14 @@ public class SmartEsbReviewPreparation {
             String schemaLogicalPath,
             Path localOut,
             SmartEsbDailyTransactionPlan.ReviewItem item,
-            boolean overwrite
+        boolean overwrite
     ) throws IOException {
         String slug = slugify(item.name());
-        String logicalReportDir = appendLogical(logicalOut, "reports", slug);
+        String kindDir = item.isModule() ? "modules" : "transactions";
+        String logicalReportDir = appendLogical(logicalOut, "reports", kindDir, slug);
         String logicalSectionsDir = appendLogical(logicalReportDir, "sections");
         String logicalTaskPath = appendLogical(logicalOut, "tasks", item.kind() + "-" + slug + ".json");
-        Path reportDir = localOut.resolve("reports").resolve(slug);
+        Path reportDir = localOut.resolve("reports").resolve(kindDir).resolve(slug);
         Path sectionsDir = reportDir.resolve("sections");
         Files.createDirectories(sectionsDir);
         Map<String, Path> files = new LinkedHashMap<>();

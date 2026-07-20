@@ -129,8 +129,8 @@ class PrepareRewriteReviewTasksTest(unittest.TestCase):
             )
             markers = task["output_markers"]
 
-            self.assertEqual(markers["findings_md"], "<!-- OPENCODE_APPEND:01-findings -->")
-            self.assertEqual(markers["review_md"], "<!-- OPENCODE_APPEND:review -->")
+            self.assertEqual(markers["findings_md"], "<!-- AGENTBRIDGE_APPEND:01-findings -->")
+            self.assertEqual(markers["review_md"], "<!-- AGENTBRIDGE_APPEND:review -->")
             self.assertIn("当前可用写入能力", task["skill"]["write_hints"])
             self.assertIn("当前可用写入能力", task["skill"]["write_hints"])
             self.assertNotIn("create_new_file", json.dumps(task["skill"]))

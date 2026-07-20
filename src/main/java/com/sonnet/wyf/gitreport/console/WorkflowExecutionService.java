@@ -4,6 +4,7 @@ import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
+import com.sonnet.wyf.gitreport.artifact.WorkflowExecutionIds;
 
 import java.nio.file.Path;
 import java.util.Locale;
@@ -82,8 +83,14 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
                     submission.rerunId(),
                     submission.runDate(),
                     submission.agentBridge() == null ? copy(runnerProperties.getAgentbridge()) : submission.agentBridge(),
-                    configDir.toString()
+                    configDir.toString(),
+                    WorkflowExecutionIds.newExecutionId(),
+                    runId
             ));
+            String outputPath = WorkflowRunContext.currentOutputPath();
+            if (outputPath != null && !outputPath.isBlank()) {
+                repository.updateOutputPath(runId, outputPath);
+            }
             repository.markSucceeded(runId);
             eventSink.emit(runId, "SUCCEEDED", "运行已完成");
         } catch (Exception exception) {

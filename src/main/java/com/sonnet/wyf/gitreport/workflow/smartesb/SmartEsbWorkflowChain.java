@@ -6,6 +6,8 @@ import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate;
@@ -81,38 +83,52 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         SmartEsbRewriteProperties properties = configLoader.load(configDir(request), id(), SmartEsbRewriteProperties.class);
         SmartEsbDailyTransactionPlan plan = planLoader.load(properties.getTransactionPlanDir(), request.effectiveRunDate());
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
-        if ("full".equals(mode)) {
-            Path out = preparation.prepare(properties, plan, true);
-            runReviewItems(properties, request, out, plan.reviewItems(), false);
-            ensureAllReviewOutputsReady(properties, request, out, plan);
-            runIndex(properties, request, out);
-            return;
-        }
-        if (!"rerun".equals(mode)) {
-            throw new IllegalArgumentException("SmartESB mode must be one of: full, rerun");
-        }
-        Path out = datedLocalOut(properties, plan);
-        if ("transaction".equals(request.rerunType())) {
-            List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "transaction", request.rerunIds());
-            if (!Files.exists(out.resolve("index_inputs.json"))) {
-                preparation.prepare(properties, plan, true);
+        Path stableOut = datedLocalOut(properties, plan);
+        var workspace = WorkflowArtifactWorkspace.start(
+                objectMapper, id(), request, stableOut, "rerun".equals(mode)
+        );
+        Path out = workspace.bundleRoot();
+        String logicalOut = SmartEsbReviewPreparation.appendLogical(
+                properties.getOut(), plan.date().toString(), "runs", request.executionId(), "bundle"
+        );
+        workspace.registerPathMapping(
+                SmartEsbReviewPreparation.appendLogical(properties.getOut(), plan.date().toString()),
+                logicalOut
+        );
+        try (var ignored = WorkflowArtifactContext.open(workspace)) {
+            if ("full".equals(mode)) {
+                preparation.prepare(properties, plan, logicalOut, out, true);
+                runReviewItems(properties, request, out, plan.reviewItems(), false);
+                ensureAllReviewOutputsReady(properties, request, out, plan);
+                runIndex(properties, request, out);
+            } else if (!"rerun".equals(mode)) {
+                throw new IllegalArgumentException("SmartESB mode must be one of: full, rerun");
+            } else if ("transaction".equals(request.rerunType())) {
+                List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "transaction", request.rerunIds());
+                if (!Files.exists(out.resolve("index_inputs.json"))) {
+                    preparation.prepare(properties, plan, logicalOut, out, true);
+                }
+                runReviewItems(properties, request, out, items, true);
+                ensureAllReviewOutputsReady(properties, request, out, plan);
+                runIndex(properties, request, out);
+            } else if ("module".equals(request.rerunType())) {
+                List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "module", request.rerunIds());
+                if (!Files.exists(out.resolve("index_inputs.json"))) {
+                    preparation.prepare(properties, plan, logicalOut, out, true);
+                }
+                runReviewItems(properties, request, out, items, true);
+                ensureAllReviewOutputsReady(properties, request, out, plan);
+                runIndex(properties, request, out);
+            } else if ("index".equals(request.rerunType())) {
+                ensureAllReviewOutputsReady(properties, request, out, plan);
+                runIndex(properties, request, out);
+            } else {
+                throw new IllegalArgumentException("SmartESB rerun.type must be one of: transaction, module, index");
             }
-            runReviewItems(properties, request, out, items, true);
-            ensureAllReviewOutputsReady(properties, request, out, plan);
-            runIndex(properties, request, out);
-        } else if ("module".equals(request.rerunType())) {
-            List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByName(plan, "module", request.rerunIds());
-            if (!Files.exists(out.resolve("index_inputs.json"))) {
-                preparation.prepare(properties, plan, true);
-            }
-            runReviewItems(properties, request, out, items, true);
-            ensureAllReviewOutputsReady(properties, request, out, plan);
-            runIndex(properties, request, out);
-        } else if ("index".equals(request.rerunType())) {
-            ensureAllReviewOutputsReady(properties, request, out, plan);
-            runIndex(properties, request, out);
-        } else {
-            throw new IllegalArgumentException("SmartESB rerun.type must be one of: transaction, module, index");
+            workspace.publish("index.md");
+        } catch (Exception exception) {
+            workspace.markFailed(exception.getMessage());
+            throw exception;
         }
     }
 
@@ -157,9 +173,14 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             boolean rerun
     ) {
         return () -> {
-            Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()));
+            Path runDir = WorkflowArtifactContext
+                    .nextTaskAttempt(
+                            item.kind() + ":" + item.name(),
+                            out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()))
+                    )
+                    .root();
             try {
-                String failure = runReviewItem(properties, request, out, indexInputs, item, rerun);
+                String failure = runReviewItem(properties, request, out, indexInputs, item, rerun, runDir);
                 if (failure == null || failure.isBlank()) {
                     return TaskRunResult.success(item.kind() + ":" + item.name(), item.name(), runDir.resolve("agent-status.json"));
                 }
@@ -178,14 +199,14 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
             Path out,
             Map<String, Object> indexInputs,
             SmartEsbDailyTransactionPlan.ReviewItem item,
-            boolean rerun
+            boolean rerun,
+            Path runDir
     ) throws Exception {
         Map<String, Object> task = taskByReviewItem(indexInputs, item);
-        Path runDir = out.resolve("runs").resolve(SmartEsbReviewPreparation.slugify(item.name()));
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("worker-prompt.md");
         String summarySchema = ((Map<?, ?>) indexInputs.get("schemas")).get("transaction_summary").toString();
-        Path summaryJson = localSummaryPath(out, item.name());
+        Path summaryJson = localSummaryPath(out, item.kind(), item.name());
         String prompt = buildWorkerPrompt(item, task, summarySchema, rerun);
         Files.writeString(promptFile, prompt);
         AgentBridgeRunResult result = taskRunner.runUntilValidated(new ValidatedAgentBridgeTaskSpec(
@@ -217,7 +238,7 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
     ) throws Exception {
         completionGate.ensureComplete(
                 "SmartESB review",
-                out.resolve("runs").resolve("incomplete-reports.json"),
+                WorkflowArtifactContext.diagnosticPath(out.resolve("runs").resolve("incomplete-reports.json")),
                 () -> incompleteReviewItems(out, readMap(out.resolve("index_inputs.json"))),
                 (incomplete, rerunRound, maxRerunRounds) -> {
                     List<SmartEsbDailyTransactionPlan.ReviewItem> items = reviewItemsByIncomplete(plan, incomplete);
@@ -235,14 +256,14 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         for (Map<String, Object> task : listOfMaps(indexInputs.get("tasks"))) {
             String kind = task.get("review_type").toString();
             String name = taskName(task);
-            Path summaryPath = localSummaryPath(out, name);
+            Path summaryPath = localSummaryPath(out, kind, name);
             SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryPath);
             if (!validation.ok()) {
                 incomplete.add(new IncompleteOutput(kind, name, summaryPath, task.get("task_path").toString(),
                         "summary missing or invalid: " + validation.error()));
                 continue;
             }
-            String artifactError = artifactValidationError(out, name, task);
+            String artifactError = artifactValidationError(out, kind, name, task);
             if (!artifactError.isBlank()) {
                 incomplete.add(new IncompleteOutput(kind, name, summaryPath, task.get("task_path").toString(), artifactError));
             }
@@ -250,20 +271,20 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         return incomplete;
     }
 
-    private String artifactValidationError(Path out, String name, Map<String, Object> task) throws Exception {
+    private String artifactValidationError(Path out, String kind, String name, Map<String, Object> task) throws Exception {
         Object placeholders = task.get("output_placeholders");
         if (!(placeholders instanceof Map<?, ?> placeholderMap)) {
             return "output_placeholders missing or invalid: " + task.get("task_path");
         }
         ArtifactCompletenessValidator.Validation validation = artifactCompletenessValidator.validateOutputs(
                 placeholderMap,
-                outputKey -> localOutputPath(out, name, outputKey)
+                outputKey -> localOutputPath(out, kind, name, outputKey)
         );
         return validation.ok() ? "" : validation.error();
     }
 
-    private Path localOutputPath(Path out, String name, String outputKey) {
-        Path reportDir = out.resolve("reports").resolve(SmartEsbReviewPreparation.slugify(name));
+    private Path localOutputPath(Path out, String kind, String name, String outputKey) {
+        Path reportDir = out.resolve("reports").resolve(kind + "s").resolve(SmartEsbReviewPreparation.slugify(name));
         Path sectionsDir = reportDir.resolve("sections");
         return switch (outputKey) {
             case "review_md" -> reportDir.resolve("review.md");
@@ -313,8 +334,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         Map<String, Object> indexInputs = readMap(out.resolve("index_inputs.json"));
         List<String> invalid = new ArrayList<>();
         for (Map<String, Object> task : listOfMaps(indexInputs.get("tasks"))) {
+            String kind = task.get("review_type").toString();
             String name = taskName(task);
-            Path summaryPath = localSummaryPath(out, name);
+            Path summaryPath = localSummaryPath(out, kind, name);
             SmartEsbSummaryValidator.Validation validation = summaryValidator.validate(summaryPath);
             if (!validation.ok()) {
                 invalid.add(name + ": " + validation.error());
@@ -323,7 +345,9 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         if (!invalid.isEmpty()) {
             throw new IllegalStateException("SmartESB summaries invalid for index rerun: " + String.join("; ", invalid));
         }
-        Path runDir = out.resolve("runs").resolve("index");
+        Path runDir = WorkflowArtifactContext
+                .nextSynthesisAttempt("smartesb-review-index", out.resolve("runs").resolve("index"))
+                .root();
         Files.createDirectories(runDir);
         Path promptFile = runDir.resolve("synthesis-prompt.md");
         Files.writeString(promptFile, promptBuilder.buildSynthesisPrompt(out.resolve("summary.json"), out.resolve("index_inputs.json")));
@@ -411,8 +435,10 @@ public class SmartEsbWorkflowChain implements WorkflowChain {
         return task.get("transaction").toString();
     }
 
-    private Path localSummaryPath(Path out, String name) {
-        return out.resolve("reports").resolve(SmartEsbReviewPreparation.slugify(name)).resolve("summary.json");
+    private Path localSummaryPath(Path out, String kind, String name) {
+        return out.resolve("reports").resolve(kind + "s")
+                .resolve(SmartEsbReviewPreparation.slugify(name))
+                .resolve("summary.json");
     }
 
     private Map<String, Object> readMap(Path path) throws Exception {

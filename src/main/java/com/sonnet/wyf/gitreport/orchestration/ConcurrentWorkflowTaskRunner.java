@@ -1,5 +1,7 @@
 package com.sonnet.wyf.gitreport.orchestration;
 
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.console.WorkflowRunContext;
 import org.slf4j.Logger;
@@ -41,8 +43,9 @@ public class ConcurrentWorkflowTaskRunner {
         Semaphore semaphore = new Semaphore(slots);
         List<Future<TaskRunResult>> futures = new ArrayList<>();
         Long runId = WorkflowRunContext.currentRunId();
+        WorkflowArtifactWorkspace artifactWorkspace = WorkflowArtifactContext.currentOrNull();
         for (T task : tasks) {
-            futures.add(taskExecutor.submit(limitedCallable(semaphore, task, taskKey, taskFactory, runId)));
+            futures.add(taskExecutor.submit(limitedCallable(semaphore, task, taskKey, taskFactory, runId, artifactWorkspace)));
         }
         List<TaskRunResult> results = new ArrayList<>();
         List<TaskRunResult> failures = new ArrayList<>();
@@ -89,11 +92,13 @@ public class ConcurrentWorkflowTaskRunner {
             T task,
             Function<T, String> taskKey,
             Function<T, Callable<TaskRunResult>> taskFactory,
-            Long runId
+            Long runId,
+            WorkflowArtifactWorkspace artifactWorkspace
     ) {
         return () -> {
             boolean acquired = false;
-            try (WorkflowRunContext.Scope ignored = WorkflowRunContext.open(runId)) {
+            try (WorkflowRunContext.Scope ignored = WorkflowRunContext.open(runId);
+                 WorkflowArtifactContext.Scope ignoredArtifacts = WorkflowArtifactContext.open(artifactWorkspace)) {
                 semaphore.acquire();
                 acquired = true;
                 String key = taskKey.apply(task);

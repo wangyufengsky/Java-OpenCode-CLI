@@ -1,5 +1,8 @@
 package com.sonnet.wyf.gitreport.workflow.weekly;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
@@ -18,6 +21,7 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
     private final WeeklyEvidenceValidator evidenceValidator;
     private final WeeklyCodeReviewRunner codeReviewRunner;
     private final WeeklyReportRenderer reportRenderer;
+    private final ObjectMapper objectMapper;
 
     public WeeklyEngineeringReportWorkflowChain(
             ChainConfigLoader configLoader,
@@ -25,7 +29,8 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
             WeeklyEvidenceBuilder evidenceBuilder,
             WeeklyEvidenceValidator evidenceValidator,
             WeeklyCodeReviewRunner codeReviewRunner,
-            WeeklyReportRenderer reportRenderer
+            WeeklyReportRenderer reportRenderer,
+            ObjectMapper objectMapper
     ) {
         this.configLoader = configLoader;
         this.runnerProperties = runnerProperties;
@@ -33,6 +38,7 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
         this.evidenceValidator = evidenceValidator;
         this.codeReviewRunner = codeReviewRunner;
         this.reportRenderer = reportRenderer;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -48,28 +54,37 @@ public class WeeklyEngineeringReportWorkflowChain implements WorkflowChain {
                 id(),
                 WeeklyEngineeringReportProperties.class
         );
-        if ("full".equals(mode)) {
-            Path evidence = evidenceBuilder.build(properties, request.effectiveRunDate());
-            evidenceValidator.validate(evidence);
-            codeReviewRunner.run(properties, request, evidence, List.of());
-            reportRenderer.render(evidence);
-            return;
-        }
-        if (!"rerun".equals(mode)) {
-            throw new IllegalArgumentException("weekly-engineering-report mode must be one of: full, rerun");
-        }
-        Path evidence = properties.getPaths().getOut().toAbsolutePath().normalize().resolve("weekly-evidence.json");
-        if (!Files.exists(evidence)) {
-            evidence = evidenceBuilder.build(properties, request.effectiveRunDate());
-        }
-        evidenceValidator.validate(evidence);
-        if ("review-batch".equals(request.rerunType())) {
-            codeReviewRunner.run(properties, request, evidence, request.rerunIds());
-            reportRenderer.render(evidence);
-        } else if ("synthesis".equals(request.rerunType())) {
-            reportRenderer.render(evidence);
-        } else {
-            throw new IllegalArgumentException("weekly-engineering-report rerun.type must be one of: review-batch, synthesis");
+        var workspace = WorkflowArtifactWorkspace.start(
+                objectMapper, id(), request, properties.getPaths().getOut(), "rerun".equals(mode)
+        );
+        properties.getPaths().setOut(workspace.bundleRoot());
+        try (var ignored = WorkflowArtifactContext.open(workspace)) {
+            if ("full".equals(mode)) {
+                Path evidence = evidenceBuilder.build(properties, request.effectiveRunDate());
+                evidenceValidator.validate(evidence);
+                codeReviewRunner.run(properties, request, evidence, List.of());
+                reportRenderer.render(evidence);
+            } else if (!"rerun".equals(mode)) {
+                throw new IllegalArgumentException("weekly-engineering-report mode must be one of: full, rerun");
+            } else {
+                Path evidence = workspace.bundleRoot().resolve("weekly-evidence.json");
+                if (!Files.exists(evidence)) {
+                    evidence = evidenceBuilder.build(properties, request.effectiveRunDate());
+                }
+                evidenceValidator.validate(evidence);
+                if ("review-batch".equals(request.rerunType())) {
+                    codeReviewRunner.run(properties, request, evidence, request.rerunIds());
+                    reportRenderer.render(evidence);
+                } else if ("synthesis".equals(request.rerunType())) {
+                    reportRenderer.render(evidence);
+                } else {
+                    throw new IllegalArgumentException("weekly-engineering-report rerun.type must be one of: review-batch, synthesis");
+                }
+            }
+            workspace.publish("weekly-report.md");
+        } catch (Exception exception) {
+            workspace.markFailed(exception.getMessage());
+            throw exception;
         }
     }
 

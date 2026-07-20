@@ -49,6 +49,10 @@ public class WorkflowRunRepository {
         jdbcTemplate.update("update workflow_runs set config_path=? where id=?", configPath, id);
     }
 
+    public void updateOutputPath(long id, String outputPath) {
+        jdbcTemplate.update("update workflow_runs set output_path=? where id=?", outputPath, id);
+    }
+
     public void markRunning(long id) {
         jdbcTemplate.update("update workflow_runs set state=?, phase=?, started_at=? where id=?",
                 RunState.RUNNING.name(), "running", Instant.now().toString(), id);

@@ -128,8 +128,13 @@ public class RunnerConfiguration {
     }
 
     @Bean
-    WorkflowChain gitReportWorkflowChain(ChainConfigLoader chainConfigLoader, AgentBridgeRunnerProperties runnerProperties, GitReportOrchestrator orchestrator) {
-        return new GitReportWorkflowChain(chainConfigLoader, runnerProperties, orchestrator);
+    WorkflowChain gitReportWorkflowChain(
+            ChainConfigLoader chainConfigLoader,
+            AgentBridgeRunnerProperties runnerProperties,
+            GitReportOrchestrator orchestrator,
+            ObjectMapper objectMapper
+    ) {
+        return new GitReportWorkflowChain(chainConfigLoader, runnerProperties, orchestrator, objectMapper);
     }
 
     @Bean
@@ -193,7 +198,8 @@ public class RunnerConfiguration {
             WeeklyEvidenceBuilder evidenceBuilder,
             WeeklyEvidenceValidator evidenceValidator,
             WeeklyCodeReviewRunner codeReviewRunner,
-            WeeklyReportRenderer reportRenderer
+            WeeklyReportRenderer reportRenderer,
+            ObjectMapper objectMapper
     ) {
         return new WeeklyEngineeringReportWorkflowChain(
                 chainConfigLoader,
@@ -201,7 +207,8 @@ public class RunnerConfiguration {
                 evidenceBuilder,
                 evidenceValidator,
                 codeReviewRunner,
-                reportRenderer
+                reportRenderer,
+                objectMapper
         );
     }
 

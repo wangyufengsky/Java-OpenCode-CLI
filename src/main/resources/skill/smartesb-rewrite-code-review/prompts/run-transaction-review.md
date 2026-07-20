@@ -74,7 +74,7 @@
 示例格式：
 
 ```text
-<!-- OPENCODE_APPEND:01-findings -->
+<!-- AGENTBRIDGE_APPEND:01-findings -->
 ```
 
 4. 追加内容时，用 当前可用写入能力 替换对应文件的 exact marker：

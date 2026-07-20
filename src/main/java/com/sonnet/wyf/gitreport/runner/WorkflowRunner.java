@@ -41,8 +41,8 @@ public class WorkflowRunner implements ApplicationRunner {
                 properties.getAgentbridge(),
                 properties.getConfigDir()
         );
-        log.info("Starting workflow chain: id={}, mode={}, rerunType={}, rerunId={}, runDate={}",
-                chain.id(), request.mode(), request.rerunType(), request.rerunId(), request.effectiveRunDate());
+        log.info("Starting workflow chain: id={}, executionId={}, mode={}, rerunType={}, rerunId={}, runDate={}",
+                chain.id(), request.executionId(), request.mode(), request.rerunType(), request.rerunId(), request.effectiveRunDate());
         chain.run(request);
     }
 

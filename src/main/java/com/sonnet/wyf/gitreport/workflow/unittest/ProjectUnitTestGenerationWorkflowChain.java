@@ -2,6 +2,9 @@ package com.sonnet.wyf.gitreport.workflow.unittest;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.artifact.RepositoryExecutionLock;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
@@ -51,25 +54,35 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
     public void run(WorkflowRunRequest request) throws Exception {
         ProjectUnitTestGenerationProperties properties = configLoader.load(configDir(request), id(), ProjectUnitTestGenerationProperties.class);
         String mode = request.mode() == null || request.mode().isBlank() ? "full" : request.mode();
-        Path out = properties.getPaths().getOut().toAbsolutePath().normalize();
-        if ("full".equals(mode)) {
-            preparation.prepare(properties, true);
-            Files.deleteIfExists(out.resolve(ProjectUnitTestGenerationBatchRunner.RESULTS_JSON));
-            finish(batchRunner.runBatches(properties, out, loadBatches(out)), out);
-            return;
-        }
-        if (!"rerun".equals(mode)) {
-            throw new IllegalArgumentException("project-unit-test-generation mode must be one of: full, rerun");
-        }
-        if (!Files.exists(out.resolve("test-batches.json"))) {
-            preparation.prepare(properties, true);
-        }
-        if ("test-batch".equals(request.rerunType())) {
-            finish(batchRunner.runBatches(properties, out, batchesByIds(out, request.rerunIds())), out);
-        } else if ("verification".equals(request.rerunType())) {
-            finish(batchRunner.verifyBatches(properties, out, loadBatches(out)), out);
-        } else {
-            throw new IllegalArgumentException("project-unit-test-generation rerun.type must be one of: test-batch, verification");
+        var workspace = WorkflowArtifactWorkspace.start(
+                objectMapper, id(), request, properties.getPaths().getOut(), "rerun".equals(mode)
+        );
+        Path out = workspace.bundleRoot();
+        properties.getPaths().setOut(out);
+        try (var ignored = WorkflowArtifactContext.open(workspace);
+             var repositoryLock = RepositoryExecutionLock.acquire(properties.getProject().getRepo())) {
+            if ("full".equals(mode)) {
+                preparation.prepare(properties, true);
+                Files.deleteIfExists(out.resolve(ProjectUnitTestGenerationBatchRunner.RESULTS_JSON));
+                finish(batchRunner.runBatches(properties, out, loadBatches(out)), out);
+            } else if (!"rerun".equals(mode)) {
+                throw new IllegalArgumentException("project-unit-test-generation mode must be one of: full, rerun");
+            } else {
+                if (!Files.exists(out.resolve("test-batches.json"))) {
+                    preparation.prepare(properties, true);
+                }
+                if ("test-batch".equals(request.rerunType())) {
+                    finish(batchRunner.runBatches(properties, out, batchesByIds(out, request.rerunIds())), out);
+                } else if ("verification".equals(request.rerunType())) {
+                    finish(batchRunner.verifyBatches(properties, out, loadBatches(out)), out);
+                } else {
+                    throw new IllegalArgumentException("project-unit-test-generation rerun.type must be one of: test-batch, verification");
+                }
+            }
+            workspace.publish("unit-test-generation-report.md");
+        } catch (Exception exception) {
+            workspace.markFailed(exception.getMessage());
+            throw exception;
         }
     }
 

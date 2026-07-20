@@ -7,6 +7,7 @@ import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.orchestration.OutputCompletionGate.IncompleteOutput;
 import com.sonnet.wyf.gitreport.preparation.GitReportPreparation;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
@@ -190,7 +191,7 @@ public class GitReportOrchestrator {
     ) throws Exception {
         completionGate.ensureComplete(
                 "git-report author",
-                out.resolve("runs").resolve("incomplete-reports.json"),
+                WorkflowArtifactContext.diagnosticPath(out.resolve("runs").resolve("incomplete-reports.json")),
                 () -> incompleteAuthorOutputs(indexInputs),
                 (incomplete, rerunRound, maxRerunRounds) -> {
                     Map<String, Map<String, Object>> tasksByAuthorKey = new LinkedHashMap<>();
@@ -262,7 +263,9 @@ public class GitReportOrchestrator {
         return () -> {
             String authorKey = task.get("author_key").toString();
             String author = task.get("author").toString();
-            Path runDir = out.resolve("runs").resolve(authorKey);
+            Path runDir = WorkflowArtifactContext
+                    .nextTaskAttempt("author:" + authorKey, out.resolve("runs").resolve(authorKey))
+                    .root();
             Path statusPath = runDir.resolve("agent-status.json");
             int attempts = 1;
             int attemptsRun = 0;

@@ -7,6 +7,7 @@ import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeRunResult;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import com.sonnet.wyf.gitreport.validation.FinalReportValidator;
 import org.slf4j.Logger;
@@ -50,7 +51,9 @@ final class GitReportSynthesisWorkflow {
     }
 
     void run(GitReportProperties properties, Path out, Path qualityScores) throws Exception {
-        Path runDir = out.resolve("runs").resolve("synthesis");
+        Path runDir = WorkflowArtifactContext
+                .nextSynthesisAttempt("git-report", out.resolve("runs").resolve("synthesis"))
+                .root();
         Files.createDirectories(runDir);
         Path finalReport = out.resolve("code-contribution-report.md");
         Files.writeString(finalReport, readResource(FINAL_REPORT_TEMPLATE));

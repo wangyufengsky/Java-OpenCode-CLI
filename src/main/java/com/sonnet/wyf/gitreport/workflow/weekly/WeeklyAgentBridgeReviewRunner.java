@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
 import com.sonnet.wyf.gitreport.agentbridge.ValidatedAgentBridgeTaskSpec;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.TaskRunResult;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
@@ -80,7 +81,9 @@ public class WeeklyAgentBridgeReviewRunner implements WeeklyCodeReviewRunner {
     ) {
         return () -> {
             String batchId = string(batch.get("batch_id"));
-            Path runDir = out.resolve("runs").resolve(batchId);
+            Path runDir = WorkflowArtifactContext
+                    .nextTaskAttempt("review-batch:" + batchId, out.resolve("runs").resolve(batchId))
+                    .root();
             Path statusPath = runDir.resolve("agent-status.json");
             Path summaryJson = Path.of(string(batch.get("summary_json")));
             try {

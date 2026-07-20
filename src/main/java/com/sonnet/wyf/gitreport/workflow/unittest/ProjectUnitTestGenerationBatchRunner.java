@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
+import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -95,8 +96,6 @@ public class ProjectUnitTestGenerationBatchRunner {
 
     BatchResult runBatch(ProjectUnitTestGenerationProperties properties, Path out, Map<String, Object> batch) throws Exception {
         String batchId = string(batch.get("batch_id"));
-        Path runDir = out.resolve("test-batches").resolve(batchId);
-        Files.createDirectories(runDir);
         List<AttemptRecord> attempts = new ArrayList<>();
 
         Acceptance precheck = validate(properties, batch);
@@ -110,8 +109,11 @@ public class ProjectUnitTestGenerationBatchRunner {
         URI webBaseUrl = URI.create(properties.getAgentbridge().getWebBaseUrl());
         Duration timeout = Duration.ofMinutes(Math.max(1, properties.getAgentbridge().getTimeoutMinutes()));
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            Path runDir = WorkflowArtifactContext
+                    .nextTaskAttempt("test-batch:" + batchId, out.resolve("test-batches").resolve(batchId))
+                    .root();
             ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(properties.getProject().getRepo(), out, batch);
-            Path promptFile = runDir.resolve("attempt-%03d-prompt.md".formatted(attempt));
+            Path promptFile = runDir.resolve("worker-prompt.md");
             Files.writeString(promptFile, promptBuilder.buildBatchPrompt(
                     properties.getProject().getRepo(),
                     Path.of(string(batch.get("input_json"))),
