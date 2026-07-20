@@ -193,7 +193,8 @@ public class ConsoleViewService {
                 stateTone(run.state()),
                 DASHBOARD_TIME.withZone(clock.getZone()).format(run.createdAt()),
                 formatDuration(durationSeconds(run), run.startedAt() != null),
-                run.failureMessage() == null ? "" : run.failureMessage()
+                run.failureMessage() == null ? "" : run.failureMessage(),
+                run.state() == RunState.SUCCEEDED || run.state() == RunState.FAILED
         );
     }
 

@@ -63,8 +63,14 @@
             <h2 id="history-results-title">运行记录</h2>
             <p class="page-description" th:text="|当前第 ${historyPage.page} / ${historyPage.totalPages} 页|">当前第 1 / 1 页</p>
           </div>
-          <span class="status-badge c-status-badge" th:text="|每页 ${historyPage.pageSize} 条|">每页 20 条</span>
+          <div class="history-results-controls">
+            <span class="status-badge c-status-badge" th:text="|每页 ${historyPage.pageSize} 条|">每页 20 条</span>
+            <button class="button c-button danger" type="button"
+                    data-history-action="clear-all"
+                    th:disabled="${historyPage.total == 0}">清理所有历史</button>
+          </div>
         </div>
+        <p id="history-action-status" class="form-message history-action-status" role="status" aria-live="polite"></p>
 
         <div th:if="${historyPage.items.isEmpty()}" class="history-empty-state" role="status">
           <strong>没有符合当前筛选条件的运行</strong>
@@ -88,6 +94,16 @@
                 <a th:href="${historyDetailUrls.get(run.id)}">查看详情</a>
                 <span aria-hidden="true"> · </span>
                 <a th:href="${historyCopyUrls.get(run.id)}">复制配置</a>
+                <th:block th:if="${run.terminal}">
+                  <span aria-hidden="true"> · </span>
+                  <button class="history-action-link" type="button"
+                          data-history-action="rerun"
+                          th:attr="data-run-id=${run.id}">一键重跑</button>
+                  <span aria-hidden="true"> · </span>
+                  <button class="history-action-link danger-link" type="button"
+                          data-history-action="delete"
+                          th:attr="data-run-id=${run.id}">清理</button>
+                </th:block>
               </td>
             </tr>
             </tbody>

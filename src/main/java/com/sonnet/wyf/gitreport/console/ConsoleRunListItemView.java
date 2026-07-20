@@ -12,6 +12,7 @@ public record ConsoleRunListItemView(
         String stateTone,
         String createdAtLabel,
         String durationLabel,
-        String failureMessage
+        String failureMessage,
+        boolean terminal
 ) {
 }

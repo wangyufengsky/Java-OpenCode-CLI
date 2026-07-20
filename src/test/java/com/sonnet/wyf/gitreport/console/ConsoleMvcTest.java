@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -734,7 +735,7 @@ class ConsoleMvcTest {
     }
 
     @Test
-    void historyFiltersPersistAndExposeOnlyDetailAndCopyActions() throws Exception {
+    void historyFiltersPersistAndExposeHistoryManagementActions() throws Exception {
         long failedRunId = repository.createRun(new WorkflowRunSubmission(
                 "weekly-engineering-report", "full", null, null, null, Map.of(), null
         ), "weekly-history-config.yml");
@@ -765,7 +766,42 @@ class ConsoleMvcTest {
                 .contains("value=\"2026-07-31\"")
                 .contains("href=\"/runs/" + failedRunId + "?q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">查看详情</a>")
                 .contains("href=\"/runs/new?copyFrom=" + failedRunId + "&amp;q=weekly&amp;state=FAILED&amp;chainId=weekly-engineering-report&amp;from=2026-07-01&amp;until=2026-07-31\">复制配置</a>")
+                .contains("data-history-action=\"rerun\"")
+                .contains("data-run-id=\"" + failedRunId + "\"")
+                .contains("data-history-action=\"delete\"")
+                .contains("data-history-action=\"clear-all\"")
                 .doesNotContain("href=\"/runs/" + otherRunId + "\">查看详情</a>");
+    }
+
+    @Test
+    void historyDeleteEndpointsRemoveTerminalRunsAndPreserveActiveRuns() throws Exception {
+        long failedRunId = repository.createRun(new WorkflowRunSubmission(
+                "weekly-engineering-report", "full", null, null, null, Map.of(), null
+        ), "delete-api-failed.yml");
+        repository.appendEvent(failedRunId, "FAILED", "failed");
+        repository.markFailed(failedRunId, "failed");
+        long succeededRunId = repository.createRun(new WorkflowRunSubmission(
+                "weekly-engineering-report", "full", null, null, null, Map.of(), null
+        ), "delete-api-succeeded.yml");
+        repository.markSucceeded(succeededRunId);
+        long queuedRunId = repository.createRun(new WorkflowRunSubmission(
+                "weekly-engineering-report", "full", null, null, null, Map.of(), null
+        ), "delete-api-queued.yml");
+
+        mockMvc.perform(delete("/api/runs/" + failedRunId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(1));
+        assertThat(repository.findRun(failedRunId)).isEmpty();
+
+        mockMvc.perform(delete("/api/runs/" + queuedRunId))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("运行中或排队中的记录不能清理")));
+
+        mockMvc.perform(delete("/api/runs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+        assertThat(repository.findRun(succeededRunId)).isEmpty();
+        assertThat(repository.findRun(queuedRunId)).isPresent();
     }
 
     @Test

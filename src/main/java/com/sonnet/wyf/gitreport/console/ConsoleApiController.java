@@ -1,6 +1,7 @@
 package com.sonnet.wyf.gitreport.console;
 
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -69,6 +70,35 @@ public class ConsoleApiController {
         return repository.listRuns();
     }
 
+    @DeleteMapping("/runs/{id}")
+    public Map<String, Integer> deleteRunHistory(@PathVariable long id) {
+        WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        requireTerminal(run);
+        return Map.of("deleted", repository.deleteTerminalRun(id) ? 1 : 0);
+    }
+
+    @DeleteMapping("/runs")
+    public Map<String, Integer> clearRunHistory() {
+        return Map.of("deleted", repository.clearTerminalRuns());
+    }
+
+    @PostMapping("/runs/{id}/rerun")
+    public Map<String, Long> rerunHistory(@PathVariable long id) throws Exception {
+        WorkflowRunRecord source = repository.findRun(id).orElseThrow();
+        requireTerminal(source);
+        WorkflowRunSubmission submission = new WorkflowRunSubmission(
+                source.chainId(),
+                source.mode(),
+                source.rerunType(),
+                source.rerunId(),
+                source.runDate(),
+                readRunConfig(source),
+                null
+        );
+        validate(submission);
+        return Map.of("id", executionService.submit(submission));
+    }
+
     @GetMapping("/schedules")
     public List<WorkflowScheduleRecord> schedules() {
         return scheduleService.list();
@@ -97,19 +127,23 @@ public class ConsoleApiController {
     @GetMapping("/runs/{id}/config")
     public RunConfigResponse runConfig(@PathVariable long id) throws Exception {
         WorkflowRunRecord run = repository.findRun(id).orElseThrow();
+        return new RunConfigResponse(
+                run.id(),
+                run.chainId(),
+                run.mode(),
+                run.rerunType(),
+                run.rerunId(),
+                run.runDate(),
+                readRunConfig(run)
+        );
+    }
+
+    private Map<String, Object> readRunConfig(WorkflowRunRecord run) {
         if (run.configPath() == null || run.configPath().isBlank()) {
             throw new IllegalArgumentException("运行没有配置文件");
         }
         try {
-            return new RunConfigResponse(
-                    run.id(),
-                    run.chainId(),
-                    run.mode(),
-                    run.rerunType(),
-                    run.rerunId(),
-                    run.runDate(),
-                    configReader.readFlat(Path.of(run.configPath()))
-            );
+            return configReader.readFlat(Path.of(run.configPath()));
         } catch (InvalidPathException exception) {
             throw new IllegalArgumentException("运行配置文件不存在或不可读取", exception);
         }
@@ -164,6 +198,12 @@ public class ConsoleApiController {
                     && (submission.rerunId() == null || submission.rerunId().isBlank())) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
+        }
+    }
+
+    private static void requireTerminal(WorkflowRunRecord run) {
+        if (run.state() != RunState.SUCCEEDED && run.state() != RunState.FAILED) {
+            throw new IllegalArgumentException("运行中或排队中的记录不能清理或重跑");
         }
     }
 

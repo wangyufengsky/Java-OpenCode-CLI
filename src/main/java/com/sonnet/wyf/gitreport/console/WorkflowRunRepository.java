@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -174,6 +175,38 @@ public class WorkflowRunRepository {
 
     public List<WorkflowTaskStatus> listTaskStatuses(long runId) {
         return jdbcTemplate.query("select * from workflow_task_status where run_id=? order by task_key", taskMapper(), runId);
+    }
+
+    @Transactional
+    public boolean deleteTerminalRun(long runId) {
+        Object[] terminalRun = {runId, runId, RunState.SUCCEEDED.name(), RunState.FAILED.name()};
+        jdbcTemplate.update("""
+                delete from workflow_run_events
+                where run_id=? and exists (
+                  select 1 from workflow_runs where id=? and state in (?, ?)
+                )
+                """, terminalRun);
+        jdbcTemplate.update("""
+                delete from workflow_task_status
+                where run_id=? and exists (
+                  select 1 from workflow_runs where id=? and state in (?, ?)
+                )
+                """, terminalRun);
+        return jdbcTemplate.update(
+                "delete from workflow_runs where id=? and state in (?, ?)",
+                runId,
+                RunState.SUCCEEDED.name(),
+                RunState.FAILED.name()
+        ) == 1;
+    }
+
+    @Transactional
+    public int clearTerminalRuns() {
+        String terminalRunIds = "select id from workflow_runs where state in ('SUCCEEDED', 'FAILED')";
+        jdbcTemplate.update("delete from workflow_run_events where run_id in (" + terminalRunIds + ")");
+        jdbcTemplate.update("delete from workflow_task_status where run_id in (" + terminalRunIds + ")");
+        return jdbcTemplate.update("delete from workflow_runs where state in (?, ?)",
+                RunState.SUCCEEDED.name(), RunState.FAILED.name());
     }
 
     private static RowMapper<WorkflowRunRecord> runMapper() {

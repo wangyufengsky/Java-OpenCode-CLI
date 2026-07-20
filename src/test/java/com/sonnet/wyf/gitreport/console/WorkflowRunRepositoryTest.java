@@ -197,6 +197,50 @@ class WorkflowRunRepositoryTest {
         assertThat(repository.listRuns(filter, 20, 40)).hasSize(1);
     }
 
+    @Test
+    void deletesOneTerminalRunWithItsEventsAndTaskStatuses() {
+        WorkflowRunRepository repository = repository();
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "delete-one-history.yml");
+        repository.appendEvent(runId, "QUEUED", "accepted");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId, "task-a", "Task A", "FAILED", "execution", null, "failed", Instant.now()
+        ));
+        repository.markFailed(runId, "failed");
+
+        assertThat(repository.deleteTerminalRun(runId)).isTrue();
+
+        assertThat(repository.findRun(runId)).isEmpty();
+        assertThat(repository.listEvents(runId)).isEmpty();
+        assertThat(repository.listTaskStatuses(runId)).isEmpty();
+    }
+
+    @Test
+    void clearingHistoryDeletesOnlyTerminalRunsAndPreservesActiveRuns() {
+        WorkflowRunRepository repository = repository();
+        long succeededRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "clear-succeeded-history.yml");
+        repository.markSucceeded(succeededRunId);
+        long failedRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "clear-failed-history.yml");
+        repository.markFailed(failedRunId, "failed");
+        long queuedRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "keep-queued-history.yml");
+        long runningRunId = repository.createRun(new WorkflowRunSubmission(
+                "git-code-contribution-report", "full", null, null, null, Map.of(), null
+        ), "keep-running-history.yml");
+        repository.markRunning(runningRunId);
+
+        assertThat(repository.clearTerminalRuns()).isEqualTo(2);
+
+        assertThat(repository.listRuns()).extracting(WorkflowRunRecord::id)
+                .containsExactly(runningRunId, queuedRunId);
+    }
+
     private WorkflowRunRepository repository() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         new WorkflowRunSchema(jdbcTemplate).initialize();

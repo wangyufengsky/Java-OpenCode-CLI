@@ -326,6 +326,21 @@ h2 {
   background: #244bd0;
 }
 
+.button.danger {
+  border-color: #f3c7c3;
+  color: var(--color-danger);
+}
+
+.button.danger:hover {
+  border-color: var(--color-danger);
+  background: #fff7f6;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid var(--color-border);
@@ -532,12 +547,42 @@ tbody tr:last-child td {
   align-items: flex-start;
 }
 
+.history-results-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .history-table {
-  min-width: 910px;
+  min-width: 1080px;
 }
 
 .history-actions {
   white-space: nowrap;
+}
+
+.history-action-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.history-action-link:hover {
+  text-decoration: underline;
+}
+
+.history-action-link.danger-link {
+  color: var(--color-danger);
+}
+
+.history-action-status {
+  min-height: 20px;
+  margin: 8px 0;
 }
 
 .history-empty-state {
