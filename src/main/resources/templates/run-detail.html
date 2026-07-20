@@ -6,7 +6,17 @@
   <aside th:replace="~{fragments/layout :: sidebar('history')}"></aside>
   <main class="app-main">
     <header th:replace="~{fragments/layout :: pageHeader('运行详情', ${'运行 ' + run.id + ' / ' + @consoleText.chain(run.chainId)}, ${@consoleText.mode(run.mode) + ' / ' + @consoleText.phase(run.phase)})}"></header>
-    <div class="page-content">
+    <div class="page-content run-detail-page">
+
+    <section class="run-context-bar" aria-label="运行上下文">
+      <span th:replace="~{fragments/layout :: statusBadge(${@consoleText.state(run.state)}, ${run.state.name().toLowerCase()})}">运行状态</span>
+      <p th:text="${run.chainId + ' · ' + @consoleText.mode(run.mode)}">工作流 · 运行方式</p>
+      <div>
+        <a class="button c-button" th:href="@{/runs/new(copyFrom=${run.id})}">复制配置</a>
+        <a th:if="${rerunAction.available}" class="button c-button primary"
+           th:href="@{/runs/new(chainId=${run.chainId},mode='rerun',rerunType=${rerunAction.rerunType},rerunId=${rerunAction.rerunId})}">重跑失败任务</a>
+      </div>
+    </section>
 
     <section id="run-summary" class="metrics" aria-label="运行摘要">
     <article class="c-metric-card" data-tone="info"><span>状态</span><strong id="run-state" th:text="${@consoleText.state(run.state)}">排队中</strong></article>

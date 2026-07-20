@@ -6,7 +6,7 @@
   <aside th:replace="~{fragments/layout :: sidebar('dashboard')}"></aside>
   <main class="app-main">
     <header th:replace="~{fragments/layout :: pageHeader('运行管理', '运行概览', '监控任务状态、近期运行与系统健康度。')}"></header>
-    <div class="page-content">
+    <div class="page-content dashboard-page">
 
     <section class="metrics" aria-label="运行指标">
     <th:block th:each="metric : ${dashboardMetrics}">
@@ -14,17 +14,14 @@
     </th:block>
     </section>
 
-    <th:block th:if="${!dashboardAttentionRuns.isEmpty()}">
-      <div th:replace="~{fragments/layout :: alert(${dashboardAttentionRuns.size() + ' 项失败运行需要处理'}, 'danger')}">
-        有失败运行需要处理
-      </div>
-    </th:block>
-
     <section class="dashboard-grid">
-    <article class="panel">
+    <article class="panel dashboard-recent-runs">
       <div class="panel-title">
-        <h2>最近运行</h2>
-        <a href="/history">查看全部</a>
+        <div class="dashboard-section-heading">
+          <h2>最近运行</h2>
+          <span>按更新时间排序</span>
+        </div>
+        <a class="button c-button" href="/history">全部</a>
       </div>
       <div th:if="${dashboardRuns.isEmpty()}" class="dashboard-empty-state" role="status">
         <strong>尚无运行记录</strong>
@@ -32,7 +29,7 @@
         <a class="button c-button primary" href="/runs/new">新建运行</a>
       </div>
       <div th:if="${!dashboardRuns.isEmpty()}" class="table-scroll">
-        <table>
+        <table class="dashboard-runs-table">
           <thead>
           <tr><th>编号</th><th>链路</th><th>模式</th><th>状态</th><th>创建时间</th><th>耗时</th></tr>
           </thead>
@@ -45,10 +42,19 @@
       </div>
     </article>
 
+    <th:block th:if="${!dashboardAttentionRuns.isEmpty()}">
+      <div class="alert c-alert danger" role="alert">
+        <strong>最新失败需要关注</strong>
+        <span th:text="${dashboardAttentionRuns.size() + ' 项失败运行需要处理'}">有失败运行需要处理</span>
+        <a th:href="@{/runs/{id}(id=${dashboardAttentionRuns.get(0).id})}">查看运行 →</a>
+      </div>
+    </th:block>
+
     <aside class="panel dashboard-attention-panel">
       <div class="panel-title">
         <h2>需要关注</h2>
       </div>
+      <p class="dashboard-panel-description">优先处理失败与长时间运行任务，避免阻塞后续队列。</p>
       <ol class="event-list">
         <li th:each="run : ${dashboardAttentionRuns}">
           <time th:text="${run.createdAtLabel}">时间</time>
@@ -57,13 +63,17 @@
         </li>
         <li th:if="${dashboardAttentionRuns.isEmpty()}"><span class="empty">暂无失败运行。</span></li>
       </ol>
+    </aside>
+
+    <aside class="panel dashboard-quick-start">
       <div class="panel-title">
         <h2>快速开始</h2>
       </div>
+      <p class="dashboard-panel-description">从常用入口开始，减少重复配置和定位成本。</p>
       <div class="chain-list">
-        <a th:each="chain : ${chains}" th:href="@{/runs/new(chainId=${chain})}">
+        <a th:each="chain,iter : ${chains}" th:if="${iter.index < 2}" th:href="@{/runs/new(chainId=${chain})}">
           <strong th:text="${@consoleText.chain(chain)}">链路</strong>
-          <span>配置并加入队列</span>
+          <span>选择工作流和配置，立即创建一次新运行。</span>
         </a>
       </div>
     </aside>

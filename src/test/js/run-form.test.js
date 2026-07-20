@@ -178,9 +178,12 @@ function createHarness(fetchImplementation, options = {}) {
     copyStatus: add(document, form, 'p', 'copy-load-status'),
     preflightAlert: add(document, form, 'p', 'preflight-alert'),
     summaryChain: add(document, form, 'span', 'summary-chain'),
-    summaryMode: add(document, form, 'span', 'summary-mode'),
-    summaryDate: add(document, form, 'span', 'summary-date'),
-    summaryProject: add(document, form, 'span', 'summary-project')
+    summaryProject: add(document, form, 'span', 'summary-project'),
+    summaryScope: add(document, form, 'span', 'summary-scope'),
+    summaryValidation: add(document, form, 'span', 'summary-validation'),
+    summaryAgentBridge: add(document, form, 'span', 'summary-agentbridge'),
+    summaryOutput: add(document, form, 'span', 'summary-output'),
+    summaryReady: add(document, form, 'span', 'summary-ready')
   };
 
   const field = options.field || {
@@ -192,16 +195,18 @@ function createHarness(fetchImplementation, options = {}) {
     required: true,
     summary: true
   };
+  const fields = options.fields || [field];
   const definitions = {
-    alpha: { label: 'Alpha', description: 'Alpha workflow', fields: [field] },
-    beta: { label: 'Beta', description: 'Beta workflow', fields: [field] }
+    alpha: { label: 'Alpha', description: 'Alpha workflow', fields },
+    beta: { label: 'Beta', description: 'Beta workflow', fields }
   };
   const location = { href: 'http://localhost/runs/new' };
   const history = { replaceState() {} };
   const window = {
     ConsoleCommon: {
       chainConfigDefinitions: definitions,
-      groupDefinitions: [{ group: 'project', label: '项目', description: '项目字段' }],
+      groupDefinitions: options.groupDefinitions
+        || [{ group: 'project', label: '项目', description: '项目字段' }],
       rerunTypeDefinitions: { alpha: [], beta: [] }
     },
     location,
@@ -279,6 +284,48 @@ function createFakeTimers() {
     }
   };
 }
+
+test('run summary renders the six Figma summary fields independently', async () => {
+  const fields = [
+    { key: 'project.repo', label: '项目仓库', description: '', type: 'text', group: 'project', required: true },
+    { key: 'paths.out', label: '输出目录', description: '', type: 'path', group: 'project', required: true },
+    { key: 'source.package-paths', label: '包路径', description: '', type: 'list', group: 'scope' },
+    { key: 'test.require-coverage', label: '要求覆盖率', description: '', type: 'checkbox', group: 'validation' },
+    { key: 'test.coverage-threshold-percent', label: '覆盖率阈值', description: '', type: 'number', group: 'validation' },
+    { key: 'agentbridge.timeout-minutes', label: '超时', description: '', type: 'number', group: 'agentbridge' },
+    { key: 'agentbridge.max-attempts', label: '尝试轮次', description: '', type: 'number', group: 'agentbridge' }
+  ];
+  const defaults = {
+    'project.repo': '/workspace/demo',
+    'paths.out': 'src/test/java',
+    'source.package-paths': ['src/main/java'],
+    'test.require-coverage': true,
+    'test.coverage-threshold-percent': 80,
+    'agentbridge.timeout-minutes': 30,
+    'agentbridge.max-attempts': 3
+  };
+  const harness = createHarness(
+    () => Promise.resolve(response({ defaults })),
+    {
+      fields,
+      groupDefinitions: [
+        { group: 'project', label: '项目', description: '' },
+        { group: 'scope', label: '范围', description: '' },
+        { group: 'validation', label: '验证', description: '' },
+        { group: 'agentbridge', label: 'AgentBridge', description: '' }
+      ]
+    }
+  );
+  await initialize(harness);
+
+  assert.equal(harness.nodes.summaryChain.textContent, 'Alpha');
+  assert.equal(harness.nodes.summaryProject.textContent, '/workspace/demo');
+  assert.equal(harness.nodes.summaryScope.textContent, 'src/main/java');
+  assert.equal(harness.nodes.summaryValidation.textContent, '失败即停止 · 覆盖率 80%');
+  assert.equal(harness.nodes.summaryAgentBridge.textContent, '最多 3 轮 · 30 分钟超时');
+  assert.equal(harness.nodes.summaryOutput.textContent, 'src/test/java');
+  assert.equal(harness.nodes.summaryReady.textContent, '已就绪');
+});
 
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {
   const harness = requestHarness();

@@ -131,7 +131,7 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("<option value=\"synthesis\">总报告</option>")))
                 .andExpect(content().string(not(containsString("配置快照"))))
                 .andExpect(content().string(not(containsString("configYaml"))))
-                .andExpect(content().string(containsString("提交运行")));
+                .andExpect(content().string(containsString("确认并运行")));
         mockMvc.perform(get("/schedules").param("chainId", "weekly-engineering-report"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("<option value=\"review-batch\">审查批次</option>")))
@@ -562,7 +562,7 @@ class ConsoleMvcTest {
                 .contains("<title>新建运行</title>")
                 .contains("<h1>新建运行</h1>")
                 .contains("<script src=\"/js/console-common.js\"></script>")
-                .contains("<script src=\"/js/run-form.js\"></script>")
+                .contains("<script src=\"/js/run-form.js?v=20260720-figma-summary\"></script>")
                 .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js");
         assertThat(mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())

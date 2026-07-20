@@ -118,9 +118,7 @@
       if (fields.length === 0) return;
       const group = document.createElement('details');
       group.className = 'panel config-group';
-      const onlyAdvanced = ['validation', 'agentbridge'].includes(groupDefinition.group)
-        && fields.every((item) => !item.required && !item.summary);
-      group.open = !onlyAdvanced;
+      group.open = groupDefinition.group === 'project';
 
       const heading = document.createElement('summary');
       const title = document.createElement('strong');
@@ -421,17 +419,55 @@
   function updateSummary() {
     const definition = chainConfigDefinitions[chainSelect.value];
     document.querySelector('#summary-chain').textContent = definition?.label || chainSelect.value;
-    const rerunDefinition = selectedRerunTypeDefinition();
-    document.querySelector('#summary-mode').textContent = modeSelect.value === 'rerun'
-      ? `重跑 / ${rerunDefinition?.label || '未选择'}` : '全量';
-    document.querySelector('#summary-date').textContent = runDateInput.value || '未指定';
-    const summaryFields = (definition?.fields || []).filter((item) => item.summary);
-    const summary = summaryFields.map((item) => {
-      const control = document.querySelector(`[data-config-key="${item.key}"]`);
-      const value = readValue(control, item.type);
-      return value === null || value === '' || (Array.isArray(value) && value.length === 0) ? null : `${item.label}：${value}`;
-    }).filter(Boolean).slice(0, 3);
-    document.querySelector('#summary-project').textContent = summary.join('；') || '等待填写';
+    document.querySelector('#summary-project').textContent = firstSummaryValue([
+      'project.repo', 'paths.repo', 'new-project', 'java-root', 'project.id', 'project.name'
+    ]) || '等待填写';
+    document.querySelector('#summary-scope').textContent = firstSummaryValue([
+      'source.package-paths', 'source.include', 'git.include', 'transaction-plan-dir',
+      'service-identify', 'xml-root'
+    ]) || defaultScopeSummary(chainSelect.value);
+    document.querySelector('#summary-validation').textContent = validationSummary();
+    document.querySelector('#summary-agentbridge').textContent = agentBridgeSummary();
+    document.querySelector('#summary-output').textContent = firstSummaryValue([
+      'paths.out', 'local-out', 'out'
+    ]) || '等待填写';
+    const readyBadge = document.querySelector('#summary-ready');
+    readyBadge.textContent = configReady ? '已就绪' : '配置中';
+    readyBadge.className = `status-badge ${configReady ? 'success' : 'queued'}`;
+  }
+
+  function firstSummaryValue(keys) {
+    for (const key of keys) {
+      const definitionField = chainConfigDefinitions[chainSelect.value]?.fields
+        .find((item) => item.key === key);
+      if (!definitionField) continue;
+      const value = readValue(document.querySelector(`[data-config-key="${key}"]`), definitionField.type);
+      if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) continue;
+      return Array.isArray(value) ? value.join('，') : String(value);
+    }
+    return '';
+  }
+
+  function defaultScopeSummary(chainId) {
+    if (chainId === 'project-unit-test-generation') return '全量扫描';
+    if (chainId === 'git-code-contribution-report' || chainId === 'weekly-engineering-report') return '全部仓库';
+    return '按工作流默认范围';
+  }
+
+  function validationSummary() {
+    const requireCoverage = document.querySelector('[data-config-key="test.require-coverage"]');
+    if (!requireCoverage?.checked) return '失败即停止';
+    const threshold = firstSummaryValue(['test.coverage-threshold-percent']);
+    return threshold ? `失败即停止 · 覆盖率 ${threshold}%` : '失败即停止 · 要求覆盖率';
+  }
+
+  function agentBridgeSummary() {
+    const attempts = firstSummaryValue(['agentbridge.max-attempts']);
+    const timeout = firstSummaryValue(['agentbridge.timeout-minutes']);
+    if (attempts && timeout) return `最多 ${attempts} 轮 · ${timeout} 分钟超时`;
+    if (attempts) return `自动重试 · 最多 ${attempts} 轮`;
+    if (timeout) return `自动重连 · ${timeout} 分钟超时`;
+    return '自动重连 · 增量事件恢复';
   }
 
   runForm.addEventListener('submit', async (event) => {

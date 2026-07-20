@@ -7,6 +7,10 @@
   <main class="app-main">
     <header th:replace="~{fragments/layout :: pageHeader('运行管理', '运行历史', '筛选、追踪并复用已保存的工作流运行。')}"></header>
     <div class="page-content history-page">
+      <div class="history-intro-row">
+        <p>显示最近 30 天运行记录 · 可按条件快速定位</p>
+        <a class="button c-button primary" href="/runs/new">＋ 新建运行</a>
+      </div>
       <form id="history-filter-form" class="panel history-filter-panel c-filter-control" action="/history" method="get">
         <div class="history-filter-heading">
           <div>
@@ -49,6 +53,7 @@
         <div class="history-filter-actions">
           <button class="button c-button primary" type="submit">应用筛选</button>
           <span class="page-description" th:text="|共 ${historyPage.total} 条运行记录|">共 0 条运行记录</span>
+          <a class="button c-button" th:href="${clearFiltersUrl}">清除筛选</a>
         </div>
       </form>
 
