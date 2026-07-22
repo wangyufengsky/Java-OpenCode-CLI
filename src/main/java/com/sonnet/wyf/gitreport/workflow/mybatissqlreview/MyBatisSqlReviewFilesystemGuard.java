@@ -167,10 +167,35 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     }
 
     <T> T withJavaWrites(List<Path> allowedRoots, CheckedOperation<T> operation) throws Exception {
+        return withJavaWritesSealed(allowedRoots, operation).value();
+    }
+
+    <T> SealedWrite<T> withJavaWritesSealed(
+            List<Path> allowedRoots,
+            CheckedOperation<T> operation
+    ) throws Exception {
         if (runProtection == null) {
-            return operation.run();
+            T value = operation.run();
+            Map<Path, SealedFile> files = new LinkedHashMap<>();
+            for (Path path : allowedRoots) {
+                Path normalized = path.toAbsolutePath().normalize();
+                BasicFileAttributes attributes = Files.readAttributes(
+                        normalized, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+                );
+                if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
+                    throw new IllegalStateException("Java output disappeared before sealing: " + normalized);
+                }
+                files.put(normalized, new SealedFile(
+                        normalized,
+                        attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
+                        attributes.lastModifiedTime(),
+                        attributes.size(),
+                        sha256(normalized)
+                ));
+            }
+            return new SealedWrite<>(value, files);
         }
-        return runProtection.withJavaWrites(allowedRoots, operation);
+        return runProtection.withJavaWritesSealed(allowedRoots, operation);
     }
 
     static void requireSafeCandidate(Path attemptRoot, Path candidate) throws IOException {
@@ -767,6 +792,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
 
         default void javaWritesSealed(List<Path> paths) {
         }
+
+        default void javaWritesCompletedBeforeSeal(List<Path> paths) {
+        }
     }
 
     @FunctionalInterface
@@ -1006,7 +1034,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             }
         }
 
-        private <T> T withJavaWrites(List<Path> allowedPaths, CheckedOperation<T> operation) throws Exception {
+        private <T> SealedWrite<T> withJavaWritesSealed(
+                List<Path> allowedPaths,
+                CheckedOperation<T> operation
+        ) throws Exception {
             requireOpen();
             Objects.requireNonNull(allowedPaths, "allowedPaths");
             Objects.requireNonNull(operation, "operation");
@@ -1058,11 +1089,12 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 operationFailure = exception;
             }
             Throwable refreshFailure = null;
+            Map<Path, CurrentEntry> sealed = new LinkedHashMap<>();
             try {
+                observer.javaWritesCompletedBeforeSeal(allowed);
                 for (Path path : allowed) {
                     applyGuardedPermission(path);
                 }
-                Map<Path, CurrentEntry> sealed = new LinkedHashMap<>();
                 for (Path path : allowed) {
                     CurrentEntry entry = currentEntryOrNull(path, true);
                     if (entry == null || entry.kind() != Kind.REGULAR_FILE) {
@@ -1123,7 +1155,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
                 throw (Error) refreshFailure;
             }
-            return value;
+            Map<Path, SealedFile> sealedFiles = new LinkedHashMap<>();
+            for (Map.Entry<Path, CurrentEntry> entry : sealed.entrySet()) {
+                CurrentEntry file = entry.getValue();
+                sealedFiles.put(entry.getKey(), new SealedFile(
+                        entry.getKey(), file.fileKey(), file.lastModifiedTime(), file.size(), file.sha256()
+                ));
+            }
+            return new SealedWrite<>(value, sealedFiles);
         }
 
         private void close() {
@@ -1918,5 +1957,20 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             String sha256,
             String symbolicLinkTarget
     ) {
+    }
+
+    record SealedFile(
+            Path path,
+            String fileKey,
+            FileTime lastModifiedTime,
+            long size,
+            String sha256
+    ) {
+    }
+
+    record SealedWrite<T>(T value, Map<Path, SealedFile> files) {
+        SealedWrite {
+            files = Map.copyOf(files);
+        }
     }
 }

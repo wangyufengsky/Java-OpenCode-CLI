@@ -437,6 +437,73 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
+    void runnerRejectsValidSetSubstitutedAfterCopyButBeforeFilesystemSeal() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        List<String> artifacts = List.of("report.md", "summary.json", "database-evidence.json");
+        Path target = Files.createDirectories(layout.currentRun().resolve("bundle/task"));
+        Path alternate = Files.createDirectories(tempDir.resolve("alternate-valid-bundle"));
+        Map<String, String> fixtures = Map.of(
+                "report.md", "report-valid.md",
+                "summary.json", "sql-summary-valid.json",
+                "database-evidence.json", "database-evidence-valid.json"
+        );
+        for (String artifact : artifacts) {
+            try (var input = getClass().getResourceAsStream(
+                    "/mybatis-sql-review-fixtures/" + fixtures.get(artifact)
+            )) {
+                Files.copy(java.util.Objects.requireNonNull(input), layout.candidateOne().resolve(artifact));
+            }
+            Files.copy(layout.candidateOne().resolve(artifact), alternate.resolve(artifact));
+            Files.createFile(target.resolve(artifact));
+        }
+        Files.writeString(
+                alternate.resolve("report.md"),
+                Files.readString(alternate.resolve("report.md")) + System.lineSeparator()
+        );
+        var expectedTask = new MyBatisSqlOutputValidator.ExpectedTaskContext(
+                "mapper-order-find-open", "mappers/OrderMapper.xml", "com.example.OrderMapper",
+                "findOpen", "select", false
+        );
+        MyBatisSqlOutputValidator validator = new MyBatisSqlOutputValidator(objectMapper);
+        assertThat(validator.validatePublishedOffline(layout.candidateOne(), expectedTask))
+                .isEqualTo(validator.validatePublishedOffline(alternate, expectedTask));
+        MyBatisSqlReviewTaskRunner.CandidateSnapshot validated =
+                MyBatisSqlReviewTaskRunner.captureCandidate(layout.candidateOne());
+        RecordingProtectionObserver observer = new RecordingProtectionObserver();
+        observer.onJavaWritesCompletedBeforeSeal = () -> {
+            try {
+                for (String artifact : artifacts) {
+                    Files.write(target.resolve(artifact), Files.readAllBytes(alternate.resolve(artifact)));
+                }
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        };
+        try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo()), observer
+        )) {
+            MyBatisSqlReviewFilesystemGuard.SealedWrite<Path> sealed = guard.withJavaWritesSealed(
+                    artifacts.stream().map(target::resolve).toList(),
+                    () -> {
+                        MyBatisSqlReviewTaskRunner.copyCandidateSnapshot(
+                                layout.candidateOne(), target, validated
+                        );
+                        return target;
+                    }
+            );
+            MyBatisSqlReviewTaskRunner.CandidateSnapshot published =
+                    MyBatisSqlReviewTaskRunner.captureCandidate(target);
+
+            assertThatThrownBy(() -> MyBatisSqlReviewTaskRunner.verifySealedBundle(
+                    validated, published, target, sealed
+            )).hasMessageContaining("differs from validated candidate");
+        }
+    }
+
+    @Test
     void preservesOnlyABoundedPrefixForALargeUnexpectedConflict() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
@@ -586,6 +653,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         private final Map<Path, Integer> backups = new LinkedHashMap<>();
         private final Map<Path, Integer> permissionChanges = new LinkedHashMap<>();
         private Runnable onJavaWritesSealed;
+        private Runnable onJavaWritesCompletedBeforeSeal;
 
         @Override
         public void backedUp(Path path) {
@@ -601,6 +669,13 @@ class MyBatisSqlReviewFilesystemGuardTest {
         public void javaWritesSealed(List<Path> paths) {
             if (onJavaWritesSealed != null) {
                 onJavaWritesSealed.run();
+            }
+        }
+
+        @Override
+        public void javaWritesCompletedBeforeSeal(List<Path> paths) {
+            if (onJavaWritesCompletedBeforeSeal != null) {
+                onJavaWritesCompletedBeforeSeal.run();
             }
         }
 

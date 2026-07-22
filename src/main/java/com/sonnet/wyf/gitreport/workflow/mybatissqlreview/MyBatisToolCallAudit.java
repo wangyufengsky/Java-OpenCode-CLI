@@ -42,6 +42,61 @@ public final class MyBatisToolCallAudit {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
 
+    static void validateDeterminableScenario(
+            String queryText,
+            String callId,
+            String configuredSchema,
+            long durationMs
+    ) {
+        if (durationMs < 0 || durationMs > MAX_QUERY_DURATION_MS) {
+            throw new IllegalStateException(
+                    "tool call " + callId
+                            + " violates SQL review policy: execute_sql_query duration must be in 0..30000 ms"
+            );
+        }
+        new ReadOnlySqlPolicy(MAX_ROWS_PER_CALL).validateDeterminable(
+                queryText, callId, configuredSchema
+        );
+    }
+
+    static void validateDeterminableMetadata(
+            String toolName,
+            JsonNode arguments,
+            String callId
+    ) {
+        if (!ALLOWED_TOOLS.contains(toolName)) {
+            throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
+        }
+        if ("execute_sql_query".equals(toolName)) {
+            throw new IllegalStateException("execute_sql_query evidence must be represented as a scenario");
+        }
+        if (!"preview_table_data".equals(toolName)) {
+            return;
+        }
+        String tableName = arguments.path("tableName").asText("");
+        if (!tableName.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new IllegalStateException(
+                    "tool call " + callId + " preview tableName must be a plain relation name"
+            );
+        }
+        arguments.fieldNames().forEachRemaining(field -> {
+            if (!PREVIEW_ARGUMENTS.contains(field)) {
+                throw new IllegalStateException(
+                        "tool call " + callId + " uses an unsupported preview argument: " + field
+                );
+            }
+        });
+        JsonNode maximumRows = arguments.path("maxRowCount");
+        if (!maximumRows.isIntegralNumber()
+                || !maximumRows.canConvertToInt()
+                || maximumRows.intValue() < 1
+                || maximumRows.intValue() > MAX_ROWS_PER_CALL) {
+            throw new IllegalStateException(
+                    "tool call " + callId + " preview maxRowCount must be an integer in 1..20"
+            );
+        }
+    }
+
     public Result audit(
             List<AgentBridgeClient.ToolCallRecord> history,
             Boundary boundary,
@@ -96,10 +151,10 @@ public final class MyBatisToolCallAudit {
                 if (queryScenarios > MAX_QUERY_SCENARIOS) {
                     throw violation(call, "execute_sql_query is limited to at most 3 scenarios");
                 }
-                if (call.durationMs() > MAX_QUERY_DURATION_MS) {
-                    throw violation(call, "execute_sql_query duration exceeds 30000 ms");
-                }
                 queryText = call.arguments().path("queryText").asText("");
+                validateDeterminableScenario(
+                        queryText, call.id(), database.schemaName(), call.durationMs()
+                );
                 sqlPolicy.validate(
                         queryText,
                         call.id(),
@@ -107,6 +162,7 @@ public final class MyBatisToolCallAudit {
                         database.safeBaseRelations()
                 );
             } else if ("preview_table_data".equals(call.toolName())) {
+                validateDeterminableMetadata(call.toolName(), call.arguments(), call.id());
                 requireSafePreviewRelation(call, database);
             }
 

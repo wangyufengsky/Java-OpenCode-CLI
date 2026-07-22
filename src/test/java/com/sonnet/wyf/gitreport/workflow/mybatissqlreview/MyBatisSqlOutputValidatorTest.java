@@ -357,6 +357,39 @@ class MyBatisSqlOutputValidatorTest {
                 .hasMessageContaining("row_count");
     }
 
+    @Test
+    void offlineAndOnlineEvidencePoliciesRejectTheSameDeterminableSqlViolation() throws Exception {
+        String unsafe = "SELECT id FROM public.orders LIMIT 20";
+        assertThatThrownBy(() -> MyBatisToolCallAudit.validateDeterminableScenario(
+                unsafe, "call-2", "audit", 42
+        )).hasMessageContaining("outside the configured schema");
+
+        Path candidates = validCandidates();
+        ObjectNode evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/scenarios/0")).put("query_text", unsafe);
+        ((ObjectNode) evidence.at("/scenarios/0/arguments")).put("queryText", unsafe);
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(candidates, expectedTask()))
+                .hasMessageContaining("outside the configured schema");
+
+        Path metadataQuery = validCandidates();
+        evidence = evidence(metadataQuery);
+        ((ObjectNode) evidence.at("/metadata/0")).put("tool_name", "execute_sql_query");
+        writeJson(metadataQuery.resolve("database-evidence.json"), evidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(metadataQuery, expectedTask()))
+                .hasMessageContaining("must be represented as a scenario");
+
+        Path unsafePreview = validCandidates();
+        evidence = evidence(unsafePreview);
+        ObjectNode metadata = (ObjectNode) evidence.at("/metadata/0");
+        metadata.put("tool_name", "preview_table_data");
+        ObjectNode previewArguments = (ObjectNode) metadata.path("arguments");
+        previewArguments.put("tableName", "orders").put("maxRowCount", 21);
+        writeJson(unsafePreview.resolve("database-evidence.json"), evidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(unsafePreview, expectedTask()))
+                .hasMessageContaining("maxRowCount").hasMessageContaining("1..20");
+    }
+
     private MyBatisSqlOutputValidator.Result validateCandidates(Path candidates) throws Exception {
         return validator.validate(candidates, expectedTask(), database, auditedFacts());
     }

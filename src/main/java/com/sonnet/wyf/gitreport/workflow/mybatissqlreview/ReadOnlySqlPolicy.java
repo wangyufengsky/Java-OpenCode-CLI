@@ -28,6 +28,17 @@ final class ReadOnlySqlPolicy {
             String configuredSchema,
             Set<String> safeBaseRelations
     ) {
+        String canonicalRelation = validateDeterminable(sql, callId, configuredSchema);
+        if (!safeBaseRelations.contains(canonicalRelation)) {
+            throw violation(
+                    callId,
+                    "relation is not an explicitly verified safe base relation: " + canonicalRelation
+            );
+        }
+        return canonicalRelation;
+    }
+
+    String validateDeterminable(String sql, String callId, String configuredSchema) {
         if (sql == null || sql.isBlank()) {
             throw violation(callId, "queryText is required");
         }
@@ -47,15 +58,8 @@ final class ReadOnlySqlPolicy {
                             + relation.qualifiedName()
             );
         }
-        String canonicalRelation = MyBatisDatabasePreflight.canonicalRelation(
+        return MyBatisDatabasePreflight.canonicalRelation(
                 configuredSchema, relation.relationName());
-        if (!safeBaseRelations.contains(canonicalRelation)) {
-            throw violation(
-                    callId,
-                    "relation is not an explicitly verified safe base relation: " + canonicalRelation
-            );
-        }
-        return canonicalRelation;
     }
 
     private List<Token> tokenize(String sql) {

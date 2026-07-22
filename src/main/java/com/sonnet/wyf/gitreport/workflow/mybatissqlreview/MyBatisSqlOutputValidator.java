@@ -173,11 +173,12 @@ public final class MyBatisSqlOutputValidator {
             requireUnique(evidenceIds, requireText(item, "evidence_id", "metadata item"), "evidence_id");
             String callId = requireText(item, "tool_call_id", "metadata item");
             requireUniqueCallEvidence(representedCallIds, callId);
-            requireText(item, "tool_name", "metadata item");
+            String toolName = requireMetadataToolName(item, "metadata item");
             requireText(item, "timestamp", "metadata item");
             requireNonNegativeLong(item, "duration_ms", "metadata item");
             JsonNode arguments = requireObject(item, "arguments", "metadata item");
             requireOfflineDatabaseArguments(arguments, evidence, "metadata item");
+            MyBatisToolCallAudit.validateDeterminableMetadata(toolName, arguments, callId);
             if (item.path("result").isMissingNode() || item.path("result").isNull()) {
                 throw new IllegalStateException("metadata item.result is required");
             }
@@ -199,12 +200,15 @@ public final class MyBatisSqlOutputValidator {
             String callId = requireText(scenario, "tool_call_id", "scenario");
             requireUniqueCallEvidence(representedCallIds, callId);
             requireText(scenario, "timestamp", "scenario");
-            requireNonNegativeLong(scenario, "duration_ms", "scenario");
-            requireText(scenario, "query_text", "scenario");
+            String queryText = requireText(scenario, "query_text", "scenario");
             JsonNode arguments = requireObject(scenario, "arguments", "scenario");
             requireOfflineDatabaseArguments(arguments, evidence, "scenario");
-            requireExactText(arguments, "queryText", scenario.path("query_text").asText(),
+            requireExactText(arguments, "queryText", queryText,
                     "scenario arguments");
+            long durationMs = requireNonNegativeLong(scenario, "duration_ms", "scenario");
+            MyBatisToolCallAudit.validateDeterminableScenario(
+                    queryText, callId, evidence.path("schema_name").asText(), durationMs
+            );
             JsonNode result = requireObject(scenario, "result", "scenario");
             JsonNode columns = requireArray(scenario, "columns", "scenario");
             uniqueTextList(columns, "scenario.columns");
@@ -251,11 +255,22 @@ public final class MyBatisSqlOutputValidator {
         requireExactText(arguments, "schemaName", evidence.path("schema_name").asText(), label);
     }
 
-    private void requireNonNegativeLong(JsonNode parent, String field, String label) {
+    private long requireNonNegativeLong(JsonNode parent, String field, String label) {
         JsonNode value = parent.path(field);
         if (!value.isIntegralNumber() || value.longValue() < 0) {
             throw new IllegalStateException(label + "." + field + " must be a non-negative integer");
         }
+        return value.longValue();
+    }
+
+    private String requireMetadataToolName(JsonNode item, String label) {
+        String toolName = requireText(item, "tool_name", label);
+        if ("execute_sql_query".equals(toolName)) {
+            throw new IllegalStateException(
+                    "execute_sql_query evidence must be represented as a scenario"
+            );
+        }
+        return toolName;
     }
 
     private void requireAuditedContext(
@@ -413,6 +428,7 @@ public final class MyBatisSqlOutputValidator {
             String callId = requireText(item, "tool_call_id", "metadata item");
             MyBatisToolCallAudit.AuditedCallFact fact = requireAuditedFact(factsById, callId);
             requireUniqueCallEvidence(representedCallIds, callId);
+            requireMetadataToolName(item, "metadata item");
             if ("execute_sql_query".equals(fact.toolName())) {
                 throw new IllegalStateException("execute_sql_query audited call must be represented as a scenario: " + callId);
             }
@@ -441,6 +457,12 @@ public final class MyBatisSqlOutputValidator {
             requireExactText(scenario, "query_text", fact.queryText(), "scenario for audited call " + callId);
             requireExactJson(scenario, "arguments", fact.arguments(), "scenario for audited call " + callId);
             requireExactJson(scenario, "result", fact.resultData(), "scenario for audited call " + callId);
+            MyBatisToolCallAudit.validateDeterminableScenario(
+                    scenario.path("query_text").asText(),
+                    callId,
+                    evidence.path("schema_name").asText(),
+                    scenario.path("duration_ms").asLong(-1)
+            );
 
             JsonNode columns = requireArray(scenario, "columns", "scenario");
             List<String> actualColumns = uniqueTextList(columns, "scenario.columns");

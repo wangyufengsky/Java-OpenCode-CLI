@@ -217,7 +217,7 @@ public final class MyBatisSqlReviewTaskRunner {
                         audit
                 );
                 CandidateSnapshot candidateSnapshot = captureCandidate(layout.candidate());
-                Path publishedDirectory = guard.withJavaWrites(
+                MyBatisSqlReviewFilesystemGuard.SealedWrite<Path> sealedWrite = guard.withJavaWritesSealed(
                         List.of(
                                 layout.validation(), layout.status(),
                                 prepared.bundleDirectory().resolve("report.md"),
@@ -233,6 +233,9 @@ public final class MyBatisSqlReviewTaskRunner {
                             return published;
                         }
                 );
+                Path publishedDirectory = sealedWrite.value();
+                CandidateSnapshot publishedSnapshot = captureCandidate(publishedDirectory);
+                verifySealedBundle(candidateSnapshot, publishedSnapshot, publishedDirectory, sealedWrite);
                 MyBatisSqlOutputValidator.Result copiedValidation = outputValidator.validate(
                         publishedDirectory,
                         new MyBatisSqlOutputValidator.ExpectedTaskContext(
@@ -478,9 +481,44 @@ public final class MyBatisSqlReviewTaskRunner {
             if (total > MAX_CANDIDATE_TOTAL_BYTES) {
                 throw new IllegalStateException("candidate artifacts exceed total safe size limit");
             }
-            files.put(artifact, new CandidateFile(size, HexFormat.of().formatHex(digest.digest())));
+            files.put(artifact, new CandidateFile(
+                    size,
+                    HexFormat.of().formatHex(digest.digest()),
+                    after.fileKey() == null ? "" : after.fileKey().toString(),
+                    after.lastModifiedTime()
+            ));
         }
         return new CandidateSnapshot(Map.copyOf(files), total);
+    }
+
+    static void verifySealedBundle(
+            CandidateSnapshot validated,
+            CandidateSnapshot published,
+            Path publishedDirectory,
+            MyBatisSqlReviewFilesystemGuard.SealedWrite<?> sealedWrite
+    ) {
+        for (String artifact : CANDIDATE_ARTIFACTS) {
+            CandidateFile expected = validated.files().get(artifact);
+            CandidateFile actual = published.files().get(artifact);
+            if (expected == null || actual == null
+                    || expected.size() != actual.size()
+                    || !expected.sha256().equals(actual.sha256())) {
+                throw new IllegalStateException(
+                        "sealed bundle differs from validated candidate: " + artifact
+                );
+            }
+            Path path = publishedDirectory.resolve(artifact).toAbsolutePath().normalize();
+            MyBatisSqlReviewFilesystemGuard.SealedFile sealed = sealedWrite.files().get(path);
+            if (sealed == null
+                    || sealed.size() != actual.size()
+                    || !sealed.sha256().equals(actual.sha256())
+                    || !sealed.fileKey().equals(actual.fileKey())
+                    || !sealed.lastModifiedTime().equals(actual.lastModifiedTime())) {
+                throw new IllegalStateException(
+                        "published bundle changed after filesystem sealing: " + artifact
+                );
+            }
+        }
     }
 
     private static void requireExactTargetTree(Path target) throws IOException {
@@ -551,6 +589,6 @@ public final class MyBatisSqlReviewTaskRunner {
         }
     }
 
-    record CandidateFile(long size, String sha256) {
+    record CandidateFile(long size, String sha256, String fileKey, java.nio.file.attribute.FileTime lastModifiedTime) {
     }
 }

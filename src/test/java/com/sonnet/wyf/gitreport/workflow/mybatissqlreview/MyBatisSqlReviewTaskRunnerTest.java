@@ -5,7 +5,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -48,5 +50,34 @@ class MyBatisSqlReviewTaskRunnerTest {
         assertThatThrownBy(() -> MyBatisSqlReviewTaskRunner.captureCandidate(candidate))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("safe regular-file limit");
+    }
+
+    @Test
+    void rejectsAnotherSemanticallyValidBundleSubstitutedAfterCopyBeforeSeal() throws Exception {
+        Path attempt = Files.createDirectories(tempDir.resolve("sealed-attempt"));
+        Path candidate = Files.createDirectories(attempt.resolve("candidate"));
+        Path target = Files.createDirectories(tempDir.resolve("sealed-bundle"));
+        for (String artifact : ARTIFACTS) {
+            Files.writeString(candidate.resolve(artifact), "validated-set-" + artifact);
+            Files.writeString(target.resolve(artifact), "alternate-valid-set-" + artifact);
+        }
+        MyBatisSqlReviewTaskRunner.CandidateSnapshot validated =
+                MyBatisSqlReviewTaskRunner.captureCandidate(candidate);
+        MyBatisSqlReviewTaskRunner.CandidateSnapshot substituted =
+                MyBatisSqlReviewTaskRunner.captureCandidate(target);
+        Map<Path, MyBatisSqlReviewFilesystemGuard.SealedFile> sealedFiles = new LinkedHashMap<>();
+        for (String artifact : ARTIFACTS) {
+            Path path = target.resolve(artifact).toAbsolutePath().normalize();
+            MyBatisSqlReviewTaskRunner.CandidateFile file = substituted.files().get(artifact);
+            sealedFiles.put(path, new MyBatisSqlReviewFilesystemGuard.SealedFile(
+                    path, file.fileKey(), file.lastModifiedTime(), file.size(), file.sha256()
+            ));
+        }
+        var sealed = new MyBatisSqlReviewFilesystemGuard.SealedWrite<>(target, sealedFiles);
+
+        assertThatThrownBy(() -> MyBatisSqlReviewTaskRunner.verifySealedBundle(
+                validated, substituted, target, sealed
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("differs from validated candidate");
     }
 }

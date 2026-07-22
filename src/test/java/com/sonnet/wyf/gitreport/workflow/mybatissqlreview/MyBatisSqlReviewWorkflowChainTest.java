@@ -154,6 +154,15 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
+    void perTaskRecheckTopologyMismatchPreventsPromptSubmission() {
+        client.mismatchTopologyOnRecheck = true;
+
+        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-recheck-drift")))
+                .hasMessageContaining("host/instance/topology fingerprint mismatch");
+        assertThat(client.postedStatementKeys).isEmpty();
+    }
+
+    @Test
     void targetedRerunsRejectMapperAddDeleteModifyAndSourceConfigurationDrift() throws Exception {
         chain.run(request("full", "", "", "run-original"));
         Path publishedInventoryPath = stableOut.resolve("sql-inventory.json");
@@ -536,6 +545,8 @@ class MyBatisSqlReviewWorkflowChainTest {
         private boolean clearPending;
         private boolean omitEvidence;
         private boolean missingRequiredTool;
+        private boolean mismatchTopologyOnRecheck;
+        private int connectionCalls;
         private Runnable onListTools;
 
         private RecordingAgentBridgeClient(ObjectMapper objectMapper) {
@@ -636,6 +647,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         }
 
         private ObjectNode connections() {
+            connectionCalls++;
             ObjectNode response = objectMapper.createObjectNode();
             ObjectNode connection = response.putArray("connections").addObject()
                     .put("id", "gauss-readonly")
@@ -648,6 +660,9 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("topologySource", "server-observed")
                     .put("readOnly", true);
             addDatabaseBinding(connection);
+            if (mismatchTopologyOnRecheck && connectionCalls > 1) {
+                connection.put("topologyFingerprint", "sha256:" + "e".repeat(64));
+            }
             connection.putArray("databases").add("orders");
             return response;
         }
