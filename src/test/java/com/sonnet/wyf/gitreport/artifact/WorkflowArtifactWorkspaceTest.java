@@ -559,6 +559,13 @@ class WorkflowArtifactWorkspaceTest {
         assertThat(tempDir.resolve(".published/legacy-migration")).isRegularFile();
 
         WorkflowArtifactWorkspace recovered = workspace("run-legacy-half-step-recovered", false);
+
+        assertThat(tempDir.resolve("reports")).isSymbolicLink();
+        assertThat(tempDir.resolve("reports/listed.txt")).hasContent("old nested");
+        assertThat(tempDir.resolve("weekly-report.md")).isSymbolicLink().hasContent("old report");
+        assertThat(tempDir.resolve(".published/migration-backup")).doesNotExist();
+        assertThat(tempDir.resolve(".published/legacy-migration")).doesNotExist();
+
         Files.writeString(recovered.bundleRoot().resolve("weekly-report.md"), "recovered report");
         Files.createDirectories(recovered.bundleRoot().resolve("reports"));
         Files.writeString(recovered.bundleRoot().resolve("reports/new.txt"), "recovered nested");
@@ -568,6 +575,29 @@ class WorkflowArtifactWorkspaceTest {
         assertThat(tempDir.resolve("reports/new.txt")).hasContent("recovered nested");
         assertThat(tempDir.resolve(".published/migration-backup")).doesNotExist();
         assertThat(tempDir.resolve(".published/legacy-migration")).doesNotExist();
+    }
+
+    @Test
+    void startupCleansOnlyStrictlyManagedLegacyTopLevelForwarderTemps() throws Exception {
+        Files.createDirectories(tempDir.resolve(".published"));
+        Path managedTemp = tempDir.resolve(".weekly-report.md.forward-old-execution");
+        Files.createSymbolicLink(managedTemp, Path.of(".published/current/weekly-report.md"));
+        Path userFile = tempDir.resolve(".notes.forward-old-execution");
+        Files.writeString(userFile, "user data");
+        Path external = Files.createDirectories(tempDir.resolve("external-legacy-temp"));
+        Files.writeString(external.resolve("sentinel.txt"), "outside");
+        Path unmanagedTemp = tempDir.resolve(".reports.forward-old-execution");
+        Files.createSymbolicLink(unmanagedTemp, external);
+        Path invalidName = tempDir.resolve(".other.forward-invalid execution");
+        Files.createSymbolicLink(invalidName, Path.of(".published/current/other"));
+
+        workspace("run-clean-legacy-top-level-temp", false);
+
+        assertThat(managedTemp).doesNotExist();
+        assertThat(userFile).isRegularFile().hasContent("user data");
+        assertThat(unmanagedTemp).isSymbolicLink();
+        assertThat(invalidName).isSymbolicLink();
+        assertThat(external.resolve("sentinel.txt")).hasContent("outside");
     }
 
     @Test

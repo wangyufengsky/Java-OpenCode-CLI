@@ -35,6 +35,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.READ;
@@ -49,6 +51,8 @@ public final class WorkflowArtifactWorkspace {
     private static final String CURRENT_POINTER = "current";
     private static final String LEGACY_MIGRATION = "legacy-migration";
     private static final String MYBATIS_SQL_REVIEW_CHAIN = "mybatis-sql-review";
+    private static final Pattern LEGACY_TOP_LEVEL_FORWARDER_TEMP = Pattern.compile(
+            "^\\.([^/\\\\]+)\\.forward-([A-Za-z0-9][A-Za-z0-9._-]{0,127})$");
     private static final Set<String> RESERVED_ROOT_NAMES = Set.of(
             "runs", PUBLICATION_MANIFEST, GENERATION_FILE, PUBLISH_LOCK, PUBLICATION_STORE
     );
@@ -129,7 +133,8 @@ public final class WorkflowArtifactWorkspace {
         if (Files.exists(requestedRunRoot, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalStateException("workflow execution directory already exists: " + requestedRunRoot);
         }
-        long generation = nextGeneration(normalizedRoot);
+        long generation = initializePublicationAtStart(
+                objectMapper, chainId, request, normalizedRoot, publicationFailureInjector);
         WorkflowArtifactWorkspace workspace = new WorkflowArtifactWorkspace(
                 objectMapper,
                 chainId,
@@ -611,6 +616,35 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
+    private void cleanupLegacyTopLevelForwarderTemps() throws IOException {
+        boolean changed = false;
+        try (var entries = Files.list(stableRoot)) {
+            for (Path entry : entries.toList()) {
+                if (!Files.isSymbolicLink(entry)) {
+                    continue;
+                }
+                Matcher matcher = LEGACY_TOP_LEVEL_FORWARDER_TEMP.matcher(entry.getFileName().toString());
+                if (!matcher.matches()) {
+                    continue;
+                }
+                String rootName = matcher.group(1);
+                try {
+                    requireForwardableRootName(rootName);
+                } catch (IllegalStateException invalidLegacyName) {
+                    continue;
+                }
+                if (!Files.readSymbolicLink(entry).equals(managedForwarderTarget(rootName))) {
+                    continue;
+                }
+                Files.delete(entry);
+                changed = true;
+            }
+        }
+        if (changed) {
+            forceDirectory(stableRoot);
+        }
+    }
+
     private void rollbackUncommittedForwarders(Set<String> created, Throwable failure) {
         boolean changed = false;
         for (String rootName : created.stream().sorted(Comparator.reverseOrder()).toList()) {
@@ -821,20 +855,11 @@ public final class WorkflowArtifactWorkspace {
     }
 
     private void migrateLegacyPublicationIfNecessary() throws IOException {
-        LegacyMigration pending = readLegacyMigration();
-        if (pending != null) {
-            resumeLegacyMigration(pending);
+        if (recoverPendingLegacyMigrationIfNecessary()) {
             return;
         }
         Path current = currentGenerationRoot(stableRoot);
         if (current != null) {
-            if (current.getFileName().toString().startsWith("legacy-before-")) {
-                Set<String> roots = topLevelArtifactNames(validateGenerationManifest(current).keySet());
-                roots.add(PUBLICATION_MANIFEST);
-                LegacyMigration recovered = new LegacyMigration(current, roots);
-                writeLegacyMigration(recovered);
-                resumeLegacyMigration(recovered);
-            }
             return;
         }
         Path directLegacyManifest = stableRoot.resolve(PUBLICATION_MANIFEST);
@@ -912,6 +937,26 @@ public final class WorkflowArtifactWorkspace {
         switchCurrentGeneration(legacyRoot);
         publicationFailureInjector.afterLegacyPointerSwitch(legacyRoot);
         resumeLegacyMigration(migration);
+    }
+
+    private boolean recoverPendingLegacyMigrationIfNecessary() throws IOException {
+        LegacyMigration pending = readLegacyMigration();
+        if (pending != null) {
+            resumeLegacyMigration(pending);
+            return true;
+        }
+        Path current = currentGenerationRoot(stableRoot);
+        if (current != null) {
+            if (current.getFileName().toString().startsWith("legacy-before-")) {
+                Set<String> roots = topLevelArtifactNames(validateGenerationManifest(current).keySet());
+                roots.add(PUBLICATION_MANIFEST);
+                LegacyMigration recovered = new LegacyMigration(current, roots);
+                writeLegacyMigration(recovered);
+                resumeLegacyMigration(recovered);
+                return true;
+            }
+        }
+        return false;
     }
 
     private void resumeLegacyMigration(LegacyMigration migration) throws IOException {
@@ -1212,6 +1257,7 @@ public final class WorkflowArtifactWorkspace {
 
     private static void requireForwardableRootName(String rootName) {
         if (rootName == null || rootName.isBlank() || rootName.indexOf('/') >= 0 || rootName.indexOf('\\') >= 0
+                || rootName.equals(".") || rootName.equals("..")
                 || (RESERVED_ROOT_NAMES.contains(rootName) && !PUBLICATION_MANIFEST.equals(rootName))) {
             throw new IllegalStateException("invalid publication forwarder root: " + rootName);
         }
@@ -1686,7 +1732,13 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
-    private static long nextGeneration(Path stableRoot) throws IOException {
+    private static long initializePublicationAtStart(
+            ObjectMapper objectMapper,
+            String chainId,
+            WorkflowRunRequest request,
+            Path stableRoot,
+            PublicationFailureInjector failureInjector
+    ) throws IOException {
         Path lockPath = requireNoSymlinkComponents(
                 stableRoot, stableRoot.resolve(PUBLISH_LOCK), "publication lock");
         ReentrantLock jvmLock = publicationJvmLock(stableRoot);
@@ -1695,8 +1747,19 @@ public final class WorkflowArtifactWorkspace {
             try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE, LinkOption.NOFOLLOW_LINKS);
                  FileLock ignored = channel.lock()) {
                 cleanupPublicationScratch(stableRoot);
+                long currentGeneration = readGeneration(stableRoot);
+                WorkflowArtifactWorkspace recoveryWorkspace = new WorkflowArtifactWorkspace(
+                        objectMapper,
+                        chainId,
+                        request,
+                        stableRoot,
+                        currentGeneration,
+                        failureInjector
+                );
+                recoveryWorkspace.cleanupLegacyTopLevelForwarderTemps();
+                recoveryWorkspace.recoverPendingLegacyMigrationIfNecessary();
                 cleanupOrphanGenerations(stableRoot);
-                long next = readGeneration(stableRoot) + 1;
+                long next = currentGeneration + 1;
                 Path target = requireNoSymlinkComponents(
                         stableRoot, stableRoot.resolve(GENERATION_FILE), "publication generation target");
                 Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
