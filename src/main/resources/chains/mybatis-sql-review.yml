@@ -1,0 +1,47 @@
+# MyBatis XML SQL review chain. Replace every CHANGE_ME value before running.
+# Database credentials must be an isolated non-owner/non-admin read-only account on a
+# centralized GaussDB read replica or test environment. Java/tool-call audit is post-hoc.
+
+project:
+  id: "example-project"
+  name: "Example Project"
+  repo: "CHANGE_ME_PROJECT_REPO"
+
+paths:
+  out: "mybatis-sql-review/example-project"
+
+source:
+  include:
+    - "**/*Mapper.xml"
+  exclude:
+    - "target/**"
+    - "build/**"
+    - "**/target/**"
+    - "**/build/**"
+
+database:
+  connection-name: "CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"
+  database-name: "CHANGE_ME_DATABASE"
+  schema-name: "CHANGE_ME_SCHEMA"
+  environment: "test"
+  non-owner-non-admin-read-only-account: false
+  row-level-security-disabled-for-safe-base-tables: false
+  user-defined-and-security-definer-function-execution-revoked-including-public: false
+  statement-timeout-seconds: 30
+  statement-timeout-scope: "role"
+  max-rows: 20
+  max-scenarios-per-sql: 3
+  max-evidence-bytes: 262144
+  retain-raw-rows: true
+  allow-agent-select: true
+
+agentbridge:
+  web-base-url: "https://127.0.0.1:9642"
+  mcp-url: "http://127.0.0.1:8642/mcp"
+  concurrency: 1
+  max-concurrency: 1
+  timeout-minutes: 40
+  poll-millis: 1000
+  validation-settle-seconds: 30
+  validation-max-corrections: 0
+  task-message: "严格执行完整 MyBatis SQL review prompt，只写指定 candidate 三文件；完成后回复简短完成信息，Java 将进行工具历史和产物强校验。"
