@@ -35,6 +35,7 @@ import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
+    public static final String MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION = "1.200.0";
     private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
     private static final int MCP_METADATA_RESPONSE_BYTES = 1024 * 1024;
     private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
@@ -88,6 +89,46 @@ public class AgentBridgeClient {
     }
 
     public boolean isRunning(URI webBaseUrl) throws IOException, InterruptedException {
+        return agentBridgeInfo(webBaseUrl).path("running").asBoolean(false);
+    }
+
+    public void requireMyBatisSqlReviewCapabilities(URI webBaseUrl)
+            throws IOException, InterruptedException {
+        JsonNode info = agentBridgeInfo(webBaseUrl);
+        String version = info.path("version").asText("").strip();
+        if (!isAtLeastVersion(version, MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION)) {
+            throw incompatibleMyBatisAuditProtocol(version);
+        }
+        JsonNode capability = info.path("capabilities").path("mybatisSqlReviewAudit");
+        List<String> requiredBooleans = List.of(
+                "untruncatedStructuredToolArguments",
+                "untruncatedStructuredToolResults",
+                "immutableToolCallSnapshot",
+                "stableToolCallTotal",
+                "explicitToolCallHistoryComplete",
+                "previewMaxRowsRequired"
+        );
+        if (!capability.isObject()
+                || !capability.path("contractVersion").isIntegralNumber()
+                || capability.path("contractVersion").intValue() != 1) {
+            throw incompatibleMyBatisAuditProtocol(version);
+        }
+        for (String requirement : requiredBooleans) {
+            if (!capability.path(requirement).isBoolean()
+                    || !capability.path(requirement).booleanValue()) {
+                throw new IllegalStateException(
+                        "AgentBridge " + version + " MyBatis SQL review capability is missing required "
+                                + requirement + "; strict audit protocol is incompatible"
+                );
+            }
+        }
+        if (!capability.path("serverEnforcedPreviewMaxRows").isIntegralNumber()
+                || capability.path("serverEnforcedPreviewMaxRows").intValue() != 20) {
+            throw incompatibleMyBatisAuditProtocol(version);
+        }
+    }
+
+    private JsonNode agentBridgeInfo(URI webBaseUrl) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/info"))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
@@ -96,7 +137,47 @@ public class AgentBridgeClient {
                 request, SMALL_JSON_RESPONSE_BYTES, "AgentBridge GET /info response"
         );
         requireSuccess(response, "AgentBridge GET /info failed");
-        return objectMapper.readTree(response.body()).path("running").asBoolean(false);
+        JsonNode info = objectMapper.readTree(response.body());
+        if (!info.isObject()) {
+            throw new IllegalStateException("AgentBridge GET /info must return an object");
+        }
+        return info;
+    }
+
+    private IllegalStateException incompatibleMyBatisAuditProtocol(String version) {
+        String reported = version.isBlank() ? "unknown" : version;
+        return new IllegalStateException(
+                "AgentBridge " + reported + " is incompatible with MyBatis SQL review; requires AgentBridge >= "
+                        + MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION
+                        + " and explicit capabilities for untruncated structured arguments/results, immutable "
+                        + "paginated tool-call snapshots with stable total/complete, and server-enforced preview max 20"
+        );
+    }
+
+    private boolean isAtLeastVersion(String actual, String minimum) {
+        String[] actualParts = actual.split("\\.");
+        String[] minimumParts = minimum.split("\\.");
+        if (actualParts.length != 3 || minimumParts.length != 3) {
+            return false;
+        }
+        for (int index = 0; index < 3; index++) {
+            if (!actualParts[index].matches("0|[1-9][0-9]*")
+                    || !minimumParts[index].matches("0|[1-9][0-9]*")) {
+                return false;
+            }
+            int actualPart;
+            int minimumPart;
+            try {
+                actualPart = Integer.parseInt(actualParts[index]);
+                minimumPart = Integer.parseInt(minimumParts[index]);
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+            if (actualPart != minimumPart) {
+                return actualPart > minimumPart;
+            }
+        }
+        return true;
     }
 
     public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) throws IOException, InterruptedException {
@@ -217,16 +298,9 @@ public class AgentBridgeClient {
             String nextToken = null;
             String nextParameter = null;
             if (root.isArray()) {
-                if (pageNumber != 0 || !response.headers()
-                        .firstValue("X-AgentBridge-Tool-Calls-Complete")
-                        .map("true"::equalsIgnoreCase)
-                        .orElse(false)) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls array response cannot prove complete history"
-                    );
-                }
-                items = root;
-                complete = true;
+                throw new IllegalStateException(
+                        "AgentBridge GET /tool-calls array response cannot prove an immutable complete snapshot"
+                );
             } else if (root.isObject()) {
                 boolean toolCallsArray = root.path("toolCalls").isArray();
                 boolean itemsArray = root.path("items").isArray();
@@ -251,21 +325,18 @@ public class AgentBridgeClient {
 
                 String snapshot = root.path("snapshotToken").asText("").strip();
                 Long total = requiredOptionalTotal(root);
-                boolean paginationStarted = pageNumber > 0 || !complete;
-                if (paginationStarted) {
-                    if (snapshot.isBlank() || total == null) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls pagination lacks a stable snapshotToken/total boundary"
-                        );
-                    }
-                    if (stableSnapshot == null) {
-                        stableSnapshot = snapshot;
-                        stableTotal = total;
-                    } else if (!stableSnapshot.equals(snapshot) || !stableTotal.equals(total)) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls page drift changed snapshotToken or total"
-                        );
-                    }
+                if (snapshot.isBlank() || total == null) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls lacks an immutable snapshotToken/total boundary"
+                    );
+                }
+                if (stableSnapshot == null) {
+                    stableSnapshot = snapshot;
+                    stableTotal = total;
+                } else if (!stableSnapshot.equals(snapshot) || !stableTotal.equals(total)) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls page drift changed snapshotToken or total"
+                    );
                 }
 
                 String cursor = root.path("nextCursor").asText("").strip();

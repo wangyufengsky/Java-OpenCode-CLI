@@ -53,7 +53,7 @@ class MyBatisDatabasePreflightTest {
         assertThat(result.databaseName()).isEqualTo("orders");
         assertThat(result.schemaName()).isEqualTo("audit");
         assertThat(result.databaseSystem()).isEqualTo("GaussDB");
-        assertThat(result.environment()).isEqualTo(MyBatisDatabasePreflight.Environment.TEST);
+        assertThat(result.environment()).isEqualTo(MyBatisDatabasePreflight.Environment.READ_REPLICA);
         assertThat(result.statementTimeout().maximum()).isEqualTo(Duration.ofSeconds(12));
         assertThat(result.statementTimeout().confirmed()).isTrue();
         assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder("audit.orders", "audit.line_items");
@@ -77,6 +77,14 @@ class MyBatisDatabasePreflightTest {
         assertThat(probeArguments.path("schemaName").asText()).isEqualTo("audit");
         assertThat(probeArguments.path("queryText").asText())
                 .contains("mybatis-sql-review-db-safety-v1")
+                .contains("pg_is_in_recovery()")
+                .contains("has_database_privilege")
+                .contains("has_schema_privilege")
+                .contains("has_any_privilege")
+                .contains("has_any_column_privilege")
+                .contains("has_sequence_privilege")
+                .contains("role_tab_privs")
+                .contains("gs_package")
                 .doesNotContain("Gauss Review");
         assertThat(bridge.toolCallHistoryRequested).isTrue();
     }
@@ -121,7 +129,7 @@ class MyBatisDatabasePreflightTest {
         JsonNode baseConnections = fixture("connections-centralized.json");
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true, true, true,
+                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA, true, true, true,
                         timeoutContract()),
                 "exactly one connection");
 
@@ -131,7 +139,7 @@ class MyBatisDatabasePreflightTest {
 
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.TEST, true, true, true,
+                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.READ_REPLICA, true, true, true,
                         timeoutContract()),
                 "schema");
     }
@@ -160,31 +168,53 @@ class MyBatisDatabasePreflightTest {
     }
 
     @Test
-    void requiresReadReplicaOrTestAndExplicitReadOnlyCredentialContract() throws Exception {
+    void requiresPhysicalReadReplicaAndRejectsTestSelfAttestation() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
                         "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY,
                         true, true, true,
                         timeoutContract()),
-                "read-replica or test");
+                "physical read-replica");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
                         "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        true, true, true,
+                        timeoutContract()),
+                "physical read-replica");
+        assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
                         false, true, true,
                         timeoutContract()),
                 "non-owner/non-admin read-only account");
     }
 
     @Test
+    void rejectsLegacyAgentBridgeBeforeListingOrCallingDatabaseTools() throws Exception {
+        FakeDatabaseBridge bridge = startBridge(
+                fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"), fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(), true, true, false
+        );
+
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), contract()))
+                .hasMessageContaining("1.199.2")
+                .hasMessageContaining("incompatible");
+        assertThat(bridge.calledTools).isEmpty();
+    }
+
+    @Test
     void requiresConfirmedRlsDisabledAndFunctionExecuteRevokedIncludingPublic() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
                         true, false, true, timeoutContract()),
                 "RLS disabled");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
                         true, true, false, timeoutContract()),
                 "including PUBLIC");
     }
@@ -193,14 +223,14 @@ class MyBatisDatabasePreflightTest {
     void requiresConfirmedDatabaseServerOrRoleStatementTimeoutAtMostThirtySeconds() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
                         true, true, true,
                         new MyBatisDatabasePreflight.StatementTimeoutContract(
                                 Duration.ofSeconds(31), MyBatisDatabasePreflight.StatementTimeoutScope.ROLE, true)),
                 "30 seconds");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
                         true, true, true,
                         new MyBatisDatabasePreflight.StatementTimeoutContract(
                                 Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.DATABASE, false)),
@@ -216,7 +246,11 @@ class MyBatisDatabasePreflightTest {
                 "auditAdmin",
                 "roleAdmin",
                 "databaseOwner",
-                "schemaOwner"
+                "schemaOwner",
+                "databaseCreate",
+                "databaseTemporary",
+                "schemaCreate",
+                "dangerousAnyPrivilege"
         )) {
             ObjectNode unsafe = valid.deepCopy();
             probeRow(unsafe).put(unsafeBoolean, true);
@@ -226,9 +260,12 @@ class MyBatisDatabasePreflightTest {
                 "roleMembershipCount",
                 "ownedBaseTableCount",
                 "unsafeTablePrivilegeCount",
+                "unsafeColumnPrivilegeCount",
+                "unsafeSequencePrivilegeCount",
                 "rlsEnabledBaseTableCount",
                 "forceRlsEnabledBaseTableCount",
-                "executableFunctionCount"
+                "executableFunctionCount",
+                "executablePackageCount"
         )) {
             ObjectNode unsafe = valid.deepCopy();
             probeRow(unsafe).put(unsafeCount, 1);
@@ -265,6 +302,19 @@ class MyBatisDatabasePreflightTest {
         assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
                 .verify(bridge.mcpUri(), bridge.webUri(), contract()))
                 .hasMessageContaining("environment metadata");
+        stopServer();
+
+        ObjectNode untrustedTopology = withEnvironmentEvidence(fixture("connections-centralized.json"));
+        ((ObjectNode) untrustedTopology.at("/connections/0")).put("topologySource", "yaml-self-attested");
+        FakeDatabaseBridge topologyBridge = startBridge(
+                untrustedTopology, fixture("schemas-orders.json"), true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"), fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(), false, true
+        );
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(topologyBridge.mcpUri(), topologyBridge.webUri(), contract()))
+                .hasMessageContaining("server-observed physical read-replica");
     }
 
     @Test
@@ -273,6 +323,8 @@ class MyBatisDatabasePreflightTest {
         ((ObjectNode) connections.at("/connections/0"))
                 .put("environment", "read-replica")
                 .put("environmentSource", "managed-connection-metadata")
+                .put("topologyRole", "physical-standby")
+                .put("topologySource", "server-observed")
                 .put("readOnly", true);
         FakeDatabaseBridge bridge = startBridge(
                 connections,
@@ -281,7 +333,7 @@ class MyBatisDatabasePreflightTest {
                 MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
                 fixture("schema-object-kinds-audit.json"),
                 fixture("schema-objects-table-audit.json"),
-                validSafetyProbe(),
+                probeWith("readReplica", false),
                 false,
                 true
         );
@@ -303,7 +355,7 @@ class MyBatisDatabasePreflightTest {
     }
 
     @Test
-    void rejectsUnsupportedDatabaseToolSchemaBeforeIssuingSafetyProbe() throws Exception {
+    void rejectsLegacyOptionalPreviewLimitSchemaBeforeIssuingSafetyProbe() throws Exception {
         FakeDatabaseBridge bridge = startBridge(
                 fixture("connections-centralized.json"),
                 fixture("schemas-orders.json"),
@@ -319,7 +371,8 @@ class MyBatisDatabasePreflightTest {
         assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
                 .verify(bridge.mcpUri(), bridge.webUri(), contract()))
                 .hasMessageContaining("input schema")
-                .hasMessageContaining("execute_sql_query");
+                .hasMessageContaining("preview_table_data")
+                .hasMessageContaining("maxRowCount");
         assertThat(bridge.calledTools).doesNotContain("execute_sql_query");
     }
 
@@ -371,7 +424,7 @@ class MyBatisDatabasePreflightTest {
                 "Gauss Review",
                 "orders",
                 "audit",
-                MyBatisDatabasePreflight.Environment.TEST,
+                MyBatisDatabasePreflight.Environment.READ_REPLICA,
                 true,
                 true,
                 true,
@@ -438,6 +491,24 @@ class MyBatisDatabasePreflightTest {
             boolean addEnvironmentEvidence,
             boolean strictToolSchemas
     ) throws IOException {
+        return startBridge(
+                connections, schemas, connectionAvailable, tools, objectKinds, schemaObjects,
+                safetyProbe, addEnvironmentEvidence, strictToolSchemas, true
+        );
+    }
+
+    private FakeDatabaseBridge startBridge(
+            JsonNode connections,
+            JsonNode schemas,
+            boolean connectionAvailable,
+            Set<String> tools,
+            JsonNode objectKinds,
+            JsonNode schemaObjects,
+            JsonNode safetyProbe,
+            boolean addEnvironmentEvidence,
+            boolean strictToolSchemas,
+            boolean strictAgentBridgeProtocol
+    ) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         FakeDatabaseBridge bridge = new FakeDatabaseBridge(
                 server,
@@ -448,7 +519,8 @@ class MyBatisDatabasePreflightTest {
                 objectKinds,
                 schemaObjects,
                 safetyProbe,
-                strictToolSchemas
+                strictToolSchemas,
+                strictAgentBridgeProtocol
         );
         bridge.install();
         server.start();
@@ -474,6 +546,7 @@ class MyBatisDatabasePreflightTest {
         private final JsonNode schemaObjects;
         private final JsonNode safetyProbe;
         private final boolean strictToolSchemas;
+        private final boolean strictAgentBridgeProtocol;
         private final Set<String> calledTools = new LinkedHashSet<>();
         private final List<ToolInvocation> invocations = new ArrayList<>();
         private boolean toolCallHistoryRequested;
@@ -487,7 +560,8 @@ class MyBatisDatabasePreflightTest {
                 JsonNode objectKinds,
                 JsonNode schemaObjects,
                 JsonNode safetyProbe,
-                boolean strictToolSchemas
+                boolean strictToolSchemas,
+                boolean strictAgentBridgeProtocol
         ) {
             this.httpServer = httpServer;
             this.connections = connections;
@@ -498,9 +572,14 @@ class MyBatisDatabasePreflightTest {
             this.schemaObjects = schemaObjects;
             this.safetyProbe = safetyProbe;
             this.strictToolSchemas = strictToolSchemas;
+            this.strictAgentBridgeProtocol = strictAgentBridgeProtocol;
         }
 
         private void install() {
+            httpServer.createContext("/info", exchange -> respond(exchange, 200,
+                    strictAgentBridgeProtocol ? strictAuditInfo() : """
+                            {"version":"1.199.2","capabilities":{}}
+                            """));
             httpServer.createContext("/mcp", exchange -> {
                 JsonNode request = objectMapper.readTree(readBody(exchange));
                 switch (request.path("method").asText()) {
@@ -531,7 +610,8 @@ class MyBatisDatabasePreflightTest {
             });
             httpServer.createContext("/tool-calls", exchange -> {
                 toolCallHistoryRequested = true;
-                respond(exchange, 200, "{\"complete\":true,\"total\":0,\"items\":[]}");
+                respond(exchange, 200,
+                        "{\"complete\":true,\"snapshotToken\":\"preflight-snapshot\",\"total\":0,\"items\":[]}");
             });
         }
 
@@ -546,8 +626,7 @@ class MyBatisDatabasePreflightTest {
         }
 
         private JsonNode toolSchema(String name) {
-            if (!strictToolSchemas
-                    || (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name))) {
+            if (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name)) {
                 return objectMapper.createObjectNode().put("type", "object");
             }
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
@@ -562,10 +641,13 @@ class MyBatisDatabasePreflightTest {
             } else {
                 properties.putObject("tableName").put("type", "string");
                 properties.putObject("maxRowCount").put("type", "integer")
-                        .put("minimum", 1).put("maximum", 20);
+                        .put("minimum", 1).put("maximum", strictToolSchemas ? 20 : 200);
                 schema.putArray("required")
                         .add("connectionId").add("databaseName").add("schemaName")
-                        .add("tableName").add("maxRowCount");
+                        .add("tableName");
+                if (strictToolSchemas) {
+                    ((ArrayNode) schema.path("required")).add("maxRowCount");
+                }
             }
             return schema;
         }
@@ -616,10 +698,32 @@ class MyBatisDatabasePreflightTest {
     private ObjectNode withEnvironmentEvidence(JsonNode source) {
         ObjectNode copy = source.deepCopy();
         ((ObjectNode) copy.at("/connections/0"))
-                .put("environment", "test")
+                .put("environment", "read-replica")
                 .put("environmentSource", "managed-connection-metadata")
+                .put("topologyRole", "physical-standby")
+                .put("topologySource", "server-observed")
                 .put("readOnly", true);
         return copy;
+    }
+
+    private String strictAuditInfo() {
+        return """
+                {
+                  "version":"1.200.0",
+                  "capabilities":{
+                    "mybatisSqlReviewAudit":{
+                      "contractVersion":1,
+                      "untruncatedStructuredToolArguments":true,
+                      "untruncatedStructuredToolResults":true,
+                      "immutableToolCallSnapshot":true,
+                      "stableToolCallTotal":true,
+                      "explicitToolCallHistoryComplete":true,
+                      "serverEnforcedPreviewMaxRows":20,
+                      "previewMaxRowsRequired":true
+                    }
+                  }
+                }
+                """;
     }
 
     private ObjectNode validSafetyProbe() {
@@ -636,16 +740,23 @@ class MyBatisDatabasePreflightTest {
                 .put("databaseOwner", false)
                 .put("schemaOwner", false)
                 .put("ownedBaseTableCount", 0)
+                .put("databaseCreate", false)
+                .put("databaseTemporary", false)
+                .put("schemaCreate", false)
+                .put("dangerousAnyPrivilege", false)
                 .put("sessionReadOnly", true)
                 .put("transactionReadOnly", true)
                 .put("unsafeTablePrivilegeCount", 0)
+                .put("unsafeColumnPrivilegeCount", 0)
+                .put("unsafeSequencePrivilegeCount", 0)
                 .put("rlsEnabledBaseTableCount", 0)
                 .put("forceRlsEnabledBaseTableCount", 0)
                 .put("executableFunctionCount", 0)
+                .put("executablePackageCount", 0)
                 .put("statementTimeoutMs", 12_000)
                 .put("baseTableNames", "line_items,orders")
                 .put("baseTableCount", 2)
-                .put("readReplica", false);
+                .put("readReplica", true);
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode columns = result.putArray("columns");
         row.fieldNames().forEachRemaining(columns::add);

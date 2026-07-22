@@ -47,7 +47,7 @@ class PromptPackContractTest {
                 "Database Tools & SQL",
                 "JetBrains AI Assistant",
                 "集中式 GaussDB",
-                "只读副本或测试库",
+                "物理只读副本",
                 "非 owner、非管理员的专用只读账号",
                 "RLS",
                 "SECURITY DEFINER",

@@ -33,12 +33,19 @@ public final class MyBatisDatabasePreflight {
             "databaseOwner",
             "schemaOwner",
             "ownedBaseTableCount",
+            "databaseCreate",
+            "databaseTemporary",
+            "schemaCreate",
+            "dangerousAnyPrivilege",
             "sessionReadOnly",
             "transactionReadOnly",
             "unsafeTablePrivilegeCount",
+            "unsafeColumnPrivilegeCount",
+            "unsafeSequencePrivilegeCount",
             "rlsEnabledBaseTableCount",
             "forceRlsEnabledBaseTableCount",
             "executableFunctionCount",
+            "executablePackageCount",
             "statementTimeoutMs",
             "baseTableNames",
             "baseTableCount",
@@ -51,6 +58,12 @@ public final class MyBatisDatabasePreflight {
                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname = pg_catalog.current_schema()
                   AND c.relkind = 'r'
+            ), target_sequences AS (
+                SELECT c.oid
+                FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = pg_catalog.current_schema()
+                  AND c.relkind = 'S'
             )
             SELECT
                 'mybatis-sql-review-db-safety-v1' AS "probeContractVersion",
@@ -68,6 +81,27 @@ public final class MyBatisDatabasePreflight {
                 (n.nspowner = r.oid) AS "schemaOwner",
                 (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relowner = r.oid)
                     AS "ownedBaseTableCount",
+                pg_catalog.has_database_privilege(
+                    CURRENT_USER, pg_catalog.current_database(), 'CREATE') AS "databaseCreate",
+                pg_catalog.has_database_privilege(
+                    CURRENT_USER, pg_catalog.current_database(), 'TEMPORARY') AS "databaseTemporary",
+                pg_catalog.has_schema_privilege(
+                    CURRENT_USER, pg_catalog.current_schema(), 'CREATE') AS "schemaCreate",
+                (pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'ALTER ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'DROP ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'SELECT ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'INSERT ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'UPDATE ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'DELETE ANY TABLE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY SEQUENCE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY INDEX')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY FUNCTION')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'EXECUTE ANY FUNCTION')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY PACKAGE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'EXECUTE ANY PACKAGE')
+                    OR pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY TYPE'))
+                    AS "dangerousAnyPrivilege",
                 (pg_catalog.current_setting('default_transaction_read_only') IN ('on', 'true'))
                     AS "sessionReadOnly",
                 (pg_catalog.current_setting('transaction_read_only') IN ('on', 'true'))
@@ -76,6 +110,14 @@ public final class MyBatisDatabasePreflight {
                     WHERE pg_catalog.has_table_privilege(
                         CURRENT_USER, t.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
                     AS "unsafeTablePrivilegeCount",
+                (SELECT pg_catalog.count(*) FROM target_tables t
+                    WHERE pg_catalog.has_any_column_privilege(
+                        CURRENT_USER, t.oid, 'INSERT,UPDATE'))
+                    AS "unsafeColumnPrivilegeCount",
+                (SELECT pg_catalog.count(*) FROM target_sequences s
+                    WHERE pg_catalog.has_sequence_privilege(
+                        CURRENT_USER, s.oid, 'USAGE,UPDATE'))
+                    AS "unsafeSequencePrivilegeCount",
                 (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relrowsecurity)
                     AS "rlsEnabledBaseTableCount",
                 (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relforcerowsecurity)
@@ -87,6 +129,25 @@ public final class MyBatisDatabasePreflight {
                       AND (pg_catalog.has_function_privilege(CURRENT_USER, p.oid, 'EXECUTE')
                         OR pg_catalog.has_function_privilege('public', p.oid, 'EXECUTE')))
                     AS "executableFunctionCount",
+                (SELECT pg_catalog.count(DISTINCT gp.oid)
+                    FROM pg_catalog.gs_package gp
+                    JOIN pg_catalog.pg_namespace gpn ON gpn.oid = gp.pkgnamespace
+                    WHERE gpn.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND (gp.pkgowner = r.oid
+                        OR EXISTS (
+                            SELECT 1 FROM pg_catalog.role_tab_privs rtp
+                            WHERE pg_catalog.lower(rtp.table_name) = pg_catalog.lower(gp.pkgname)
+                              AND pg_catalog.lower(rtp.role) IN (
+                                  pg_catalog.lower(CURRENT_USER), 'public')
+                              AND pg_catalog.upper(rtp.privilege) = 'EXECUTE')
+                        OR EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_proc pp
+                            WHERE pp.propackageid = gp.oid
+                              AND (pg_catalog.has_function_privilege(
+                                    CURRENT_USER, pp.oid, 'EXECUTE')
+                                OR pg_catalog.has_function_privilege(
+                                    'public', pp.oid, 'EXECUTE')))))
+                    AS "executablePackageCount",
                 (EXTRACT(EPOCH FROM
                     pg_catalog.current_setting('statement_timeout')::pg_catalog.interval) * 1000)::bigint
                     AS "statementTimeoutMs",
@@ -127,6 +188,7 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(contract, "contract");
         verifyCredentialContract(contract);
+        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
 
         Set<String> availableTools = new LinkedHashSet<>();
         Map<String, AgentBridgeClient.ToolDefinition> toolsByName = new HashMap<>();
@@ -251,7 +313,6 @@ public final class MyBatisDatabasePreflight {
         SafetyProbe probe = verifySafetyProbe(
                 probeResponse.structured(),
                 contract,
-                verifiedEnvironment,
                 safeBaseRelations
         );
 
@@ -296,11 +357,11 @@ public final class MyBatisDatabasePreflight {
         );
         JsonNode maximumRows = preview.inputSchema().path("properties").path("maxRowCount");
         if (!maximumRows.path("minimum").isIntegralNumber()
-                || maximumRows.path("minimum").longValue() > 1
+                || maximumRows.path("minimum").longValue() != 1
                 || !maximumRows.path("maximum").isIntegralNumber()
-                || maximumRows.path("maximum").longValue() < 20) {
+                || maximumRows.path("maximum").longValue() != 20) {
             throw new IllegalStateException(
-                    "AgentBridge preview_table_data input schema cannot prove maxRowCount supports 1..20"
+                    "AgentBridge preview_table_data input schema cannot prove server-enforced maxRowCount 1..20"
             );
         }
         for (String unsupported : List.of("limit", "rowLimit", "pageSize", "maxRows")) {
@@ -347,16 +408,17 @@ public final class MyBatisDatabasePreflight {
 
     private Environment verifiedEnvironment(JsonNode connection, Environment configured) {
         if (!connection.path("readOnly").isBoolean() || !connection.path("readOnly").booleanValue()
-                || !VERIFIED_ENVIRONMENT_SOURCE.equals(connection.path("environmentSource").asText())) {
+                || !VERIFIED_ENVIRONMENT_SOURCE.equals(connection.path("environmentSource").asText())
+                || !"physical-standby".equals(connection.path("topologyRole").asText())
+                || !"server-observed".equals(connection.path("topologySource").asText())) {
             throw new IllegalStateException(
-                    "connection environment metadata must prove a managed read-only target"
+                    "connection environment metadata must prove a server-observed physical read-replica target"
             );
         }
         Environment actual = switch (connection.path("environment").asText("").toLowerCase(Locale.ROOT)) {
-            case "test" -> Environment.TEST;
             case "read-replica" -> Environment.READ_REPLICA;
             default -> throw new IllegalStateException(
-                    "connection environment metadata must prove read-replica or test"
+                    "connection environment metadata must prove a physical read-replica"
             );
         };
         if (actual != configured) {
@@ -370,7 +432,6 @@ public final class MyBatisDatabasePreflight {
     private SafetyProbe verifySafetyProbe(
             JsonNode response,
             DatabaseContract contract,
-            Environment environment,
             Set<String> expectedBaseRelations
     ) {
         if (!response.isObject()
@@ -418,7 +479,11 @@ public final class MyBatisDatabasePreflight {
                 "auditAdmin",
                 "roleAdmin",
                 "databaseOwner",
-                "schemaOwner"
+                "schemaOwner",
+                "databaseCreate",
+                "databaseTemporary",
+                "schemaCreate",
+                "dangerousAnyPrivilege"
         )) {
             if (requiredProbeBoolean(row, field)) {
                 throw new IllegalStateException("database safety probe rejected unsafe " + field);
@@ -428,9 +493,12 @@ public final class MyBatisDatabasePreflight {
                 "roleMembershipCount",
                 "ownedBaseTableCount",
                 "unsafeTablePrivilegeCount",
+                "unsafeColumnPrivilegeCount",
+                "unsafeSequencePrivilegeCount",
                 "rlsEnabledBaseTableCount",
                 "forceRlsEnabledBaseTableCount",
-                "executableFunctionCount"
+                "executableFunctionCount",
+                "executablePackageCount"
         )) {
             if (requiredProbeLong(row, field) != 0) {
                 throw new IllegalStateException("database safety probe rejected non-zero " + field);
@@ -461,9 +529,9 @@ public final class MyBatisDatabasePreflight {
             );
         }
         boolean readReplica = requiredProbeBoolean(row, "readReplica");
-        if (environment == Environment.READ_REPLICA && !readReplica) {
+        if (!readReplica) {
             throw new IllegalStateException(
-                    "database safety probe could not prove the configured read-replica"
+                    "database safety probe could not prove a physical read-replica with pg_is_in_recovery()"
             );
         }
         return new SafetyProbe(currentUser, timeoutMillis, readReplica);
@@ -498,8 +566,8 @@ public final class MyBatisDatabasePreflight {
     }
 
     private void verifyCredentialContract(DatabaseContract contract) {
-        if (contract.environment() != Environment.READ_REPLICA && contract.environment() != Environment.TEST) {
-            throw new IllegalStateException("database environment must be read-replica or test");
+        if (contract.environment() != Environment.READ_REPLICA) {
+            throw new IllegalStateException("database environment must be a physical read-replica");
         }
         if (!contract.nonOwnerNonAdminReadOnlyAccount()) {
             throw new IllegalStateException(

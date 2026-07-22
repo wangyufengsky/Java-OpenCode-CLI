@@ -52,7 +52,7 @@ final class VerifiedMyBatisDatabaseFixture {
                             connectionName,
                             databaseName,
                             schemaName,
-                            MyBatisDatabasePreflight.Environment.TEST,
+                            MyBatisDatabasePreflight.Environment.READ_REPLICA,
                             true,
                             true,
                             true,
@@ -94,6 +94,11 @@ final class VerifiedMyBatisDatabaseFixture {
         }
 
         @Override
+        public void requireMyBatisSqlReviewCapabilities(URI ignored) {
+            // This fixture models only the explicitly future, strict AgentBridge audit contract.
+        }
+
+        @Override
         public List<ToolDefinition> listTools(URI ignored) {
             return MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS.stream()
                     .map(name -> new ToolDefinition(
@@ -130,8 +135,10 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("name", connectionName)
                     .put("databaseSystem", "GaussDB")
                     .put("deployment", "centralized")
-                    .put("environment", "test")
+                    .put("environment", "read-replica")
                     .put("environmentSource", "managed-connection-metadata")
+                    .put("topologyRole", "physical-standby")
+                    .put("topologySource", "server-observed")
                     .put("readOnly", true)
                     .putArray("databases").add(databaseName);
             return response;
@@ -201,17 +208,24 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("databaseOwner", false)
                     .put("schemaOwner", false)
                     .put("ownedBaseTableCount", 0)
+                    .put("databaseCreate", false)
+                    .put("databaseTemporary", false)
+                    .put("schemaCreate", false)
+                    .put("dangerousAnyPrivilege", false)
                     .put("sessionReadOnly", true)
                     .put("transactionReadOnly", true)
                     .put("unsafeTablePrivilegeCount", 0)
+                    .put("unsafeColumnPrivilegeCount", 0)
+                    .put("unsafeSequencePrivilegeCount", 0)
                     .put("rlsEnabledBaseTableCount", 0)
                     .put("forceRlsEnabledBaseTableCount", 0)
                     .put("executableFunctionCount", 0)
+                    .put("executablePackageCount", 0)
                     .put("statementTimeoutMs", 30_000)
                     .put("baseTableNames", baseTables.stream().map(String::toLowerCase).sorted()
                             .collect(java.util.stream.Collectors.joining(",")))
                     .put("baseTableCount", baseTables.size())
-                    .put("readReplica", false);
+                    .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
             ArrayNode columns = result.putArray("columns");
             row.fieldNames().forEachRemaining(columns::add);

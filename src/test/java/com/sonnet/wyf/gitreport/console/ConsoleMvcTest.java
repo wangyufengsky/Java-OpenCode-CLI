@@ -769,7 +769,7 @@ class ConsoleMvcTest {
                         .value("CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"))
                 .andExpect(jsonPath("$.defaults['database.database-name']").value("CHANGE_ME_DATABASE"))
                 .andExpect(jsonPath("$.defaults['database.schema-name']").value("CHANGE_ME_SCHEMA"))
-                .andExpect(jsonPath("$.defaults['database.environment']").value("test"))
+                .andExpect(jsonPath("$.defaults['database.environment']").value("read-replica"))
                 .andExpect(jsonPath("$.defaults['database.non-owner-non-admin-read-only-account']").value(false))
                 .andExpect(jsonPath("$.defaults['database.row-level-security-disabled-for-safe-base-tables']")
                         .value(false))

@@ -373,7 +373,7 @@ database:
   connection-name: "CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"
   database-name: "CHANGE_ME_DATABASE"
   schema-name: "CHANGE_ME_SCHEMA"
-  environment: "test"
+  environment: "read-replica"
   non-owner-non-admin-read-only-account: false
   row-level-security-disabled-for-safe-base-tables: false
   user-defined-and-security-definer-function-execution-revoked-including-public: false
@@ -404,7 +404,7 @@ agentbridge:
 | `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
 | `database.connection-name` | AgentBridge Database Tools 中必须唯一匹配的连接名。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
-| `database.environment` | 只允许 `read-replica` 或 `test`。 |
+| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。`test` 自证不构成硬只读边界。 |
 | `database.non-owner-non-admin-read-only-account` | 运行前必须改成 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
 | `database.row-level-security-disabled-for-safe-base-tables` | 运行前必须改成 `true`，确认所有可取证基础表均禁用 RLS。 |
 | `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 运行前必须改成 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
@@ -421,9 +421,10 @@ agentbridge:
 #### 必要运行环境与安全边界
 
 - IntelliJ IDEA 需要启用 JetBrains AI Assistant，并提供可用的 AgentBridge Web Access 与 AgentBridge MCP；数据库插件需要启用 **Database Tools & SQL**，且 MCP 工具清单必须包含链路预检要求的数据库工具。
-- 只能连接集中式 GaussDB 的只读副本或测试库，不能连接生产主库。必须使用非 owner、非管理员的专用只读账号；应用层 prompt 或 Java 事后审计不能替代数据库凭证隔离。
-- 所有允许取证的基础表必须禁用 RLS。审计账号对用户定义函数和 `SECURITY DEFINER` 函数的 `EXECUTE` 必须撤销，也要显式从 `PUBLIC` 撤销；数据库、server 或 role 级 `statement_timeout` 必须生效且不超过 30 秒。
-- 当前已检查的 AgentBridge v1.199.2 不提供数据库工具，因此本版本尚未通过真实 AgentBridge/GaussDB live gate。部署前必须在非生产 AgentBridge 和集中式 GaussDB 只读副本/测试库上重新验证工具清单、响应结构、调用历史、静态 SELECT、动态 SELECT、DML mapper 与 `selectKey` smoke cases。
+- 只能连接集中式 GaussDB 的物理只读副本，不能连接生产主库，也不接受 `test` 环境声明代替物理 standby 证明。必须使用非 owner、非管理员、无角色继承的专用只读账号；应用层 prompt 或 Java 事后审计不能替代数据库凭证隔离。
+- 所有允许取证的基础表必须禁用 RLS。审计账号不得拥有表级或列级 DML、序列 `USAGE/UPDATE`、database `CREATE/TEMPORARY`、schema `CREATE`、GaussDB `ANY` 权限、包/用户函数或 `SECURITY DEFINER` 执行能力（包括 `PUBLIC`）；有效 `statement_timeout` 必须大于 0 且不超过配置值和 30 秒。探针返回字段缺失或目录事实无法证明时一律 fail closed。
+- AgentBridge release gate 要求版本不低于 `1.200.0`，且 `/info` 必须显式声明 MyBatis SQL review audit contract v1：工具参数/结果为结构化且未截断、`/tool-calls` 是带稳定 `snapshotToken`、`total`、`complete` 的不可变分页快照、`preview_table_data.maxRowCount` 必填并由服务端硬限制为 20。版本号本身不能代替能力握手。
+- 已检查的 AgentBridge v1.199.2 明确不兼容：`preview_table_data` 的上限参数可选，`/tool-calls` 仅提供 `{items}`，单字段会截断至 8000 字符且历史最多 200 条，无法形成完整审计证据；预检会在任何数据库工具调用前给出不兼容错误。只有未来版本同时满足上述版本与能力合同，并在集中式 GaussDB 物理只读副本上完成静态 SELECT、动态 SELECT、DML mapper 与 `selectKey` live smoke gate 后，才可发布启用。
 - `/tool-calls` 检查属于 post-hoc 事后审计：它只能在调用发生后拒绝产物，不能阻止或撤销已经发出的数据库调用。数据库侧只读账号、RLS/函数权限和 statement timeout 才是硬安全边界。
 
 ## 运行时行为

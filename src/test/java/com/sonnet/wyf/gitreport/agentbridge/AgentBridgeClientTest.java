@@ -70,6 +70,61 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void acceptsOnlyTheFutureStrictMyBatisAuditProtocolCapabilityContract() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(exchange, 200, strictAuditInfo()));
+        server.start();
+
+        client.requireMyBatisSqlReviewCapabilities(baseUri(server));
+    }
+
+    @Test
+    void rejectsLegacy11992BeforeDatabaseToolsCanBeUsed() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(exchange, 200, """
+                {"version":"1.199.2","capabilities":{}}
+                """));
+        server.start();
+
+        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+                .hasMessageContaining("1.199.2")
+                .hasMessageContaining("incompatible")
+                .hasMessageContaining("immutable")
+                .hasMessageContaining("preview");
+    }
+
+    @Test
+    void rejectsVersionOnlyOrPartialAuditCapabilityClaims() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(exchange, 200, """
+                {
+                  "version":"1.200.0",
+                  "capabilities":{"mybatisSqlReviewAudit":{"contractVersion":1}}
+                }
+                """));
+        server.start();
+
+        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+                .hasMessageContaining("capability")
+                .hasMessageContaining("untruncatedStructuredToolArguments");
+    }
+
+    @Test
+    void rejectsPreviewCapabilityWhenServerMaximumIsNotExactlyTwenty() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(
+                exchange, 200, strictAuditInfo().replace(
+                        "\"serverEnforcedPreviewMaxRows\":20",
+                        "\"serverEnforcedPreviewMaxRows\":21"
+                )
+        ));
+        server.start();
+
+        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+                .hasMessageContaining("server-enforced preview max 20");
+    }
+
+    @Test
     void parsesStructuredToolResponseFromMcpContentText() throws Exception {
         List<JsonNode> requests = new ArrayList<>();
         HttpServer server = server();
@@ -279,6 +334,7 @@ class AgentBridgeClientTest {
         server.createContext("/tool-calls", exchange -> respond(exchange, 200,
                 objectMapper.createObjectNode()
                         .put("complete", true)
+                        .put("snapshotToken", "snapshot-typed")
                         .put("total", 1)
                         .set("toolCalls", objectMapper.createArrayNode().add(fixtureCall.deepCopy()))
                         .toString()));
@@ -374,7 +430,7 @@ class AgentBridgeClientTest {
                 {"items":[],"complete":false,"snapshotToken":"stable","total":1}
                 """), "missing continuation token");
         assertToolCallsRejected(List.of("""
-                {"items":[],"complete":true,"total":1}
+                {"items":[],"complete":true,"snapshotToken":"stable","total":1}
                 """), "total does not match");
         assertToolCallsRejected(List.of(
                 """
@@ -395,14 +451,14 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void rejectsUnprovenArrayHistoryAndAcceptsOnlyExplicitCompleteArrayContract() throws Exception {
+    void rejectsArrayHistoryEvenWhenLegacyHeaderClaimsCompleteness() throws Exception {
         HttpServer server = server();
         server.createContext("/tool-calls", exchange -> respond(exchange, 200, "[]"));
         server.start();
         URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
 
         assertThatThrownBy(() -> client.getToolCalls(base))
-                .hasMessageContaining("cannot prove complete");
+                .hasMessageContaining("immutable complete snapshot");
         server.stop(0);
 
         HttpServer completeServer = server();
@@ -411,9 +467,9 @@ class AgentBridgeClientTest {
             respond(exchange, 200, "[]");
         });
         completeServer.start();
-        assertThat(client.getToolCalls(
+        assertThatThrownBy(() -> client.getToolCalls(
                 URI.create("http://127.0.0.1:" + completeServer.getAddress().getPort())
-        )).isEmpty();
+        )).hasMessageContaining("immutable complete snapshot");
     }
 
     @Test
@@ -487,6 +543,30 @@ class AgentBridgeClientTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         servers.add(server);
         return server;
+    }
+
+    private URI baseUri(HttpServer server) {
+        return URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+    }
+
+    private String strictAuditInfo() {
+        return """
+                {
+                  "version":"1.200.0",
+                  "capabilities":{
+                    "mybatisSqlReviewAudit":{
+                      "contractVersion":1,
+                      "untruncatedStructuredToolArguments":true,
+                      "untruncatedStructuredToolResults":true,
+                      "immutableToolCallSnapshot":true,
+                      "stableToolCallTotal":true,
+                      "explicitToolCallHistoryComplete":true,
+                      "serverEnforcedPreviewMaxRows":20,
+                      "previewMaxRowsRequired":true
+                    }
+                  }
+                }
+                """;
     }
 
     private String resource(String path) throws IOException {
