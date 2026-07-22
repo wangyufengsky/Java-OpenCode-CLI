@@ -117,6 +117,13 @@ public final class WorkflowArtifactWorkspace {
         }
         Path normalizedRoot = stableRoot.toAbsolutePath().normalize();
         requireOrCreateSecureRoot(normalizedRoot);
+        boolean symbolicLinksSupported = probePublicationCapabilities(
+                normalizedRoot, publicationFailureInjector);
+        if (MYBATIS_SQL_REVIEW_CHAIN.equals(chainId) && !symbolicLinksSupported) {
+            throw new IllegalStateException(
+                    "mybatis-sql-review requires crash-atomic generation publication, but symbolic links, "
+                            + "atomic replacement, or directory fsync are unavailable on this filesystem");
+        }
         Path requestedRunRoot = inside(normalizedRoot, normalizedRoot.resolve("runs").resolve(request.executionId()));
         requireNoSymlinkComponents(normalizedRoot, requestedRunRoot, "workflow execution directory");
         if (Files.exists(requestedRunRoot, LinkOption.NOFOLLOW_LINKS)) {
@@ -131,6 +138,7 @@ public final class WorkflowArtifactWorkspace {
                 generation,
                 publicationFailureInjector
         );
+        workspace.symbolicLinksSupported = symbolicLinksSupported;
         boolean ownsRunRoot = false;
         try {
             createDirectoriesSecure(normalizedRoot, workspace.runRoot.getParent());
@@ -138,7 +146,6 @@ public final class WorkflowArtifactWorkspace {
             ownsRunRoot = true;
             Files.createDirectories(workspace.preparationRoot);
             Files.createDirectories(workspace.bundleRoot);
-            workspace.symbolicLinksSupported = workspace.detectSymbolicLinkSupport();
             if (seedFromStable) {
                 workspace.copyStableToBundle();
                 workspace.rebaseBundlePaths(workspace.stableRoot.toString(), workspace.bundleRoot.toString());
@@ -258,11 +265,6 @@ public final class WorkflowArtifactWorkspace {
                 return new PublicationResult(false, true, stableRoot.resolve(mainArtifact));
             }
             if (!symbolicLinksSupported) {
-                if (MYBATIS_SQL_REVIEW_CHAIN.equals(chainId)) {
-                    throw new IllegalStateException(
-                            "mybatis-sql-review requires crash-atomic generation publication, but symbolic links "
-                                    + "are unavailable on this filesystem");
-                }
                 return publishLegacyLocked(mainArtifact);
             }
             return publishGenerationLocked(mainArtifact);
@@ -339,39 +341,32 @@ public final class WorkflowArtifactWorkspace {
         boolean previousManifestExists = Files.isRegularFile(
                 stableRoot.resolve(PUBLICATION_MANIFEST), LinkOption.NOFOLLOW_LINKS);
         backupDirectPublication(previousArtifacts, previousManifestExists, backupRoot);
-        boolean manifestCommitted = false;
         try {
-            for (String previous : previousArtifacts.stream().sorted().toList()) {
-                if (!newArtifacts.containsKey(previous)) {
-                    Path target = secureStableArtifact(previous, "legacy publication deletion target");
-                    if (Files.deleteIfExists(target)) {
-                        publicationFailureInjector.afterDeletion(target);
-                    }
-                }
-            }
+            deleteDirectArtifacts(previousArtifacts, newArtifacts.keySet());
             for (String relative : newArtifacts.keySet()) {
                 Path target = secureStableArtifact(relative, "legacy publication replacement target");
                 publishFile(stagedRoot, stagedRoot.resolve(relative), stableRoot, target);
                 publicationFailureInjector.afterReplacement(target);
             }
-            atomicWriteJson(stableRoot.resolve(PUBLICATION_MANIFEST), publicationManifest(mainArtifact, newArtifacts));
-            manifestCommitted = true;
+            atomicWriteJsonRequired(
+                    stableRoot.resolve(PUBLICATION_MANIFEST), publicationManifest(mainArtifact, newArtifacts));
         } catch (IOException | RuntimeException failure) {
-            if (!manifestCommitted) {
-                try {
-                    rollbackDirectPublication(
-                            newArtifacts.keySet(), previousArtifacts, previousManifestExists, backupRoot);
-                } catch (IOException rollbackFailure) {
-                    failure.addSuppressed(rollbackFailure);
-                }
+            try {
+                rollbackDirectPublication(
+                        newArtifacts.keySet(), previousArtifacts, previousManifestExists, backupRoot);
+            } catch (IOException | RuntimeException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
             }
+            cleanupDirectScratchBeforeCommit(publicationRoot, stagedRoot, backupRoot, failure);
             throw failure;
-        } finally {
-            deleteGenerationWithoutFollowingLinks(stagedRoot);
-            deleteGenerationWithoutFollowingLinks(backupRoot);
         }
 
-        Path publishedMain = secureStableArtifact(mainArtifact, "legacy published main artifact");
+        Path publishedMain = inside(stableRoot, stableRoot.resolve(requireCanonicalRelativeArtifactPath(
+                normalize(mainArtifact))));
+        runBestEffort(() -> forceDirectory(stableRoot));
+        runBestEffort(() -> publicationFailureInjector.afterDirectManifestCommit(
+                stableRoot.resolve(PUBLICATION_MANIFEST)));
+        runBestEffort(() -> cleanupDirectScratch(publicationRoot, stagedRoot, backupRoot));
         runBestEffort(() -> writeRunManifest("PUBLISHED", ""));
         runBestEffort(() -> {
             if (WorkflowRunContext.currentRunId() != null) {
@@ -379,6 +374,68 @@ public final class WorkflowArtifactWorkspace {
             }
         });
         return new PublicationResult(true, false, publishedMain);
+    }
+
+    private void deleteDirectArtifacts(Set<String> previousArtifacts, Set<String> newArtifacts) throws IOException {
+        for (String previous : previousArtifacts.stream()
+                .sorted(Comparator.comparingInt((String path) -> Path.of(path).getNameCount()).reversed()
+                        .thenComparing(Comparator.reverseOrder()))
+                .toList()) {
+            Path target = secureStableArtifact(previous, "legacy publication deletion target");
+            if (Files.deleteIfExists(target) && !newArtifacts.contains(previous)) {
+                publicationFailureInjector.afterDeletion(target);
+            }
+        }
+        removeEmptyDirectParents(previousArtifacts);
+    }
+
+    private void removeEmptyDirectParents(Set<String> artifacts) throws IOException {
+        Set<Path> parents = new LinkedHashSet<>();
+        for (String relative : artifacts) {
+            Path parent = Path.of(relative).getParent();
+            while (parent != null) {
+                parents.add(parent);
+                parent = parent.getParent();
+            }
+        }
+        for (Path relativeParent : parents.stream()
+                .sorted(Comparator.comparingInt(Path::getNameCount).reversed()
+                        .thenComparing(path -> normalize(path.toString()), Comparator.reverseOrder()))
+                .toList()) {
+            Path parent = requireNoSymlinkComponents(
+                    stableRoot,
+                    inside(stableRoot, stableRoot.resolve(relativeParent)),
+                    "legacy publication empty parent"
+            );
+            if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+                continue;
+            }
+            try (var entries = Files.list(parent)) {
+                if (entries.findAny().isPresent()) {
+                    continue;
+                }
+            }
+            Files.delete(parent);
+        }
+    }
+
+    private void cleanupDirectScratchBeforeCommit(
+            Path publicationRoot,
+            Path stagedRoot,
+            Path backupRoot,
+            Throwable failure
+    ) {
+        try {
+            cleanupDirectScratch(publicationRoot, stagedRoot, backupRoot);
+        } catch (IOException | RuntimeException cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
+    }
+
+    private void cleanupDirectScratch(Path publicationRoot, Path stagedRoot, Path backupRoot) throws IOException {
+        publicationFailureInjector.beforeDirectScratchCleanup(publicationRoot);
+        deleteGenerationWithoutFollowingLinks(stagedRoot);
+        deleteGenerationWithoutFollowingLinks(backupRoot);
     }
 
     private Map<String, Object> publicationManifest(String mainArtifact, Map<String, String> artifactHashes) {
@@ -435,16 +492,17 @@ public final class WorkflowArtifactWorkspace {
             Path backupRoot
     ) throws IOException {
         IOException failure = null;
-        for (String relative : newArtifacts.stream().sorted().toList()) {
-            try {
-                Path target = secureStableArtifact(relative, "legacy rollback deletion");
-                Files.deleteIfExists(target);
-            } catch (IOException | RuntimeException exception) {
-                failure = accumulate(failure, exception);
-            }
+        try {
+            deleteDirectArtifactsForRollback(newArtifacts);
+        } catch (IOException | RuntimeException exception) {
+            failure = accumulate(failure, exception);
         }
-        for (String relative : previousArtifacts.stream().sorted().toList()) {
+        for (String relative : previousArtifacts.stream()
+                .sorted(Comparator.comparingInt((String path) -> Path.of(path).getNameCount())
+                        .thenComparing(Comparator.naturalOrder()))
+                .toList()) {
             try {
+                prepareDirectRestoreTarget(relative);
                 publishFile(
                         backupRoot,
                         backupRoot.resolve("artifacts").resolve(relative),
@@ -471,6 +529,51 @@ public final class WorkflowArtifactWorkspace {
         }
         if (failure != null) {
             throw failure;
+        }
+    }
+
+    private void deleteDirectArtifactsForRollback(Set<String> artifacts) throws IOException {
+        IOException failure = null;
+        for (String relative : artifacts.stream()
+                .sorted(Comparator.comparingInt((String path) -> Path.of(path).getNameCount()).reversed()
+                        .thenComparing(Comparator.reverseOrder()))
+                .toList()) {
+            try {
+                Path target = secureStableArtifact(relative, "legacy rollback deletion");
+                if (Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+                    try (var entries = Files.list(target)) {
+                        if (entries.findAny().isPresent()) {
+                            throw new IllegalStateException(
+                                    "legacy rollback target directory is not empty: " + target);
+                        }
+                    }
+                }
+                Files.deleteIfExists(target);
+            } catch (IOException | RuntimeException exception) {
+                failure = accumulate(failure, exception);
+            }
+        }
+        try {
+            removeEmptyDirectParents(artifacts);
+        } catch (IOException | RuntimeException exception) {
+            failure = accumulate(failure, exception);
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private void prepareDirectRestoreTarget(String relative) throws IOException {
+        Path target = secureStableArtifact(relative, "legacy rollback restore target");
+        if (Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+            try (var entries = Files.list(target)) {
+                if (entries.findAny().isPresent()) {
+                    throw new IllegalStateException("legacy rollback restore target directory is not empty: " + target);
+                }
+            }
+            Files.delete(target);
+        } else if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            Files.delete(target);
         }
     }
 
@@ -569,27 +672,73 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
-    private boolean detectSymbolicLinkSupport() throws IOException {
-        Boolean override = publicationFailureInjector.symbolicLinkSupportOverride();
-        if (override != null) {
-            return override;
-        }
-        Path capabilityRoot = inside(runRoot, runRoot.resolve("capabilities"));
-        createDirectoriesSecure(runRoot, capabilityRoot);
-        Path target = capabilityRoot.resolve("symlink-target");
-        Path link = capabilityRoot.resolve("symlink-probe");
-        Files.writeString(target, "probe", StandardCharsets.UTF_8, CREATE, WRITE,
-                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
-        try {
-            Files.createSymbolicLink(link, target.getFileName());
-            return Files.isSymbolicLink(link) && Files.isRegularFile(link);
-        } catch (UnsupportedOperationException | SecurityException | IOException unsupported) {
+    private static boolean probePublicationCapabilities(
+            Path stableRoot,
+            PublicationFailureInjector failureInjector
+    ) {
+        Boolean override = failureInjector.symbolicLinkSupportOverride();
+        if (Boolean.FALSE.equals(override)) {
             return false;
-        } finally {
-            Files.deleteIfExists(link);
-            Files.deleteIfExists(target);
-            Files.deleteIfExists(capabilityRoot);
         }
+        Path capabilityRoot = null;
+        boolean supported = false;
+        try {
+            capabilityRoot = Files.createTempDirectory(stableRoot, ".publication-capability-");
+            Path firstTarget = capabilityRoot.resolve("target-one");
+            Path secondTarget = capabilityRoot.resolve("target-two");
+            Files.writeString(firstTarget, "one", StandardCharsets.UTF_8, CREATE, WRITE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+            Files.writeString(secondTarget, "two", StandardCharsets.UTF_8, CREATE, WRITE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+            Path pointer = capabilityRoot.resolve("current");
+            Files.createSymbolicLink(pointer, firstTarget.getFileName());
+            if (!Files.isSymbolicLink(pointer) || !Files.isRegularFile(pointer)) {
+                return false;
+            }
+            failureInjector.afterCapabilityProbeStep("symlink-create", capabilityRoot);
+
+            Path replacement = capabilityRoot.resolve("current.next");
+            Files.createSymbolicLink(replacement, secondTarget.getFileName());
+            atomicMoveRequired(capabilityRoot, replacement, pointer);
+            if (!Files.isSymbolicLink(pointer)
+                    || !Files.readSymbolicLink(pointer).equals(secondTarget.getFileName())
+                    || !Files.readString(pointer, StandardCharsets.UTF_8).equals("two")) {
+                return false;
+            }
+            failureInjector.afterCapabilityProbeStep("atomic-replace", capabilityRoot);
+
+            forceDirectory(capabilityRoot);
+            forceDirectory(stableRoot);
+            failureInjector.afterCapabilityProbeStep("directory-fsync", capabilityRoot);
+            supported = true;
+        } catch (IOException | RuntimeException unsupported) {
+            supported = false;
+        } finally {
+            if (capabilityRoot != null) {
+                try {
+                    deleteGenerationWithoutFollowingLinks(capabilityRoot);
+                    forceDirectory(stableRoot);
+                } catch (IOException | RuntimeException cleanupFailure) {
+                    supported = false;
+                }
+            }
+        }
+        return supported;
+    }
+
+    private static void cleanupPublicationScratch(Path stableRoot) throws IOException {
+        Path store = stableRoot.resolve(PUBLICATION_STORE);
+        if (!Files.exists(store, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        Path safeStore = requireNoSymlinkComponents(stableRoot, store, "publication store");
+        Path scratch = safeStore.resolve("scratch");
+        if (!Files.exists(scratch, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        requireNoSymlinkComponents(stableRoot, scratch, "publication scratch");
+        deleteGenerationWithoutFollowingLinks(scratch);
+        forceDirectory(safeStore);
     }
 
     private void copyGenerationArtifactsToBundle(Path generationRoot) throws IOException {
@@ -937,6 +1086,9 @@ public final class WorkflowArtifactWorkspace {
                 createDirectoriesSecure(stableRoot, migrated.getParent());
                 deleteGenerationWithoutFollowingLinks(migrated);
                 atomicMoveRequired(stableRoot, target, migrated);
+                forceDirectory(stableRoot);
+                forceDirectory(migrated.getParent());
+                publicationFailureInjector.afterLegacyTargetMovedBeforeForwarderInstall(target, migrated);
                 atomicMoveRequired(stableRoot, temporary, target);
                 deleteGenerationWithoutFollowingLinks(migrated);
             } else {
@@ -978,7 +1130,10 @@ public final class WorkflowArtifactWorkspace {
     }
 
     private Path forwarderTemporaryPath(String rootName) throws IOException {
-        Path temporary = stableRoot.resolve("." + rootName + ".forward-" + executionId());
+        Path store = publicationStore(stableRoot);
+        Path scratch = inside(stableRoot, store.resolve("scratch"));
+        createDirectoriesSecure(stableRoot, scratch);
+        Path temporary = scratch.resolve(rootName + ".forward-" + executionId());
         return requireNoSymlinkComponents(stableRoot, temporary, "publication forwarder temporary path");
     }
 
@@ -1438,6 +1593,32 @@ public final class WorkflowArtifactWorkspace {
         atomicMoveSecure(root, temporary, target);
     }
 
+    private void atomicWriteJsonRequired(Path target, Object value) throws IOException {
+        Path root = target.toAbsolutePath().normalize().startsWith(runRoot) ? runRoot : stableRoot;
+        createDirectoriesSecure(root, target.getParent());
+        requireNoSymlinkComponents(root, target, "atomic JSON target");
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp-commit-" + executionId());
+        requireNoSymlinkComponents(root, temporary, "atomic JSON temporary target");
+        boolean committed = false;
+        try {
+            try (var output = Files.newOutputStream(
+                    temporary, CREATE, WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                    LinkOption.NOFOLLOW_LINKS
+            )) {
+                objectMapper.writerWithDefaultPrettyPrinter().writeValue(output, value);
+            }
+            try (FileChannel channel = FileChannel.open(temporary, WRITE, LinkOption.NOFOLLOW_LINKS)) {
+                channel.force(true);
+            }
+            atomicMoveRequired(root, temporary, target);
+            committed = true;
+        } finally {
+            if (!committed) {
+                Files.deleteIfExists(temporary);
+            }
+        }
+    }
+
     private void publishFile(Path sourceRoot, Path source, Path targetRoot, Path target) throws IOException {
         requireNoSymlinkComponents(sourceRoot, source, "publication copy source");
         if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
@@ -1513,6 +1694,7 @@ public final class WorkflowArtifactWorkspace {
         try {
             try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE, LinkOption.NOFOLLOW_LINKS);
                  FileLock ignored = channel.lock()) {
+                cleanupPublicationScratch(stableRoot);
                 cleanupOrphanGenerations(stableRoot);
                 long next = readGeneration(stableRoot) + 1;
                 Path target = requireNoSymlinkComponents(
@@ -1717,6 +1899,9 @@ public final class WorkflowArtifactWorkspace {
     }
 
     interface PublicationFailureInjector {
+        default void afterCapabilityProbeStep(String step, Path scratchRoot) throws IOException {
+        }
+
         default void afterGenerationPrepared(Path generationRoot) throws IOException {
         }
 
@@ -1730,6 +1915,16 @@ public final class WorkflowArtifactWorkspace {
         }
 
         default void afterLegacyRootReplacement(Path stableRootEntry) throws IOException {
+        }
+
+        default void afterLegacyTargetMovedBeforeForwarderInstall(Path stableRootEntry, Path backup)
+                throws IOException {
+        }
+
+        default void afterDirectManifestCommit(Path manifest) throws IOException {
+        }
+
+        default void beforeDirectScratchCleanup(Path publicationRoot) throws IOException {
         }
 
         default Boolean symbolicLinkSupportOverride() {

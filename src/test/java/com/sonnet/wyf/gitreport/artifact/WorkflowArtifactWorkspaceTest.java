@@ -336,27 +336,238 @@ class WorkflowArtifactWorkspaceTest {
     }
 
     @Test
-    void myBatisChainFailsClosedBeforePublishingWhenSymbolicLinksAreUnavailable() throws Exception {
+    void directFallbackRollsBackFileToDirectoryShapeChange() throws Exception {
+        WorkflowArtifactWorkspace initial = noSymlinkWorkspace("run-direct-file-initial");
+        Files.writeString(initial.bundleRoot().resolve("artifact"), "old file");
+        initial.publish("artifact");
+        byte[] manifestBefore = Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST));
+        WorkflowArtifactWorkspace replacement = workspace(
+                "run-direct-file-to-directory",
+                false,
+                failingDirectReplacementInjector()
+        );
+        Files.createDirectories(replacement.bundleRoot().resolve("artifact"));
+        Files.writeString(replacement.bundleRoot().resolve("artifact/child.txt"), "new child");
+
+        assertThatThrownBy(() -> replacement.publish("artifact/child.txt"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("direct replacement failure");
+
+        assertThat(tempDir.resolve("artifact")).isRegularFile().hasContent("old file");
+        assertThat(Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)))
+                .isEqualTo(manifestBefore);
+        assertPublicationScratchRemoved(replacement);
+    }
+
+    @Test
+    void directFallbackRollsBackDirectoryToFileShapeChange() throws Exception {
+        WorkflowArtifactWorkspace initial = noSymlinkWorkspace("run-direct-directory-initial");
+        Files.createDirectories(initial.bundleRoot().resolve("artifact"));
+        Files.writeString(initial.bundleRoot().resolve("artifact/child.txt"), "old child");
+        initial.publish("artifact/child.txt");
+        byte[] manifestBefore = Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST));
+        WorkflowArtifactWorkspace replacement = workspace(
+                "run-direct-directory-to-file",
+                false,
+                failingDirectReplacementInjector()
+        );
+        Files.writeString(replacement.bundleRoot().resolve("artifact"), "new file");
+
+        assertThatThrownBy(() -> replacement.publish("artifact"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("direct replacement failure");
+
+        assertThat(tempDir.resolve("artifact")).isDirectory();
+        assertThat(tempDir.resolve("artifact/child.txt")).hasContent("old child");
+        assertThat(Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)))
+                .isEqualTo(manifestBefore);
+        assertPublicationScratchRemoved(replacement);
+    }
+
+    @Test
+    void directManifestReplaceIsTheCommitPointAndLaterFailureIsBestEffort() throws Exception {
+        boolean[] afterCommitCalled = {false};
         WorkflowArtifactWorkspace workspace = workspace(
-                "mybatis-sql-review",
-                "run-no-symlink-mybatis",
+                "run-direct-after-commit",
                 false,
                 new WorkflowArtifactWorkspace.PublicationFailureInjector() {
                     @Override
                     public Boolean symbolicLinkSupportOverride() {
                         return false;
                     }
+
+                    @Override
+                    public void afterDirectManifestCommit(Path ignored) throws java.io.IOException {
+                        afterCommitCalled[0] = true;
+                        throw new java.io.IOException("failure after direct manifest commit");
+                    }
                 }
         );
-        Files.writeString(workspace.bundleRoot().resolve("mybatis-sql-review-report.md"), "unsafe fallback");
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "committed direct report");
 
-        assertThatThrownBy(() -> workspace.publish("mybatis-sql-review-report.md"))
+        WorkflowArtifactWorkspace.PublicationResult result = workspace.publish("weekly-report.md");
+
+        assertThat(afterCommitCalled[0]).isTrue();
+        assertThat(result.published()).isTrue();
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("committed direct report");
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST))
+                .content().contains("run-direct-after-commit");
+        assertPublicationScratchRemoved(workspace);
+    }
+
+    @Test
+    void directScratchCleanupFailureAfterCommitDoesNotTurnPublishIntoFailure() throws Exception {
+        boolean[] cleanupAttempted = {false};
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-direct-cleanup-failure",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public Boolean symbolicLinkSupportOverride() {
+                        return false;
+                    }
+
+                    @Override
+                    public void beforeDirectScratchCleanup(Path ignored) throws java.io.IOException {
+                        cleanupAttempted[0] = true;
+                        throw new java.io.IOException("direct scratch cleanup unavailable");
+                    }
+                }
+        );
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "committed despite cleanup");
+
+        WorkflowArtifactWorkspace.PublicationResult result = workspace.publish("weekly-report.md");
+
+        assertThat(cleanupAttempted[0]).isTrue();
+        assertThat(result.published()).isTrue();
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("committed despite cleanup");
+        assertThat(workspace.runRoot().resolve("publication/staged")).exists();
+    }
+
+    @Test
+    void myBatisChainFailsClosedBeforePublishingWhenSymbolicLinksAreUnavailable() throws Exception {
+        Files.writeString(tempDir.resolve(".workflow-generation"), "41");
+        Files.createDirectories(tempDir.resolve("runs/old-run"));
+        Files.writeString(tempDir.resolve("runs/old-run/run-manifest.json"), "published old run");
+
+        assertThatThrownBy(() -> workspace(
+                "mybatis-sql-review",
+                "run-no-symlink-mybatis",
+                false,
+                noSymlinkInjector()
+        ))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requires crash-atomic generation publication")
                 .hasMessageContaining("symbolic links");
 
+        assertThat(tempDir.resolve(".workflow-generation")).hasContent("41");
+        assertThat(tempDir.resolve("runs/run-no-symlink-mybatis")).doesNotExist();
+        assertThat(tempDir.resolve("runs/old-run/run-manifest.json")).hasContent("published old run");
         assertThat(tempDir.resolve("mybatis-sql-review-report.md")).doesNotExist();
         assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).doesNotExist();
+    }
+
+    @Test
+    void capabilityProbeExercisesSymlinkAtomicReplaceAndDirectoryFsyncBeforeGenerationAllocation() throws Exception {
+        List<String> steps = new java.util.ArrayList<>();
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-capability-probe",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterCapabilityProbeStep(String step, Path ignored) {
+                        steps.add(step);
+                        assertThat(tempDir.resolve(".workflow-generation")).doesNotExist();
+                    }
+                }
+        );
+
+        assertThat(steps).containsExactly("symlink-create", "atomic-replace", "directory-fsync");
+        assertThat(workspace.publicationGeneration()).isEqualTo(1L);
+    }
+
+    @Test
+    void myBatisStartFailsBeforeGenerationAllocationWhenAnyCapabilityProbeStepFails() throws Exception {
+        for (String failedStep : List.of("symlink-create", "atomic-replace", "directory-fsync")) {
+            String executionId = "run-capability-failure-" + failedStep;
+
+            assertThatThrownBy(() -> workspace(
+                    "mybatis-sql-review",
+                    executionId,
+                    false,
+                    new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                        @Override
+                        public void afterCapabilityProbeStep(String step, Path ignored) throws java.io.IOException {
+                            if (step.equals(failedStep)) {
+                                throw new java.io.IOException("failed capability step " + failedStep);
+                            }
+                        }
+                    }
+            )).isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("requires crash-atomic generation publication");
+
+            assertThat(tempDir.resolve(".publication-generation")).doesNotExist();
+            assertThat(tempDir.resolve("runs").resolve(executionId)).doesNotExist();
+        }
+    }
+
+    @Test
+    void startupRemovesStaleForwarderScratchWithoutFollowingIt() throws Exception {
+        Path external = Files.createDirectories(tempDir.resolve("external-scratch-target"));
+        Files.writeString(external.resolve("sentinel.txt"), "outside");
+        Path scratch = Files.createDirectories(tempDir.resolve(".published/scratch"));
+        Files.createSymbolicLink(scratch.resolve("stale-forwarder"), external);
+
+        workspace("run-clean-forwarder-scratch", false);
+
+        assertThat(scratch).doesNotExist();
+        assertThat(external.resolve("sentinel.txt")).hasContent("outside");
+    }
+
+    @Test
+    void legacyMigrationRecoversTargetMovedBeforeForwarderInstall() throws Exception {
+        Files.writeString(tempDir.resolve("weekly-report.md"), "old report");
+        Files.createDirectories(tempDir.resolve("reports"));
+        Files.writeString(tempDir.resolve("reports/listed.txt"), "old nested");
+        writeLegacyManifest(List.of("weekly-report.md", "reports/listed.txt"));
+        boolean[] sawScratchForwarder = {false};
+        WorkflowArtifactWorkspace interrupted = workspace(
+                "run-legacy-half-step",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterLegacyTargetMovedBeforeForwarderInstall(Path stableEntry, Path ignoredBackup)
+                            throws java.io.IOException {
+                        if (stableEntry.getFileName().toString().equals("reports")) {
+                            Path scratch = tempDir.resolve(".published/scratch");
+                            try (var entries = Files.list(scratch)) {
+                                sawScratchForwarder[0] = entries.anyMatch(Files::isSymbolicLink);
+                            }
+                            throw new java.io.IOException("stopped between legacy move and forwarder install");
+                        }
+                    }
+                }
+        );
+        Files.writeString(interrupted.bundleRoot().resolve("weekly-report.md"), "first replacement");
+
+        assertThatThrownBy(() -> interrupted.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("between legacy move and forwarder install");
+        assertThat(sawScratchForwarder[0]).isTrue();
+        assertThat(tempDir.resolve("reports")).doesNotExist();
+        assertThat(tempDir.resolve(".published/migration-backup/reports/listed.txt")).hasContent("old nested");
+        assertThat(tempDir.resolve(".published/legacy-migration")).isRegularFile();
+
+        WorkflowArtifactWorkspace recovered = workspace("run-legacy-half-step-recovered", false);
+        Files.writeString(recovered.bundleRoot().resolve("weekly-report.md"), "recovered report");
+        Files.createDirectories(recovered.bundleRoot().resolve("reports"));
+        Files.writeString(recovered.bundleRoot().resolve("reports/new.txt"), "recovered nested");
+
+        assertThat(recovered.publish("weekly-report.md").published()).isTrue();
+        assertThat(tempDir.resolve("reports")).isSymbolicLink();
+        assertThat(tempDir.resolve("reports/new.txt")).hasContent("recovered nested");
+        assertThat(tempDir.resolve(".published/migration-backup")).doesNotExist();
+        assertThat(tempDir.resolve(".published/legacy-migration")).doesNotExist();
     }
 
     @Test
@@ -604,6 +815,33 @@ class WorkflowArtifactWorkspaceTest {
     private WorkflowArtifactWorkspace workspace(String executionId, boolean seed) throws Exception {
         WorkflowRunRequest request = request(executionId, seed);
         return WorkflowArtifactWorkspace.start(objectMapper, "test-chain", request, tempDir, seed);
+    }
+
+    private WorkflowArtifactWorkspace noSymlinkWorkspace(String executionId) throws Exception {
+        return workspace(executionId, false, noSymlinkInjector());
+    }
+
+    private WorkflowArtifactWorkspace.PublicationFailureInjector noSymlinkInjector() {
+        return new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+            @Override
+            public Boolean symbolicLinkSupportOverride() {
+                return false;
+            }
+        };
+    }
+
+    private WorkflowArtifactWorkspace.PublicationFailureInjector failingDirectReplacementInjector() {
+        return new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+            @Override
+            public Boolean symbolicLinkSupportOverride() {
+                return false;
+            }
+
+            @Override
+            public void afterReplacement(Path ignored) throws java.io.IOException {
+                throw new java.io.IOException("direct replacement failure");
+            }
+        };
     }
 
     private WorkflowRunRequest request(String executionId, boolean seed) {
