@@ -15,14 +15,58 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MyBatisSqlInventoryBuilderTest {
     @TempDir
     Path repository;
 
     private final MyBatisSqlInventoryBuilder builder = new MyBatisSqlInventoryBuilder();
+
+    @Test
+    void doubleStarSlashMatchesRootAndNestedMapperXml() throws Exception {
+        write("RootMapper.xml", """
+                <mapper namespace="demo.RootMapper">
+                  <select id="root">SELECT 1</select>
+                </mapper>
+                """);
+        write("nested/NestedMapper.xml", """
+                <mapper namespace="demo.NestedMapper">
+                  <select id="nested">SELECT 2</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*Mapper.xml"), List.of());
+
+        assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly("RootMapper.xml", "nested/NestedMapper.xml");
+    }
+
+    @Test
+    void rejectsRepositoriesWithNoMatchingMapperXml() {
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*Mapper.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no MyBatis mapper XML files matched");
+    }
+
+    @Test
+    void allowsDiscoveredMappersWithNoMappedStatements() throws Exception {
+        write("mapper/OnlyFragmentsMapper.xml", """
+                <mapper namespace="demo.OnlyFragmentsMapper">
+                  <sql id="columns">id, name</sql>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*Mapper.xml"), List.of());
+
+        assertThat(inventory.mappers()).singleElement()
+                .extracting(MyBatisMapperInventory::mapperRelativePath)
+                .isEqualTo("mapper/OnlyFragmentsMapper.xml");
+        assertThat(inventory.statements()).isEmpty();
+    }
 
     @Test
     void inventoriesOnlyTopLevelStatementsInStablePathNamespaceIdOrder() throws Exception {
@@ -108,12 +152,62 @@ class MyBatisSqlInventoryBuilderTest {
                 .statements().getFirst();
 
         assertThat(statement.normalizedSql())
-                .isEqualTo("SELECT * FROM users name = #{name} AND score >= #{minScore} ORDER BY ${orderBy}");
+                .contains("SELECT * FROM users")
+                .contains("name = #{name}")
+                .contains("AND score >= #{minScore}")
+                .contains("ORDER BY ${orderBy}")
+                .contains("\n");
         assertThat(statement.dynamicNodeNames()).containsExactly("where", "if", "if", "if");
         assertThat(statement.parameterPlaceholders()).containsExactly("#{name}", "#{minScore}", "${orderBy}");
         assertThat(statement.rawXml()).contains("<![CDATA[>=]]>");
         assertThat(statement.startLine()).isEqualTo(2);
         assertThat(statement.endLine()).isEqualTo(9);
+    }
+
+    @Test
+    void derivesLinesFromRawOffsetsForMultilineAttributesAndCrLf() throws Exception {
+        write("mapper/LinesMapper.xml", String.join("\r\n",
+                "<mapper namespace=\"demo.LinesMapper\">",
+                "  <select",
+                "      id=\"multiline\"",
+                "      parameterType=\"map\">",
+                "    SELECT 1",
+                "  </select>",
+                "</mapper>",
+                ""));
+
+        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+                .statements().getFirst();
+
+        assertThat(statement.startLine()).isEqualTo(2);
+        assertThat(statement.endLine()).isEqualTo(6);
+        assertThat(statement.rawXml())
+                .startsWith("<select\r\n")
+                .endsWith("</select>");
+    }
+
+    @Test
+    void preservesSemanticWhitespaceInsideSqlTokensAndComments() throws Exception {
+        write("mapper/WhitespaceMapper.xml", """
+                <mapper namespace="demo.WhitespaceMapper">
+                  <select id="preserve">
+                    SELECT 'left  right', "quoted  identifier", q'[vendor  value]'
+                    -- keep   line-comment spacing
+                    FROM users /* keep   block-comment spacing */
+                  </select>
+                </mapper>
+                """);
+
+        String sql = builder.build(repository, List.of("**/*.xml"), List.of())
+                .statements().getFirst().normalizedSql();
+
+        assertThat(sql)
+                .contains("'left  right'")
+                .contains("\"quoted  identifier\"")
+                .contains("q'[vendor  value]'")
+                .contains("-- keep   line-comment spacing")
+                .contains("/* keep   block-comment spacing */")
+                .contains("\n");
     }
 
     @Test
@@ -136,6 +230,44 @@ class MyBatisSqlInventoryBuilderTest {
     }
 
     @Test
+    void rejectsMalformedUtf8Bytes() throws Exception {
+        byte[] prefix = """
+                <mapper namespace="demo.InvalidUtf8Mapper">
+                  <select id="broken">SELECT '
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] suffix = """
+                '</select>
+                </mapper>
+                """.getBytes(StandardCharsets.UTF_8);
+        byte[] invalid = new byte[prefix.length + 2 + suffix.length];
+        System.arraycopy(prefix, 0, invalid, 0, prefix.length);
+        invalid[prefix.length] = (byte) 0xc3;
+        invalid[prefix.length + 1] = 0x28;
+        System.arraycopy(suffix, 0, invalid, prefix.length + 2, suffix.length);
+        writeBytes("mapper/InvalidUtf8Mapper.xml", invalid);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid UTF-8")
+                .hasMessageContaining("mapper/InvalidUtf8Mapper.xml");
+    }
+
+    @Test
+    void rejectsXmlDeclarationsWithNonUtf8Encoding() throws Exception {
+        write("mapper/LatinMapper.xml", """
+                <?xml version="1.0" encoding="ISO-8859-1"?>
+                <mapper namespace="demo.LatinMapper">
+                  <select id="find">SELECT 1</select>
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires UTF-8")
+                .hasMessageContaining("mapper/LatinMapper.xml");
+    }
+
+    @Test
     void recursivelyExpandsIncludesAndTracksResolvedFragmentIds() throws Exception {
         write("mapper/IncludeMapper.xml", """
                 <mapper namespace="demo.IncludeMapper">
@@ -155,6 +287,79 @@ class MyBatisSqlInventoryBuilderTest {
         assertThat(statement.resolvedFragmentIds())
                 .containsExactly("demo.IncludeMapper.baseColumns", "demo.IncludeMapper.tableName");
         assertThat(statement.parameterPlaceholders()).containsExactly("#{id}");
+    }
+
+    @Test
+    void scopesLocalIncludePropertiesAndExcludesThemFromRuntimeParameters() throws Exception {
+        write("mapper/PropertyMapper.xml", """
+                <mapper namespace="demo.PropertyMapper">
+                  <sql id="columns">${alias}.id, ${alias}.name FROM users ${alias}</sql>
+                  <select id="find">SELECT <include refid="columns"><property name="alias" value="u"/></include> WHERE ${runtimeColumn} = #{id}</select>
+                </mapper>
+                """);
+
+        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+                .statements().getFirst();
+
+        assertThat(statement.normalizedSql())
+                .isEqualTo("SELECT u.id, u.name FROM users u WHERE ${runtimeColumn} = #{id}");
+        assertThat(statement.parameterPlaceholders()).containsExactly("${runtimeColumn}", "#{id}");
+        assertThat(statement.resolvedFragmentIds()).containsExactly("demo.PropertyMapper.columns");
+    }
+
+    @Test
+    void scopesPropertiesAcrossNamespaceQualifiedAndNestedIncludes() throws Exception {
+        write("shared/SharedMapper.xml", """
+                <mapper namespace="demo.Shared">
+                  <sql id="table">accounts ${alias}</sql>
+                  <sql id="query">${alias}.id FROM <include refid="${tableFragment}"><property name="alias" value="${alias}"/></include></sql>
+                </mapper>
+                """);
+        write("mapper/CallerMapper.xml", """
+                <mapper namespace="demo.Caller">
+                  <select id="find">SELECT <include refid="demo.Shared.query"><property name="alias" value="a"/><property name="tableFragment" value="demo.Shared.table"/></include></select>
+                </mapper>
+                """);
+
+        assertThatCode(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .doesNotThrowAnyException();
+        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+                .statements().getFirst();
+
+        assertThat(statement.normalizedSql()).isEqualTo("SELECT a.id FROM accounts a");
+        assertThat(statement.parameterPlaceholders()).isEmpty();
+        assertThat(statement.resolvedFragmentIds())
+                .containsExactly("demo.Shared.query", "demo.Shared.table");
+    }
+
+    @Test
+    void rejectsDuplicatePropertyNamesOnOneInclude() throws Exception {
+        write("mapper/DuplicatePropertyMapper.xml", """
+                <mapper namespace="demo.DuplicatePropertyMapper">
+                  <sql id="columns">${alias}.id</sql>
+                  <select id="find"><include refid="columns"><property name="alias" value="a"/><property name="alias" value="b"/></include></select>
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("duplicate include property 'alias'")
+                .hasMessageContaining("mapper/DuplicatePropertyMapper.xml");
+    }
+
+    @Test
+    void rejectsUnresolvedCompileTimePropertiesInFragments() throws Exception {
+        write("mapper/UnresolvedPropertyMapper.xml", """
+                <mapper namespace="demo.UnresolvedPropertyMapper">
+                  <sql id="columns">${alias}.id</sql>
+                  <select id="find">SELECT <include refid="columns"/></select>
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unresolved include property 'alias'")
+                .hasMessageContaining("demo.UnresolvedPropertyMapper.columns");
     }
 
     @Test
@@ -264,7 +469,7 @@ class MyBatisSqlInventoryBuilderTest {
         assertThat(statements).extracting(MyBatisSqlStatement::selectKeyOrdinal)
                 .containsExactly(0, 1, 2);
         assertThat(statements).extracting(MyBatisSqlStatement::commandType)
-                .containsExactly("INSERT", "SELECT_KEY", "SELECT_KEY");
+                .containsExactly("INSERT", "SELECT", "SELECT");
         assertThat(statements).extracting(MyBatisSqlStatement::selectKey)
                 .containsExactly(false, true, true);
         assertThat(statements.getFirst().normalizedSql()).isEqualTo("INSERT INTO users(id) VALUES (#{id})");
@@ -297,6 +502,44 @@ class MyBatisSqlInventoryBuilderTest {
         assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
                 .containsExactly("mappers/KeepMapper.xml");
         assertThat(inventory.statements()).extracting(MyBatisSqlStatement::id).containsExactly("keep");
+    }
+
+    @Test
+    void rejectsXmlSymlinksToRepositoryFiles() throws Exception {
+        Path target = write("targets/RealMapper.xml", """
+                <mapper namespace="demo.RealMapper">
+                  <select id="real">SELECT 1</select>
+                </mapper>
+                """);
+        Path link = repository.resolve("LinkedMapper.xml");
+        createSymlinkOrSkip(link, target);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/LinkedMapper.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("symbolic links are forbidden")
+                .hasMessageContaining("LinkedMapper.xml");
+    }
+
+    @Test
+    void rejectsXmlSymlinksThatEscapeTheRepository() throws Exception {
+        Path outsideDirectory = Files.createTempDirectory("mybatis-inventory-symlink-");
+        Path outsideMapper = outsideDirectory.resolve("OutsideMapper.xml");
+        Files.writeString(outsideMapper, """
+                <mapper namespace="demo.OutsideMapper">
+                  <select id="outside">SELECT 1</select>
+                </mapper>
+                """, StandardCharsets.UTF_8);
+        Path link = repository.resolve("EscapeMapper.xml");
+        try {
+            createSymlinkOrSkip(link, outsideMapper);
+            assertThatThrownBy(() -> builder.build(repository, List.of("**/EscapeMapper.xml"), List.of()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("symbolic links are forbidden")
+                    .hasMessageContaining("EscapeMapper.xml");
+        } finally {
+            Files.deleteIfExists(outsideMapper);
+            Files.deleteIfExists(outsideDirectory);
+        }
     }
 
     @Test
@@ -373,6 +616,23 @@ class MyBatisSqlInventoryBuilderTest {
         Files.createDirectories(path.getParent());
         Files.writeString(path, content, StandardCharsets.UTF_8);
         return path;
+    }
+
+    private Path writeBytes(String relativePath, byte[] content) throws IOException {
+        Path path = repository.resolve(relativePath);
+        Files.createDirectories(path.getParent());
+        Files.write(path, content);
+        return path;
+    }
+
+    private void createSymlinkOrSkip(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | SecurityException ex) {
+            assumeTrue(false, "symbolic links are not supported: " + ex.getMessage());
+        } catch (IOException ex) {
+            assumeTrue(false, "symbolic links are unavailable: " + ex.getMessage());
+        }
     }
 
     private String sha256(byte[] bytes) throws Exception {

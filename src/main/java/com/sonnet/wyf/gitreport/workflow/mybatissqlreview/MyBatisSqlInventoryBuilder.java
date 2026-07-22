@@ -37,6 +37,7 @@ public final class MyBatisSqlInventoryBuilder {
             "(?is)<!DOCTYPE\\s+mapper\\s+PUBLIC\\s+(['\"])-//mybatis\\.org//DTD Mapper 3\\.0//EN\\1"
                     + "\\s+(['\"])https?://mybatis\\.org/dtd/mybatis-3-mapper\\.dtd\\2\\s*>");
     private static final Pattern PLACEHOLDER = Pattern.compile("(?:#|\\$)\\{[^}]+}");
+    private static final Pattern PROPERTY_PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)}");
     private static final Comparator<ParsedMapper> MAPPER_ORDER = Comparator
             .comparing(ParsedMapper::relativePath)
             .thenComparing(ParsedMapper::namespace);
@@ -51,6 +52,9 @@ public final class MyBatisSqlInventoryBuilder {
         List<PathMatcher> includeMatchers = matchers(defaultIncludes(includes));
         List<PathMatcher> excludeMatchers = matchers(excludes == null ? List.of() : excludes);
         List<Path> mapperPaths = discoverMappers(root, includeMatchers, excludeMatchers);
+        if (mapperPaths.isEmpty()) {
+            throw new IllegalArgumentException("no MyBatis mapper XML files matched under " + root);
+        }
 
         List<ParsedMapper> parsedMappers = mapperPaths.stream()
                 .map(path -> parseMapper(root, path))
@@ -95,24 +99,46 @@ public final class MyBatisSqlInventoryBuilder {
         List<PathMatcher> result = new ArrayList<>();
         for (String pattern : patterns) {
             if (pattern != null && !pattern.isBlank()) {
-                result.add(FileSystems.getDefault().getPathMatcher("glob:" + pattern.replace('\\', '/')));
+                LinkedHashSet<String> expandedPatterns = new LinkedHashSet<>();
+                expandDoubleStarDirectories(pattern.replace('\\', '/'), 0, expandedPatterns);
+                for (String expandedPattern : expandedPatterns) {
+                    result.add(FileSystems.getDefault().getPathMatcher("glob:" + expandedPattern));
+                }
             }
         }
         return List.copyOf(result);
     }
 
+    private void expandDoubleStarDirectories(String pattern, int fromIndex, Set<String> expandedPatterns) {
+        expandedPatterns.add(pattern);
+        int marker = pattern.indexOf("**/", fromIndex);
+        if (marker < 0) {
+            return;
+        }
+        expandDoubleStarDirectories(pattern, marker + 3, expandedPatterns);
+        expandDoubleStarDirectories(pattern.substring(0, marker) + pattern.substring(marker + 3), marker, expandedPatterns);
+    }
+
     private List<Path> discoverMappers(Path root, List<PathMatcher> includes, List<PathMatcher> excludes) {
         try (Stream<Path> paths = Files.walk(root)) {
             return paths
-                    .filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xml"))
                     .filter(path -> matches(root.relativize(path), includes))
                     .filter(path -> !matches(root.relativize(path), excludes))
+                    .filter(path -> requireRegularMapperFile(root, path))
                     .sorted(Comparator.comparing(path -> logicalPath(root.relativize(path))))
                     .toList();
         } catch (IOException ex) {
             throw new IllegalArgumentException("unable to discover MyBatis mapper XML files under " + root, ex);
         }
+    }
+
+    private boolean requireRegularMapperFile(Path root, Path path) {
+        if (Files.isSymbolicLink(path)) {
+            throw new IllegalArgumentException(
+                    "symbolic links are forbidden for MyBatis mapper XML: " + logicalPath(root.relativize(path)));
+        }
+        return Files.isRegularFile(path);
     }
 
     private boolean matches(Path relativePath, List<PathMatcher> matchers) {
@@ -136,7 +162,7 @@ public final class MyBatisSqlInventoryBuilder {
         } catch (IOException ex) {
             throw new IllegalArgumentException("unable to read MyBatis mapper XML: " + relativePath, ex);
         }
-        String source = new String(bytes, StandardCharsets.UTF_8);
+        String source = MyBatisXmlSourceDecoder.decodeUtf8(bytes, relativePath);
         validateDoctype(source, relativePath);
 
         XmlNode rootNode;
@@ -226,7 +252,7 @@ public final class MyBatisSqlInventoryBuilder {
                             reader.getLocalName(),
                             attributes,
                             startOffset,
-                            reader.getLocation().getLineNumber());
+                            lineNumberAt(source, startOffset));
                     if (stack.isEmpty()) {
                         if (root != null) {
                             throw new XMLStreamException("multiple root elements");
@@ -238,7 +264,8 @@ public final class MyBatisSqlInventoryBuilder {
                     stack.push(node);
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     MutableXmlNode node = stack.pop();
-                    node.finish(reader.getLocation().getCharacterOffset(), reader.getLocation().getLineNumber());
+                    int endOffset = reader.getLocation().getCharacterOffset();
+                    node.finish(endOffset, lineNumberAt(source, Math.max(0, endOffset - 1)));
                 } else if (event == XMLStreamConstants.CHARACTERS
                         || event == XMLStreamConstants.CDATA
                         || event == XMLStreamConstants.SPACE) {
@@ -282,6 +309,23 @@ public final class MyBatisSqlInventoryBuilder {
         return offset;
     }
 
+    private int lineNumberAt(String source, int offset) {
+        int line = 1;
+        int limit = Math.min(Math.max(offset, 0), source.length());
+        for (int i = 0; i < limit; i++) {
+            char current = source.charAt(i);
+            if (current == '\r') {
+                line++;
+                if (i + 1 < limit && source.charAt(i + 1) == '\n') {
+                    i++;
+                }
+            } else if (current == '\n') {
+                line++;
+            }
+        }
+        return line;
+    }
+
     private Map<String, Fragment> collectFragments(List<ParsedMapper> mappers) {
         Map<String, Fragment> fragments = new LinkedHashMap<>();
         for (ParsedMapper mapper : mappers) {
@@ -311,14 +355,17 @@ public final class MyBatisSqlInventoryBuilder {
                             fragment.node(),
                             fragment.mapper().namespace(),
                             fragment.mapper().relativePath(),
-                            fragment.node().attributes().get("id"),
+                            fragment.fullId(),
                             fragments,
                             includeStack,
                             new LinkedHashSet<>(),
                             new ArrayList<>(),
                             new StringBuilder(),
                             true,
-                            false);
+                            false,
+                            Map.of(),
+                            false,
+                            true);
                 });
     }
 
@@ -344,7 +391,7 @@ public final class MyBatisSqlInventoryBuilder {
                         mapper,
                         selectKeys.get(i),
                         id,
-                        "SELECT_KEY",
+                        "SELECT",
                         ordinal,
                         fragments,
                         false));
@@ -390,6 +437,9 @@ public final class MyBatisSqlInventoryBuilder {
                 dynamicNodes,
                 sql,
                 skipSelectKeys,
+                false,
+                Map.of(),
+                true,
                 false);
         String normalizedSql = normalizeSql(sql.toString());
         List<String> placeholders = placeholders(normalizedSql);
@@ -426,13 +476,18 @@ public final class MyBatisSqlInventoryBuilder {
             List<String> dynamicNodes,
             StringBuilder sql,
             boolean skipSelectKeys,
-            boolean recordNodeName) {
+            boolean recordNodeName,
+            Map<String, String> variables,
+            boolean strictProperties,
+            boolean fragmentContext) {
         if (recordNodeName) {
             dynamicNodes.add(node.name());
         }
         for (Object part : node.content()) {
             if (part instanceof String text) {
-                sql.append(text).append(' ');
+                sql.append(fragmentContext
+                        ? resolveProperties(text, variables, strictProperties, statementId, mapperRelativePath)
+                        : text);
                 continue;
             }
             XmlNode child = (XmlNode) part;
@@ -440,19 +495,29 @@ public final class MyBatisSqlInventoryBuilder {
                 continue;
             }
             if ("include".equals(child.name())) {
-                String refid = requiredAttribute(child, "refid", mapperRelativePath, "include");
+                String refid = resolveProperties(
+                        requiredAttribute(child, "refid", mapperRelativePath, "include"),
+                        variables,
+                        strictProperties,
+                        statementId,
+                        mapperRelativePath);
+                Map<String, String> scopedVariables = includeVariables(
+                        child, variables, strictProperties, statementId, mapperRelativePath);
+                if (!strictProperties && PROPERTY_PLACEHOLDER.matcher(refid).find()) {
+                    continue;
+                }
                 String fullId = refid.contains(".") ? refid : namespace + "." + refid;
                 Fragment fragment = fragments.get(fullId);
                 if (fragment == null) {
-                    throw new IllegalArgumentException("missing include '" + fullId + "' while expanding statement '"
-                            + namespace + "." + statementId + "' in " + mapperRelativePath);
+                    throw new IllegalArgumentException("missing include '" + fullId + "' while expanding '"
+                            + statementId + "' in " + mapperRelativePath);
                 }
                 if (includeStack.contains(fullId)) {
                     List<String> cycle = new ArrayList<>(includeStack);
                     java.util.Collections.reverse(cycle);
                     cycle.add(fullId);
-                    throw new IllegalArgumentException("include cycle while expanding statement '"
-                            + namespace + "." + statementId + "' in " + mapperRelativePath + ": "
+                    throw new IllegalArgumentException("include cycle while expanding '"
+                            + statementId + "' in " + mapperRelativePath + ": "
                             + String.join(" -> ", cycle));
                 }
                 resolvedFragments.add(fullId);
@@ -461,14 +526,17 @@ public final class MyBatisSqlInventoryBuilder {
                         fragment.node(),
                         fragment.mapper().namespace(),
                         mapperRelativePath,
-                        statementId,
+                        fullId,
                         fragments,
                         includeStack,
                         resolvedFragments,
                         dynamicNodes,
                         sql,
                         skipSelectKeys,
-                        false);
+                        false,
+                        scopedVariables,
+                        strictProperties,
+                        true);
                 includeStack.pop();
             } else {
                 expand(
@@ -482,9 +550,64 @@ public final class MyBatisSqlInventoryBuilder {
                         dynamicNodes,
                         sql,
                         skipSelectKeys,
-                        true);
+                        true,
+                        variables,
+                        strictProperties,
+                        fragmentContext);
             }
         }
+    }
+
+    private Map<String, String> includeVariables(
+            XmlNode include,
+            Map<String, String> inherited,
+            boolean strictProperties,
+            String expansionContext,
+            String mapperRelativePath) {
+        Map<String, String> declared = new LinkedHashMap<>();
+        for (XmlNode child : childElements(include)) {
+            if (!"property".equals(child.name())) {
+                continue;
+            }
+            String name = requiredAttribute(child, "name", mapperRelativePath, "include property");
+            String rawValue = requiredAttribute(child, "value", mapperRelativePath, "include property '" + name + "'");
+            String value = resolveProperties(
+                    rawValue, inherited, strictProperties, expansionContext, mapperRelativePath);
+            if (declared.putIfAbsent(name, value) != null) {
+                throw new IllegalArgumentException(
+                        "duplicate include property '" + name + "' in " + mapperRelativePath);
+            }
+        }
+        if (declared.isEmpty()) {
+            return inherited;
+        }
+        Map<String, String> scoped = new LinkedHashMap<>(inherited);
+        scoped.putAll(declared);
+        return Map.copyOf(scoped);
+    }
+
+    private String resolveProperties(
+            String value,
+            Map<String, String> variables,
+            boolean strictProperties,
+            String expansionContext,
+            String mapperRelativePath) {
+        Matcher matcher = PROPERTY_PLACEHOLDER.matcher(value);
+        StringBuffer resolved = new StringBuffer();
+        while (matcher.find()) {
+            String name = matcher.group(1).trim();
+            String replacement = variables.get(name);
+            if (replacement == null) {
+                if (strictProperties) {
+                    throw new IllegalArgumentException("unresolved include property '" + name + "' while expanding '"
+                            + expansionContext + "' in " + mapperRelativePath);
+                }
+                replacement = matcher.group();
+            }
+            matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(resolved);
+        return resolved.toString();
     }
 
     private void collectSelectKeys(XmlNode node, List<XmlNode> selectKeys) {
@@ -525,7 +648,7 @@ public final class MyBatisSqlInventoryBuilder {
     }
 
     private String normalizeSql(String sql) {
-        return sql.replaceAll("\\s+", " ").trim();
+        return sql.replace("\r\n", "\n").replace('\r', '\n').strip();
     }
 
     private String rawXml(String source, XmlNode node) {
