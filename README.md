@@ -1,6 +1,6 @@
 # Java AgentBridge CLI Runner
 
-基于 Spring Boot 的本地 AgentBridge 工作流运行器，用于代码贡献报告、SmartESB 审查、代码阅读、周报和单元测试生成等链路。
+基于 Spring Boot 的本地 AgentBridge 工作流运行器，用于代码贡献报告、SmartESB 审查、代码阅读、周报、单元测试生成和 MyBatis XML SQL 审查等链路。
 
 Java 侧负责工作流准备、prompt 提交、空闲轮询、输出校验、修正 prompt 和报告渲染。AgentBridge 是唯一的任务执行入口。
 
@@ -78,6 +78,7 @@ task-console:
 - `smartesb-code-reader`
 - `weekly-engineering-report`
 - `project-unit-test-generation`
+- `mybatis-sql-review`
 
 ### 重跑类型
 
@@ -88,6 +89,7 @@ task-console:
 | `smartesb-code-reader` | `transaction`、`module`、`index` | `transaction` 和 `module` 需要名称；`index` 不需要编号。 |
 | `weekly-engineering-report` | `review-batch`、`synthesis` | `review-batch` 需要一个或多个 batch id；`synthesis` 不需要编号。 |
 | `project-unit-test-generation` | `test-batch`、`verification` | `test-batch` 需要一个或多个 batch id；`verification` 不需要编号。 |
+| `mybatis-sql-review` | `sql`、`xml`、`index` | `sql` 需要一个或多个 statement key，`xml` 需要一个或多个 mapper key；`index` 不需要编号。 |
 
 ## 链路配置字段说明
 
@@ -342,6 +344,87 @@ agentbridge:
 | `agentbridge.mcp-url` | AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。 |
 | `agentbridge.timeout-minutes` | 单个单元测试生成 task 的最大等待时间；JaCoCo/Maven 验收命令的 MCP 请求等待时间也会按该值放大。 |
 | `agentbridge.max-attempts` | 当前 batch 被判定失败前最多启动 agent 的次数。 |
+
+### `mybatis-sql-review`
+
+该链路只发现 MyBatis XML 中的顶层 `select`、`insert`、`update`、`delete` 和独立 `selectKey`。Java 负责 XML 清单、串行任务、工具调用事后审计、强产物校验和原子发布；DML 与 `selectKey` 只做静态审查，不会执行原语句。稳定输出包含 `sql-inventory.json`、`sql-tasks.json`、`traceability.json`、`data-quality.md`、mapper 索引、逐 SQL 三文件和 `mybatis-sql-review-report.md`，控制台继续在运行记录的 `output_path` 中展示发布目录。
+
+示例：
+
+```yaml
+project:
+  id: "example-project"
+  name: "Example Project"
+  repo: "CHANGE_ME_PROJECT_REPO"
+
+paths:
+  out: "mybatis-sql-review/example-project"
+
+source:
+  include:
+    - "**/*Mapper.xml"
+  exclude:
+    - "target/**"
+    - "build/**"
+    - "**/target/**"
+    - "**/build/**"
+
+database:
+  connection-name: "CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"
+  database-name: "CHANGE_ME_DATABASE"
+  schema-name: "CHANGE_ME_SCHEMA"
+  environment: "test"
+  non-owner-non-admin-read-only-account: false
+  row-level-security-disabled-for-safe-base-tables: false
+  user-defined-and-security-definer-function-execution-revoked-including-public: false
+  statement-timeout-seconds: 30
+  statement-timeout-scope: "role"
+  max-rows: 20
+  max-scenarios-per-sql: 3
+  max-evidence-bytes: 262144
+  retain-raw-rows: true
+  allow-agent-select: true
+
+agentbridge:
+  web-base-url: "https://127.0.0.1:9642"
+  mcp-url: "http://127.0.0.1:8642/mcp"
+  concurrency: 1
+  max-concurrency: 1
+  timeout-minutes: 40
+  poll-millis: 1000
+  validation-settle-seconds: 30
+  validation-max-corrections: 0
+  task-message: "严格执行完整 MyBatis SQL review prompt，只写指定 candidate 三文件；完成后回复简短完成信息，Java 将进行工具历史和产物强校验。"
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `project.id` / `project.name` / `project.repo` | 项目标识、展示名称和 MyBatis mapper 所在的本地仓库。 |
+| `paths.out` | 隔离运行、稳定报告和控制台 `output_path` 对应的输出根目录。 |
+| `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
+| `database.connection-name` | AgentBridge Database Tools 中必须唯一匹配的连接名。 |
+| `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
+| `database.environment` | 只允许 `read-replica` 或 `test`。 |
+| `database.non-owner-non-admin-read-only-account` | 运行前必须改成 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
+| `database.row-level-security-disabled-for-safe-base-tables` | 运行前必须改成 `true`，确认所有可取证基础表均禁用 RLS。 |
+| `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 运行前必须改成 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
+| `database.statement-timeout-seconds` / `statement-timeout-scope` | 数据库、server 或 role 级硬超时；必须大于 0 且不超过 30 秒。 |
+| `database.max-rows` / `max-scenarios-per-sql` | 固定为每次 20 行、每条 SQL 最多 3 个代表性 SELECT 场景。 |
+| `database.max-evidence-bytes` | 单 task 数据库证据固定最多 262144 字节。 |
+| `database.retain-raw-rows` / `allow-agent-select` | 固定为 `true`；保留可复核证据，并仅允许受 Java 策略约束的简单 SELECT。 |
+| `agentbridge.web-base-url` / `mcp-url` | AgentBridge Web Access 与 AgentBridge MCP 地址。 |
+| `agentbridge.concurrency` / `max-concurrency` | 两者固定为 `1`，所有 statement task 严格串行。 |
+| `agentbridge.timeout-minutes` / `poll-millis` / `validation-settle-seconds` | AgentBridge task 超时、轮询和工具历史/产物沉降等待。 |
+| `agentbridge.validation-max-corrections` | 固定为 `0`；每个 SQL task 只有一个完整 prompt 和一次候选产物尝试。 |
+| `agentbridge.task-message` | 附加到完整 SQL 审查 prompt 前的执行说明。 |
+
+#### 必要运行环境与安全边界
+
+- IntelliJ IDEA 需要启用 JetBrains AI Assistant，并提供可用的 AgentBridge Web Access 与 AgentBridge MCP；数据库插件需要启用 **Database Tools & SQL**，且 MCP 工具清单必须包含链路预检要求的数据库工具。
+- 只能连接集中式 GaussDB 的只读副本或测试库，不能连接生产主库。必须使用非 owner、非管理员的专用只读账号；应用层 prompt 或 Java 事后审计不能替代数据库凭证隔离。
+- 所有允许取证的基础表必须禁用 RLS。审计账号对用户定义函数和 `SECURITY DEFINER` 函数的 `EXECUTE` 必须撤销，也要显式从 `PUBLIC` 撤销；数据库、server 或 role 级 `statement_timeout` 必须生效且不超过 30 秒。
+- 当前已检查的 AgentBridge v1.199.2 不提供数据库工具，因此本版本尚未通过真实 AgentBridge/GaussDB live gate。部署前必须在非生产 AgentBridge 和集中式 GaussDB 只读副本/测试库上重新验证工具清单、响应结构、调用历史、静态 SELECT、动态 SELECT、DML mapper 与 `selectKey` smoke cases。
+- `/tool-calls` 检查属于 post-hoc 事后审计：它只能在调用发生后拒绝产物，不能阻止或撤销已经发出的数据库调用。数据库侧只读账号、RLS/函数权限和 statement timeout 才是硬安全边界。
 
 ## 运行时行为
 

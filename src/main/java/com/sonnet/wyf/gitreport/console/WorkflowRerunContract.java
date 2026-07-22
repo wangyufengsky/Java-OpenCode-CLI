@@ -33,6 +33,11 @@ final class WorkflowRerunContract {
             "project-unit-test-generation", List.of(
                     new RerunTypeOption("test-batch", "测试批次", true, "test batch id，多个用英文逗号分隔"),
                     new RerunTypeOption("verification", "验证", false, "验证重跑不需要编号")
+            ),
+            "mybatis-sql-review", List.of(
+                    new RerunTypeOption("sql", "SQL 语句", true, "statement key，多个用英文逗号分隔"),
+                    new RerunTypeOption("xml", "Mapper XML", true, "mapper key，多个用英文逗号分隔"),
+                    new RerunTypeOption("index", "总报告", false, "总报告重跑不需要编号")
             )
     );
 
@@ -76,6 +81,15 @@ final class WorkflowRerunContract {
                     "test-batch", "test-batch",
                     "验证", "verification",
                     "verification", "verification"
+            ),
+            "mybatis-sql-review", Map.of(
+                    "sql", "sql",
+                    "sql 语句", "sql",
+                    "sql语句", "sql",
+                    "xml", "xml",
+                    "mapper xml", "xml",
+                    "index", "index",
+                    "总报告", "index"
             )
     );
 
@@ -84,7 +98,8 @@ final class WorkflowRerunContract {
             "smartesb-rewrite-code-review", Set.of("transaction", "module"),
             "smartesb-code-reader", Set.of("transaction", "module"),
             "weekly-engineering-report", Set.of("review-batch"),
-            "project-unit-test-generation", Set.of("test-batch")
+            "project-unit-test-generation", Set.of("test-batch"),
+            "mybatis-sql-review", Set.of("sql", "xml")
     );
 
     private WorkflowRerunContract() {

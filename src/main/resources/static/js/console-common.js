@@ -115,6 +115,41 @@
         field('agentbridge.timeout-minutes', 'AgentBridge 超时分钟数', '单轮 agent 最大等待时间。', 'number', 'agentbridge'),
         field('agentbridge.max-attempts', '最大尝试轮次', '当前 batch 未达标时最多重新启动 agent 的次数。', 'number', 'agentbridge')
       ]
+    },
+    'mybatis-sql-review': {
+      label: 'MyBatis SQL 审查',
+      description: '发现 MyBatis XML 映射语句，结合受限数据库证据生成逐 SQL 审查和项目汇总报告。',
+      fields: [
+        field('project.id', '项目标识', '写入清单和报告元信息的项目 ID。', 'text', 'project', true, true),
+        field('project.name', '项目名称', '写入报告标题和摘要的项目名称。', 'text', 'project', true, true),
+        field('paths.out', '输出目录', '运行隔离目录、稳定报告和 output_path 对应的输出根目录。', 'path', 'project', true, true),
+        field('project.repo', '项目仓库路径', '包含 MyBatis XML mapper 的本地项目仓库。', 'text', 'scope', true, true),
+        field('source.include', 'Mapper 包含路径', '每行一个 XML include glob；至少保留一个 mapper 范围。', 'list', 'scope', true, true),
+        field('source.exclude', 'Mapper 排除路径', '每行一个 exclude glob，用于过滤构建输出。', 'list', 'scope'),
+        field('database.connection-name', '数据库连接名', 'AgentBridge Database Tools 中唯一匹配的连接名称。', 'text', 'validation', true),
+        field('database.database-name', '数据库名', '集中式 GaussDB 只读副本或测试库中的数据库名。', 'text', 'validation', true),
+        field('database.schema-name', 'Schema 名', '数据库证据只允许绑定到该 schema。', 'text', 'validation', true),
+        field('database.environment', '数据库环境', '只允许 test 或 read-replica。', 'text', 'validation', true),
+        field('database.non-owner-non-admin-read-only-account', '专用只读账号确认', '确认运行凭证属于非 owner、非管理员的专用只读账号。', 'checkbox', 'validation', true),
+        field('database.row-level-security-disabled-for-safe-base-tables', '安全表已禁用 RLS', '确认所有可取证基础表均已禁用行级安全策略。', 'checkbox', 'validation', true),
+        field('database.user-defined-and-security-definer-function-execution-revoked-including-public', '函数 EXECUTE 已撤销', '确认用户函数及 SECURITY DEFINER 函数的 EXECUTE 已从账号和 PUBLIC 撤销。', 'checkbox', 'validation', true),
+        field('database.statement-timeout-seconds', 'SQL 超时秒数', '数据库、server 或 role 级 statement_timeout，必须在 1 到 30 秒。', 'number', 'validation', true),
+        field('database.statement-timeout-scope', 'SQL 超时作用域', '已确认的 timeout 作用域：database、server 或 role。', 'text', 'validation', true),
+        field('database.max-rows', '每次最多保留行数', '固定为 20；Java 会拒绝其它值。', 'number', 'validation', true),
+        field('database.max-scenarios-per-sql', '每条 SQL 最多场景数', '固定为 3；Java 会拒绝其它值。', 'number', 'validation', true),
+        field('database.max-evidence-bytes', '证据最大字节数', '固定为 262144；Java 会拒绝其它值。', 'number', 'validation', true),
+        field('database.retain-raw-rows', '保留原始证据行', '固定开启；确保报告证据可复核。', 'checkbox', 'validation', true),
+        field('database.allow-agent-select', '允许受限 SELECT', '固定开启；仅允许 Java 审计策略规定的简单只读 SELECT。', 'checkbox', 'validation', true),
+        field('agentbridge.web-base-url', 'AgentBridge Web URL', '提交 prompt、清理会话和读取 tool-call 历史的 Web Access 地址。', 'text', 'agentbridge', true),
+        field('agentbridge.mcp-url', 'AgentBridge MCP URL', '数据库工具预检与调用使用的 MCP JSON-RPC 地址。', 'text', 'agentbridge', true),
+        field('agentbridge.concurrency', '任务并发数', '固定为 1；SQL 审查任务严格串行执行。', 'number', 'agentbridge', true),
+        field('agentbridge.max-concurrency', '最大并发数', '固定为 1；Java 会拒绝其它值。', 'number', 'agentbridge', true),
+        field('agentbridge.timeout-minutes', '任务超时分钟数', '单个 AgentBridge SQL 审查 task 的最大等待时间。', 'number', 'agentbridge', true),
+        field('agentbridge.poll-millis', '轮询间隔毫秒数', '等待 AgentBridge 空闲状态时的轮询间隔。', 'number', 'agentbridge', true),
+        field('agentbridge.validation-settle-seconds', '校验等待秒数', 'AgentBridge 空闲后读取工具历史和候选产物前的等待时间。', 'number', 'agentbridge', true),
+        field('agentbridge.validation-max-corrections', '最大修正轮次', '固定为 0；本链路每个 task 只发送一个完整 prompt。', 'number', 'agentbridge', true),
+        field('agentbridge.task-message', 'SQL 审查任务消息', '追加到每个完整 SQL review prompt 前的执行说明。', 'textarea', 'agentbridge', true)
+      ]
     }
   };
 
@@ -140,6 +175,11 @@
     'project-unit-test-generation': [
       { value: 'test-batch', label: '测试批次', requiresId: true, idPlaceholder: 'test batch id，多个用英文逗号分隔' },
       { value: 'verification', label: '验证', requiresId: false, idPlaceholder: '验证重跑不需要编号' }
+    ],
+    'mybatis-sql-review': [
+      { value: 'sql', label: 'SQL 语句', requiresId: true, idPlaceholder: 'statement key，多个用英文逗号分隔' },
+      { value: 'xml', label: 'Mapper XML', requiresId: true, idPlaceholder: 'mapper key，多个用英文逗号分隔' },
+      { value: 'index', label: '总报告', requiresId: false, idPlaceholder: '总报告重跑不需要编号' }
     ]
   };
 

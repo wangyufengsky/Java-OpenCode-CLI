@@ -11,6 +11,54 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PromptPackContractTest {
     @Test
+    void myBatisSqlReviewPromptDefaultsAndDocumentationKeepTheHardSafetyBoundaryVisible() throws Exception {
+        String prompt = Files.readString(Path.of(
+                "src/main/resources/mybatis-sql-review-prompt-pack/prompts/review-sql.md"));
+        String chain = Files.readString(Path.of("src/main/resources/chains/mybatis-sql-review.yml"));
+        String applicationExample = Files.readString(Path.of("src/main/resources/application-example.yml"));
+        String readme = Files.readString(Path.of("README.md"));
+
+        assertThat(prompt).contains(
+                "centralized GaussDB read replica or test database",
+                "non-owner, non-admin, read-only account",
+                "RLS is disabled",
+                "security-definer functions",
+                "including PUBLIC grants",
+                "statement_timeout",
+                "post-hoc audit cannot prevent or undo"
+        );
+        assertThat(chain).contains(
+                "max-rows: 20",
+                "max-scenarios-per-sql: 3",
+                "max-evidence-bytes: 262144",
+                "retain-raw-rows: true",
+                "allow-agent-select: true",
+                "concurrency: 1",
+                "max-concurrency: 1",
+                "validation-max-corrections: 0"
+        );
+        assertThat(applicationExample).contains(
+                "mybatis-sql-review",
+                "mybatis-sql-review: sql | xml | index"
+        );
+        assertThat(readme).contains(
+                "AgentBridge Web Access",
+                "AgentBridge MCP",
+                "Database Tools & SQL",
+                "JetBrains AI Assistant",
+                "集中式 GaussDB",
+                "只读副本或测试库",
+                "非 owner、非管理员的专用只读账号",
+                "RLS",
+                "SECURITY DEFINER",
+                "PUBLIC",
+                "30 秒",
+                "v1.199.2",
+                "不能阻止或撤销"
+        );
+    }
+
+    @Test
     void javaPromptPackDoesNotRequireSkillDiscoveryOrPythonScoring() throws Exception {
         Path promptPack = Path.of("src/main/resources/git-report-prompt-pack");
 

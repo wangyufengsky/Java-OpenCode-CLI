@@ -13,7 +13,8 @@ public class ConsoleText {
             "smartesb-rewrite-code-review", "SmartESB 改造评审",
             "smartesb-code-reader", "SmartESB 代码阅读",
             "weekly-engineering-report", "研发周报",
-            "project-unit-test-generation", "单元测试生成"
+            "project-unit-test-generation", "单元测试生成",
+            "mybatis-sql-review", "MyBatis SQL 审查"
     );
 
     private static final Map<String, String> MODES = Map.of(
@@ -36,7 +37,9 @@ public class ConsoleText {
             "synthesis", "总报告",
             "review-batch", "审查批次",
             "test-batch", "测试批次",
-            "verification", "验证"
+            "verification", "验证",
+            "sql", "SQL 语句",
+            "xml", "Mapper XML"
     );
 
     private static final Map<String, String> EVENT_TYPES = Map.of(

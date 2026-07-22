@@ -1,6 +1,6 @@
 agentbridge-runner:
   enabled: false
-  # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader, weekly-engineering-report, project-unit-test-generation
+  # 可选值：git-code-contribution-report, smartesb-rewrite-code-review, smartesb-code-reader, weekly-engineering-report, project-unit-test-generation, mybatis-sql-review
   active-chain: "git-code-contribution-report"
   mode: "full"
   run-date:
@@ -10,7 +10,8 @@ agentbridge-runner:
     # smartesb: transaction | module | index
     # weekly-engineering-report: review-batch | synthesis
     # project-unit-test-generation: test-batch | verification
-    # 多个 author/transaction 用英文逗号放在同一个字符串中。
+    # mybatis-sql-review: sql | xml | index
+    # 多个 author/transaction/statement key/mapper key 用英文逗号放在同一个字符串中；index 不需要 id。
     type:
     id:
   agentbridge:

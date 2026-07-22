@@ -1,5 +1,14 @@
 package com.sonnet.wyf.gitreport.console;
 
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisDatabasePreflight;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlInventoryBuilder;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlPromptBuilder;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReportRenderer;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReviewTaskRunner;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReviewWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisToolCallAudit;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -223,6 +232,88 @@ class ConsoleMvcTest {
                 .containsPattern("<option value=\"rerun\" selected(?:=\"selected\")?>重跑</option>")
                 .containsPattern("<option value=\"author\" selected(?:=\"selected\")?>作者</option>")
                 .contains("<input id=\"rerunId\" name=\"rerunId\" placeholder=\"多个编号用英文逗号分隔\" value=\"failed-task\">");
+    }
+
+    @Test
+    void myBatisSqlReviewIsWiredIntoTheCatalogConsoleAndRerunContract() throws Exception {
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlInventoryBuilder.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisDatabasePreflight.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlPromptBuilder.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisToolCallAudit.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlOutputValidator.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlReviewTaskRunner.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlReportRenderer.class)).hasSize(1);
+        assertThat(webApplicationContext.getBeansOfType(MyBatisSqlReviewWorkflowChain.class)).hasSize(1);
+
+        String page = mockMvc.perform(get("/runs/new").param("chainId", "mybatis-sql-review"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("MyBatis SQL 审查")))
+                .andExpect(content().string(containsString("mybatis-sql-review")))
+                .andExpect(content().string(containsString(
+                        "src=\"/js/console-common.js?v=20260722-mybatis-sql-review\"")))
+                .andExpect(content().string(containsString("<option value=\"sql\">SQL 语句</option>")))
+                .andExpect(content().string(containsString("<option value=\"xml\">Mapper XML</option>")))
+                .andExpect(content().string(containsString("<option value=\"index\">总报告</option>")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(page).contains("id=\"summary-output\"");
+
+        String commonJs = mockMvc.perform(get("/js/console-common.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(commonJs).contains(
+                "'mybatis-sql-review'",
+                "project.id",
+                "project.name",
+                "project.repo",
+                "paths.out",
+                "source.include",
+                "source.exclude",
+                "database.connection-name",
+                "database.database-name",
+                "database.schema-name",
+                "database.environment",
+                "database.non-owner-non-admin-read-only-account",
+                "database.row-level-security-disabled-for-safe-base-tables",
+                "database.user-defined-and-security-definer-function-execution-revoked-including-public",
+                "database.statement-timeout-seconds",
+                "database.statement-timeout-scope",
+                "database.max-rows",
+                "database.max-scenarios-per-sql",
+                "database.max-evidence-bytes",
+                "database.retain-raw-rows",
+                "database.allow-agent-select",
+                "agentbridge.web-base-url",
+                "agentbridge.mcp-url",
+                "agentbridge.concurrency",
+                "agentbridge.max-concurrency",
+                "agentbridge.timeout-minutes",
+                "agentbridge.poll-millis",
+                "agentbridge.validation-settle-seconds",
+                "agentbridge.validation-max-corrections",
+                "agentbridge.task-message",
+                "{ value: 'sql', label: 'SQL 语句', requiresId: true",
+                "{ value: 'xml', label: 'Mapper XML', requiresId: true",
+                "{ value: 'index', label: '总报告', requiresId: false"
+        );
+        String runFormJs = mockMvc.perform(get("/js/run-form.js"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(runFormJs)
+                .contains("document.querySelector('#summary-output')")
+                .contains("'paths.out', 'local-out', 'out'");
+
+        assertThat(WorkflowRerunContract.requiresRerunId("mybatis-sql-review", "sql")).isTrue();
+        assertThat(WorkflowRerunContract.requiresRerunId("mybatis-sql-review", "xml")).isTrue();
+        assertThat(WorkflowRerunContract.requiresRerunId("mybatis-sql-review", "index")).isFalse();
+        assertThat(WorkflowRerunContract.isKnownType("mybatis-sql-review", "sql")).isTrue();
+        assertThat(WorkflowRerunContract.isKnownType("mybatis-sql-review", "xml")).isTrue();
+        assertThat(WorkflowRerunContract.isKnownType("mybatis-sql-review", "index")).isTrue();
     }
 
     @Test
@@ -562,7 +653,7 @@ class ConsoleMvcTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
                 .contains("<title>新建运行</title>")
                 .contains("<h1>新建运行</h1>")
-                .contains("<script src=\"/js/console-common.js\"></script>")
+                .contains("<script src=\"/js/console-common.js?v=20260722-mybatis-sql-review\"></script>")
                 .contains("<script src=\"/js/run-form.js?v=20260720-figma-summary\"></script>")
                 .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js");
         assertThat(mockMvc.perform(get("/runs/" + runId))
@@ -632,6 +723,42 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
                 .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
                 .andExpect(jsonPath("$.defaults['agentbridge.max-attempts']").value(5));
+
+        mockMvc.perform(get("/api/chains/mybatis-sql-review/defaults"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.defaults['project.id']").value("example-project"))
+                .andExpect(jsonPath("$.defaults['project.name']").value("Example Project"))
+                .andExpect(jsonPath("$.defaults['project.repo']").value("CHANGE_ME_PROJECT_REPO"))
+                .andExpect(jsonPath("$.defaults['paths.out']").value("mybatis-sql-review/example-project"))
+                .andExpect(jsonPath("$.defaults['source.include'][0]").value("**/*Mapper.xml"))
+                .andExpect(jsonPath("$.defaults['source.exclude'][0]").value("target/**"))
+                .andExpect(jsonPath("$.defaults['database.connection-name']")
+                        .value("CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"))
+                .andExpect(jsonPath("$.defaults['database.database-name']").value("CHANGE_ME_DATABASE"))
+                .andExpect(jsonPath("$.defaults['database.schema-name']").value("CHANGE_ME_SCHEMA"))
+                .andExpect(jsonPath("$.defaults['database.environment']").value("test"))
+                .andExpect(jsonPath("$.defaults['database.non-owner-non-admin-read-only-account']").value(false))
+                .andExpect(jsonPath("$.defaults['database.row-level-security-disabled-for-safe-base-tables']")
+                        .value(false))
+                .andExpect(jsonPath("$.defaults['database." + String.join("-",
+                        "user", "defined", "and", "security", "definer", "function", "execution",
+                        "revoked", "including", "public") + "']").value(false))
+                .andExpect(jsonPath("$.defaults['database.statement-timeout-seconds']").value(30))
+                .andExpect(jsonPath("$.defaults['database.statement-timeout-scope']").value("role"))
+                .andExpect(jsonPath("$.defaults['database.max-rows']").value(20))
+                .andExpect(jsonPath("$.defaults['database.max-scenarios-per-sql']").value(3))
+                .andExpect(jsonPath("$.defaults['database.max-evidence-bytes']").value(262144))
+                .andExpect(jsonPath("$.defaults['database.retain-raw-rows']").value(true))
+                .andExpect(jsonPath("$.defaults['database.allow-agent-select']").value(true))
+                .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
+                .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
+                .andExpect(jsonPath("$.defaults['agentbridge.concurrency']").value(1))
+                .andExpect(jsonPath("$.defaults['agentbridge.max-concurrency']").value(1))
+                .andExpect(jsonPath("$.defaults['agentbridge.timeout-minutes']").value(40))
+                .andExpect(jsonPath("$.defaults['agentbridge.poll-millis']").value(1000))
+                .andExpect(jsonPath("$.defaults['agentbridge.validation-settle-seconds']").value(30))
+                .andExpect(jsonPath("$.defaults['agentbridge.validation-max-corrections']").value(0))
+                .andExpect(jsonPath("$.defaults['agentbridge.task-message']").isNotEmpty());
     }
 
     @Test

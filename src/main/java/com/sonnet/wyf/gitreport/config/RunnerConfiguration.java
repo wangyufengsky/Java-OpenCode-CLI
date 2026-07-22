@@ -3,6 +3,7 @@ package com.sonnet.wyf.gitreport.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeTaskRunner;
+import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.orchestration.ArtifactCompletenessValidator;
 import com.sonnet.wyf.gitreport.orchestration.ConcurrentWorkflowTaskRunner;
 import com.sonnet.wyf.gitreport.orchestration.GitReportOrchestrator;
@@ -13,6 +14,14 @@ import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.workflow.gitreport.GitReportWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisDatabasePreflight;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlInventoryBuilder;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlOutputValidator;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlPromptBuilder;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReportRenderer;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReviewTaskRunner;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisSqlReviewWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.mybatissqlreview.MyBatisToolCallAudit;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbDailyTransactionPlanLoader;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbPromptBuilder;
 import com.sonnet.wyf.gitreport.workflow.smartesb.SmartEsbReviewPreparation;
@@ -128,6 +137,55 @@ public class RunnerConfiguration {
     }
 
     @Bean
+    MyBatisSqlInventoryBuilder myBatisSqlInventoryBuilder() {
+        return new MyBatisSqlInventoryBuilder();
+    }
+
+    @Bean
+    MyBatisDatabasePreflight myBatisDatabasePreflight(AgentBridgeClient client) {
+        return new MyBatisDatabasePreflight(client);
+    }
+
+    @Bean
+    MyBatisSqlPromptBuilder myBatisSqlPromptBuilder(ObjectMapper objectMapper) {
+        return new MyBatisSqlPromptBuilder(objectMapper);
+    }
+
+    @Bean
+    MyBatisToolCallAudit myBatisToolCallAudit(ObjectMapper objectMapper) {
+        return new MyBatisToolCallAudit(objectMapper);
+    }
+
+    @Bean
+    MyBatisSqlOutputValidator myBatisSqlOutputValidator(ObjectMapper objectMapper) {
+        return new MyBatisSqlOutputValidator(objectMapper);
+    }
+
+    @Bean
+    MyBatisSqlReportRenderer myBatisSqlReportRenderer(ObjectMapper objectMapper) {
+        return new MyBatisSqlReportRenderer(objectMapper);
+    }
+
+    @Bean
+    MyBatisSqlReviewTaskRunner myBatisSqlReviewTaskRunner(
+            AgentBridgeClient client,
+            MyBatisSqlPromptBuilder promptBuilder,
+            MyBatisToolCallAudit toolCallAudit,
+            MyBatisSqlOutputValidator outputValidator,
+            WorkflowEventSink eventSink,
+            ObjectMapper objectMapper
+    ) {
+        return new MyBatisSqlReviewTaskRunner(
+                client,
+                promptBuilder,
+                toolCallAudit,
+                outputValidator,
+                eventSink,
+                objectMapper
+        );
+    }
+
+    @Bean
     WorkflowChain gitReportWorkflowChain(
             ChainConfigLoader chainConfigLoader,
             AgentBridgeRunnerProperties runnerProperties,
@@ -238,6 +296,27 @@ public class RunnerConfiguration {
             ObjectMapper objectMapper
     ) {
         return new ProjectUnitTestGenerationBatchRunner(client, promptBuilder, objectMapper);
+    }
+
+    @Bean
+    MyBatisSqlReviewWorkflowChain myBatisSqlReviewWorkflowChain(
+            ChainConfigLoader chainConfigLoader,
+            AgentBridgeRunnerProperties runnerProperties,
+            MyBatisSqlInventoryBuilder inventoryBuilder,
+            MyBatisDatabasePreflight databasePreflight,
+            MyBatisSqlReviewTaskRunner taskRunner,
+            MyBatisSqlReportRenderer reportRenderer,
+            ObjectMapper objectMapper
+    ) {
+        return new MyBatisSqlReviewWorkflowChain(
+                chainConfigLoader,
+                runnerProperties,
+                inventoryBuilder,
+                databasePreflight,
+                taskRunner,
+                reportRenderer,
+                objectMapper
+        );
     }
 
 }
