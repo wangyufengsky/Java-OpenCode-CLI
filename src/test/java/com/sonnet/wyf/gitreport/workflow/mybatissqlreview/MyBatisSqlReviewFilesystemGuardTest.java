@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MyBatisSqlReviewFilesystemGuardTest {
@@ -245,6 +246,74 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 .isEqualTo(attemptPermissions);
     }
 
+    @Test
+    void taskScopeRestoresWholeRepositoryTamperingButAllowsExactlyThreeCandidateFiles() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        byte[] pomBefore = Files.readAllBytes(layout.pom());
+        byte[] javaBefore = Files.readAllBytes(layout.javaSource());
+        byte[] deletedBefore = Files.readAllBytes(layout.userFile());
+        byte[] stableBefore = Files.readAllBytes(layout.stableArtifact());
+        Set<PosixFilePermission> mapperPermissions = Files.getPosixFilePermissions(layout.mapperTwo());
+        Path injectedSource = layout.javaSource().getParent().resolve("Injected.java");
+        Path external = tempDir.resolve("external.txt");
+        Files.writeString(external, "external remains untouched");
+        Path repositorySymlink = layout.javaSource().getParent().resolve("Escape.java");
+        Path candidateSibling = layout.candidateOne().getParent().resolve("agent-sibling.txt");
+
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper,
+                layout.repository(),
+                layout.stableRoot(),
+                layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        );
+
+        assertThatThrownBy(() -> {
+            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
+                makeWritable(layout.repository());
+                makeWritable(layout.pom());
+                makeWritable(layout.javaSource().getParent());
+                makeWritable(layout.javaSource());
+                makeWritable(layout.userFile());
+                makeWritable(layout.stableRoot());
+                makeWritable(layout.stableArtifact());
+                makeWritable(layout.candidateOne().getParent());
+                Files.writeString(layout.pom(), "<project>tampered</project>");
+                Files.writeString(layout.javaSource(), "class Application { int tampered; }");
+                Files.writeString(injectedSource, "class Injected {}");
+                Files.delete(layout.userFile());
+                Files.writeString(layout.stableArtifact(), "tampered stable publication");
+                Files.createSymbolicLink(repositorySymlink, external);
+                makeWritable(layout.mapperTwo());
+                Files.writeString(candidateSibling, "outside current candidate");
+                Files.writeString(layout.candidateOne().resolve("report.md"), "report");
+                Files.writeString(layout.candidateOne().resolve("summary.json"), "{}");
+                Files.writeString(layout.candidateOne().resolve("database-evidence.json"), "{}");
+            }
+        }).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected repository")
+                .hasMessageContaining("pom.xml")
+                .hasMessageContaining("Injected.java")
+                .hasMessageContaining("Escape.java")
+                .hasMessageContaining("agent-sibling.txt");
+        guard.close();
+
+        assertThat(layout.pom()).hasBinaryContent(pomBefore);
+        assertThat(layout.javaSource()).hasBinaryContent(javaBefore);
+        assertThat(layout.userFile()).hasBinaryContent(deletedBefore);
+        assertThat(layout.stableArtifact()).hasBinaryContent(stableBefore);
+        assertThat(injectedSource).doesNotExist();
+        assertThat(repositorySymlink).doesNotExist();
+        assertThat(candidateSibling).doesNotExist();
+        assertThat(external).hasContent("external remains untouched");
+        assertThat(Files.getPosixFilePermissions(layout.mapperTwo())).isEqualTo(mapperPermissions);
+        assertThatCode(() -> MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(
+                layout.candidateOne().getParent(), layout.candidateOne()
+        )).doesNotThrowAnyException();
+    }
+
     private Layout layout(boolean outputInsideRepository) throws Exception {
         Path repository = Files.createDirectories(tempDir.resolve(
                 outputInsideRepository ? "repo-overlap" : "repo"
@@ -268,6 +337,13 @@ class MyBatisSqlReviewFilesystemGuardTest {
         Path mapperTwo = mapperDirectory.resolve("TwoMapper.xml");
         Files.writeString(mapperOne, "<mapper namespace=\"one\"/>");
         Files.writeString(mapperTwo, "<mapper namespace=\"two\"/>");
+        Path pom = repository.resolve("pom.xml");
+        Files.writeString(pom, "<project/>");
+        Path javaDirectory = Files.createDirectories(repository.resolve("src/main/java/example"));
+        Path javaSource = javaDirectory.resolve("Application.java");
+        Files.writeString(javaSource, "class Application {}");
+        Path userFile = repository.resolve("README-user.md");
+        Files.writeString(userFile, "keep me");
         Path gitDirectory = Files.createDirectories(repository.resolve(".git/objects"));
         Files.writeString(gitDirectory.resolve("secret"), "git");
         Path buildDirectory = Files.createDirectories(repository.resolve("target/generated"));
@@ -295,7 +371,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         Files.writeString(diagnosticOne, "queued one");
         Files.writeString(diagnosticTwo, "queued two");
         return new RunLayout(
-                repository, mapperOne, mapperTwo, gitDirectory, buildDirectory,
+                repository, mapperOne, mapperTwo, pom, javaSource, userFile, gitDirectory, buildDirectory,
                 stableRoot, stableArtifact, historicalRun, currentRun,
                 candidateOne, candidateTwo, diagnosticOne, diagnosticTwo
         );
@@ -334,6 +410,9 @@ class MyBatisSqlReviewFilesystemGuardTest {
             Path repository,
             Path mapperOne,
             Path mapperTwo,
+            Path pom,
+            Path javaSource,
+            Path userFile,
             Path gitDirectory,
             Path buildDirectory,
             Path stableRoot,

@@ -154,33 +154,133 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
-    void rerunSqlXmlAndIndexUseThePublishedInventorySnapshotWithoutRescanningSources() throws Exception {
+    void targetedRerunsRejectMapperAddDeleteModifyAndSourceConfigurationDrift() throws Exception {
         chain.run(request("full", "", "", "run-original"));
-        JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
+        Path publishedInventoryPath = stableOut.resolve("sql-inventory.json");
+        String publishedInventoryText = Files.readString(publishedInventoryPath);
+        JsonNode publishedInventory = objectMapper.readTree(publishedInventoryPath.toFile());
         String sqlKey = publishedInventory.at("/statements/0/statement_key").asText();
         String mapperKey = publishedInventory.at("/mappers/0/mapper_key").asText();
         int originalTaskCount = client.postedStatementKeys.size();
+        Path mapper = repository.resolve("src/main/resources/mappers/OrderMapper.xml");
+        String originalMapper = Files.readString(mapper);
 
         writeMapper("OrderMapper.xml", """
                 <mapper namespace="com.example.OrderMapper">
                   <select id="newSourceStatement">SELECT id FROM orders</select>
                 </mapper>
                 """);
-        chain.run(request("rerun", "sql", sqlKey, "run-sql"));
-        assertThat(client.postedStatementKeys.subList(originalTaskCount, client.postedStatementKeys.size()))
-                .containsExactly(sqlKey);
-        assertThat(objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile()).path("statements"))
-                .hasSize(3);
+        assertFullRerunRequired(request("rerun", "sql", sqlKey, "run-modified"));
 
-        int beforeXml = client.postedStatementKeys.size();
-        chain.run(request("rerun", "xml", mapperKey, "run-xml"));
-        assertThat(client.postedStatementKeys.subList(beforeXml, client.postedStatementKeys.size()))
-                .containsExactlyElementsOf(publishedInventory.path("statements").findValuesAsText("statement_key"));
+        Files.writeString(mapper, originalMapper);
+        writeMapper("AddedMapper.xml", """
+                <mapper namespace="com.example.AddedMapper">
+                  <select id="findAdded">SELECT id FROM added_orders</select>
+                </mapper>
+                """);
+        assertFullRerunRequired(request("rerun", "sql", sqlKey, "run-added"));
 
-        int beforeIndex = client.postedStatementKeys.size();
+        Files.delete(repository.resolve("src/main/resources/mappers/AddedMapper.xml"));
+        Files.delete(mapper);
+        assertFullRerunRequired(request("rerun", "xml", mapperKey, "run-deleted"));
+
+        Files.writeString(mapper, originalMapper);
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config).replace(
+                "    - \"**/*Mapper.xml\"",
+                "    - \"src/main/resources/mappers/*Mapper.xml\""
+        ));
+        assertFullRerunRequired(request("rerun", "sql", sqlKey, "run-include-drift"));
+
+        writeConfig();
+        Files.writeString(config, Files.readString(config).replace(
+                "  exclude: []",
+                "  exclude:\n    - \"**/NeverMatched.xml\""
+        ));
+        assertFullRerunRequired(request("rerun", "xml", mapperKey, "run-exclude-drift"));
+
+        writeConfig();
+        Path otherRepository = tempDir.resolve("other-repo");
+        Path otherMappers = Files.createDirectories(otherRepository.resolve("src/main/resources/mappers"));
+        Files.copy(mapper, otherMappers.resolve("OrderMapper.xml"));
+        Files.writeString(config, Files.readString(config).replace(
+                repository.toString(), otherRepository.toString()
+        ));
+        assertFullRerunRequired(request("rerun", "xml", mapperKey, "run-root-drift"));
+
+        assertThat(client.postedStatementKeys).hasSize(originalTaskCount);
+        assertThat(stableOut.resolve("sql-inventory.json")).hasContent(publishedInventoryText);
+    }
+
+    @Test
+    void indexRerunSkipsDatabasePreflightWhileSqlAndXmlStillRequireDatabaseTools() throws Exception {
+        chain.run(request("full", "", "", "run-original"));
+        JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
+        String sqlKey = publishedInventory.at("/statements/0/statement_key").asText();
+        String mapperKey = publishedInventory.at("/mappers/0/mapper_key").asText();
+        int beforeIndexTasks = client.postedStatementKeys.size();
+        int beforeIndexToolChecks = client.listToolsUris.size();
+        client.missingRequiredTool = true;
+
         chain.run(request("rerun", "index", "", "run-index"));
-        assertThat(client.postedStatementKeys).hasSize(beforeIndex);
+
+        assertThat(client.postedStatementKeys).hasSize(beforeIndexTasks);
+        assertThat(client.listToolsUris).hasSize(beforeIndexToolChecks);
         assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
+
+        assertThatThrownBy(() -> chain.run(request("rerun", "sql", sqlKey, "run-sql-no-db")))
+                .hasMessageContaining("database tools unavailable");
+        assertThatThrownBy(() -> chain.run(request("rerun", "xml", mapperKey, "run-xml-no-db")))
+                .hasMessageContaining("database tools unavailable");
+    }
+
+    @Test
+    void indexRerunRejectsDamagedPublishedMapperArtifactBeforeAggregation() throws Exception {
+        chain.run(request("full", "", "", "run-original"));
+        JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
+        String mapperKey = publishedInventory.at("/mappers/0/mapper_key").asText();
+        Path mapperIndex = stableOut.resolve("reports").resolve(mapperKey).resolve("index.md");
+        Files.writeString(mapperIndex, "[escape](../../../../outside.md)\n");
+        int beforeToolChecks = client.listToolsUris.size();
+        client.missingRequiredTool = true;
+
+        assertThatThrownBy(() -> chain.run(request("rerun", "index", "", "run-index-damaged")))
+                .hasMessageContaining("invalid relative links");
+        assertThat(client.listToolsUris).hasSize(beforeToolChecks);
+    }
+
+    @Test
+    void indexRerunRejectsDamagedPublishedDetailEvidenceWithoutDatabaseTools() throws Exception {
+        chain.run(request("full", "", "", "run-original"));
+        JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
+        String reportDirectory = publishedInventory.at("/statements/0/report_directory").asText();
+        Files.writeString(stableOut.resolve(reportDirectory).resolve("database-evidence.json"), "{}");
+        int beforeToolChecks = client.listToolsUris.size();
+        client.missingRequiredTool = true;
+
+        assertThatThrownBy(() -> chain.run(request("rerun", "index", "", "run-index-evidence-damaged")))
+                .hasMessageContaining("database evidence");
+        assertThat(client.listToolsUris).hasSize(beforeToolChecks);
+    }
+
+    @Test
+    void fullRunRechecksInventoryAfterPreflightBeforeStartingAnyAgent() throws Exception {
+        client.onListTools = () -> {
+            try {
+                writeMapper("OrderMapper.xml", """
+                        <mapper namespace="com.example.OrderMapper">
+                          <select id="changedDuringPreflight">SELECT id FROM changed_orders</select>
+                        </mapper>
+                        """);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        };
+
+        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-toctou")))
+                .hasMessageContaining("inventory changed")
+                .hasMessageContaining("full rerun");
+        assertThat(client.postedStatementKeys).isEmpty();
     }
 
     @Test
@@ -411,6 +511,12 @@ class MyBatisSqlReviewWorkflowChainTest {
                 """.formatted(repository, stableOut));
     }
 
+    private void assertFullRerunRequired(WorkflowRunRequest rerun) {
+        assertThatThrownBy(() -> chain.run(rerun))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("full rerun");
+    }
+
     private static final class RecordingAgentBridgeClient extends AgentBridgeClient {
         private final ObjectMapper objectMapper;
         private final List<String> events = new ArrayList<>();
@@ -427,6 +533,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         private boolean clearPending;
         private boolean omitEvidence;
         private boolean missingRequiredTool;
+        private Runnable onListTools;
 
         private RecordingAgentBridgeClient(ObjectMapper objectMapper) {
             super(objectMapper);
@@ -484,12 +591,17 @@ class MyBatisSqlReviewWorkflowChainTest {
         @Override
         public List<ToolDefinition> listTools(URI uri) {
             listToolsUris.add(uri);
+            Runnable action = onListTools;
+            onListTools = null;
+            if (action != null) {
+                action.run();
+            }
             LinkedHashSet<String> names = new LinkedHashSet<>(MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS);
             if (missingRequiredTool) {
                 names.remove("execute_sql_query");
             }
             return names.stream()
-                    .map(name -> new ToolDefinition(name, name, objectMapper.createObjectNode().put("type", "object")))
+                    .map(name -> new ToolDefinition(name, name, toolSchema(name)))
                     .toList();
         }
 
@@ -501,6 +613,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                 case "list_database_schemas" -> schemas();
                 case "list_schema_object_kinds" -> objectKinds();
                 case "list_schema_objects" -> tableObjects();
+                case "execute_sql_query" -> safetyProbe();
                 default -> objectMapper.createObjectNode();
             };
             return new ToolResponse(structured, "", structured);
@@ -508,13 +621,70 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         private ObjectNode connections() {
             ObjectNode response = objectMapper.createObjectNode();
-            response.putArray("connections").addObject()
+            ObjectNode connection = response.putArray("connections").addObject()
                     .put("id", "gauss-readonly")
                     .put("name", "Gauss Review")
                     .put("databaseSystem", "GaussDB")
                     .put("deployment", "centralized")
-                    .putArray("databases").add("orders");
+                    .put("environment", "test")
+                    .put("environmentSource", "managed-connection-metadata")
+                    .put("readOnly", true);
+            connection.putArray("databases").add("orders");
             return response;
+        }
+
+        private JsonNode toolSchema(String name) {
+            if (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name)) {
+                return objectMapper.createObjectNode().put("type", "object");
+            }
+            ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            ObjectNode properties = schema.putObject("properties");
+            for (String field : List.of("connectionId", "databaseName", "schemaName")) {
+                properties.putObject(field).put("type", "string");
+            }
+            if ("execute_sql_query".equals(name)) {
+                properties.putObject("queryText").put("type", "string");
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName").add("queryText");
+            } else {
+                properties.putObject("tableName").put("type", "string");
+                properties.putObject("maxRowCount").put("type", "integer")
+                        .put("minimum", 1).put("maximum", 20);
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName")
+                        .add("tableName").add("maxRowCount");
+            }
+            return schema;
+        }
+
+        private ObjectNode safetyProbe() {
+            ObjectNode row = objectMapper.createObjectNode()
+                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                    .put("currentDatabase", "orders")
+                    .put("currentSchema", "audit")
+                    .put("currentUser", "sql_auditor")
+                    .put("superuser", false)
+                    .put("systemAdmin", false)
+                    .put("auditAdmin", false)
+                    .put("roleAdmin", false)
+                    .put("roleMembershipCount", 0)
+                    .put("databaseOwner", false)
+                    .put("schemaOwner", false)
+                    .put("ownedBaseTableCount", 0)
+                    .put("sessionReadOnly", true)
+                    .put("transactionReadOnly", true)
+                    .put("unsafeTablePrivilegeCount", 0)
+                    .put("rlsEnabledBaseTableCount", 0)
+                    .put("forceRlsEnabledBaseTableCount", 0)
+                    .put("executableFunctionCount", 0)
+                    .put("statementTimeoutMs", 12_000)
+                    .put("baseTableNames", "orders")
+                    .put("baseTableCount", 1)
+                    .put("readReplica", false);
+            ObjectNode result = objectMapper.createObjectNode();
+            row.fieldNames().forEachRemaining(result.putArray("columns")::add);
+            result.putArray("rows").add(row);
+            return result;
         }
 
         private ObjectNode tableObjects() {

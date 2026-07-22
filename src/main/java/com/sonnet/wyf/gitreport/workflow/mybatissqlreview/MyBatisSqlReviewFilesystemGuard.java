@@ -1,6 +1,5 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -709,11 +708,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     }
 
     private static final class RunProtection {
+        private static final Set<String> REPOSITORY_EXCLUDED_DIRECTORY_NAMES = Set.of(
+                ".git", ".gradle", "target", "build"
+        );
         private final Path repository;
         private final Path stableRoot;
         private final Path currentRun;
         private final Set<Path> candidates;
-        private final Set<Path> protectedPaths;
+        private final List<TreeScope> protectedTrees;
         private final Path backupRoot;
         private final ProtectionObserver observer;
         private final AtomicInteger backupSequence = new AtomicInteger();
@@ -729,7 +731,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 Path stableRoot,
                 Path currentRun,
                 Set<Path> candidates,
-                Set<Path> protectedPaths,
+                List<TreeScope> protectedTrees,
                 Path backupRoot,
                 ProtectionObserver observer
         ) {
@@ -737,7 +739,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             this.stableRoot = stableRoot;
             this.currentRun = currentRun;
             this.candidates = Set.copyOf(candidates);
-            this.protectedPaths = Set.copyOf(protectedPaths);
+            this.protectedTrees = List.copyOf(protectedTrees);
             this.backupRoot = backupRoot;
             this.observer = observer;
         }
@@ -779,20 +781,29 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 exactProtectedPaths.add(normalizedMapper);
             }
             exactProtectedPaths.add(normalizedStable);
-            Path manifest = normalizedStable.resolve(".publication.json");
-            if (Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) {
-                requireNoSymlinkPath(normalizedStable, manifest, "stable publication manifest");
-                if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)) {
-                    throw new IllegalStateException(
-                            "stable publication manifest must be a non-symlink regular file: " + manifest
-                    );
-                }
-                exactProtectedPaths.add(manifest);
-                for (Path artifact : declaredStableArtifacts(objectMapper, normalizedStable, manifest)) {
-                    exactProtectedPaths.addAll(pathChain(normalizedStable, artifact.getParent()));
-                    exactProtectedPaths.add(artifact);
-                }
+
+            List<Path> repositoryExcludedRoots = new ArrayList<>();
+            if (normalizedStable.startsWith(normalizedRepository)) {
+                requireNoSymlinkPath(normalizedRepository, normalizedStable, "stable output");
+                repositoryExcludedRoots.add(normalizedStable);
             }
+            List<TreeScope> protectedTrees = List.of(
+                    new TreeScope(
+                            normalizedRepository,
+                            Set.copyOf(repositoryExcludedRoots),
+                            REPOSITORY_EXCLUDED_DIRECTORY_NAMES
+                    ),
+                    new TreeScope(
+                            normalizedStable,
+                            Set.of(normalizedStable.resolve("runs").toAbsolutePath().normalize()),
+                            Set.of()
+                    )
+            );
+            Set<Path> wholeProtectedPaths = new LinkedHashSet<>();
+            for (TreeScope tree : protectedTrees) {
+                wholeProtectedPaths.addAll(treePaths(tree));
+            }
+            wholeProtectedPaths.addAll(exactProtectedPaths);
 
             Path backup = Files.createTempDirectory("mybatis-sql-review-run-protected-");
             RunProtection result = new RunProtection(
@@ -800,14 +811,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     normalizedStable,
                     normalizedCurrentRun,
                     normalizedCandidates,
-                    exactProtectedPaths,
+                    protectedTrees,
                     backup,
                     observer == null ? ProtectionObserver.NOOP : observer
             );
             try {
-                result.capturePaths(exactProtectedPaths, result.protectedSnapshot, true);
+                result.capturePaths(wholeProtectedPaths, result.protectedSnapshot, true);
                 result.captureTree(normalizedCurrentRun, result.currentRunSnapshot, false);
-                result.protectPermissions(exactProtectedPaths, true);
+                result.protectPermissions(wholeProtectedPaths, true);
                 result.protectPermissions(result.currentRunSnapshot.keySet(), false);
                 return result;
             } catch (Exception setupFailure) {
@@ -832,6 +843,13 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             if (!candidates.contains(normalizedCandidate)) {
                 throw new IllegalArgumentException("candidate is not registered for the current run: " + normalizedCandidate);
             }
+            List<String> protectedStale = protectedChanges(true);
+            if (!protectedStale.isEmpty()) {
+                restoreProtectedPaths();
+                throw new IllegalStateException(
+                        "protected repository/stable content changed: " + String.join("; ", protectedStale)
+                );
+            }
             List<String> stale = currentRunChanges(null, true);
             if (!stale.isEmpty()) {
                 restoreCurrentRun(null);
@@ -850,8 +868,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Throwable failure = null;
             try {
                 applyGuardedPermission(candidate);
+                violations.addAll(protectedChanges(true));
                 violations.addAll(currentRunChanges(candidate, true));
                 if (!violations.isEmpty()) {
+                    restoreProtectedPaths();
                     restoreCurrentRun(candidate);
                 }
                 adoptCurrentRunSubtree(candidate);
@@ -863,7 +883,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             if (!violations.isEmpty() || failure != null) {
                 String message = violations.isEmpty()
                         ? "current run filesystem verification failed"
-                        : "protected current run content changed: " + String.join("; ", violations);
+                        : "protected repository/current run content changed: " + String.join("; ", violations);
                 IllegalStateException exception = new IllegalStateException(message);
                 if (failure != null) {
                     exception.addSuppressed(failure);
@@ -889,6 +909,13 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
                 requireNoSymlinkPath(currentRun, nearestExisting(path), "Java write path");
             }
+            List<String> protectedStale = protectedChanges(true);
+            if (!protectedStale.isEmpty()) {
+                restoreProtectedPaths();
+                throw new IllegalStateException(
+                        "protected repository/stable content changed: " + String.join("; ", protectedStale)
+                );
+            }
             List<String> stale = currentRunChanges(null, true);
             if (!stale.isEmpty()) {
                 restoreCurrentRun(null);
@@ -912,6 +939,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     adoptCurrentRunSubtree(root);
                 }
                 reapplyGuardedPermissions(currentRunSnapshot.keySet(), null);
+                List<String> protectedViolations = protectedChanges(true);
+                if (!protectedViolations.isEmpty()) {
+                    restoreProtectedPaths();
+                    throw new IllegalStateException(
+                            "protected repository/stable content changed during Java writes: "
+                                    + String.join("; ", protectedViolations)
+                    );
+                }
                 List<String> violations = currentRunChanges(null, true);
                 if (!violations.isEmpty()) {
                     restoreCurrentRun(null);
@@ -948,7 +983,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             List<String> violations = new ArrayList<>();
             Throwable restorationFailure = null;
             try {
-                violations.addAll(exactChanges(protectedSnapshot, true, "protected path"));
+                violations.addAll(protectedChanges(true));
                 violations.addAll(currentRunChanges(null, true));
                 if (!violations.isEmpty()) {
                     restoreProtectedPaths();
@@ -1007,11 +1042,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
             );
             Kind kind = Kind.of(attributes);
-            if (kind == Kind.SYMBOLIC_LINK) {
-                throw new IllegalStateException("symlinks are forbidden in protected run paths: " + path);
-            }
             Path backupFile = null;
             String hash = "";
+            String symbolicLink = "";
             if (kind == Kind.REGULAR_FILE) {
                 backupFile = backupRoot.resolve("files").resolve(
                         "%08d.bin".formatted(backupSequence.getAndIncrement())
@@ -1023,6 +1056,8 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     Files.copy(input, backupFile, StandardCopyOption.REPLACE_EXISTING);
                 }
                 hash = sha256(backupFile);
+            } else if (kind == Kind.SYMBOLIC_LINK) {
+                symbolicLink = Files.readSymbolicLink(path).toString();
             }
             return new SnapshotEntry(
                     path,
@@ -1030,12 +1065,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                     attributes.lastModifiedTime(),
                     hash,
-                    "",
+                    symbolicLink,
                     backupFile
             );
         }
 
         private void protectPermissions(Iterable<Path> paths, boolean notifyObserver) throws IOException {
+            // POSIX modes prevent ordinary writes, but a process running as the same owner can chmod them back.
+            // The no-follow hash/identity snapshot plus mandatory per-task restore is the authoritative boundary.
             List<Path> ordered = new ArrayList<>();
             paths.forEach(ordered::add);
             for (Path path : ordered.stream()
@@ -1043,7 +1080,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
                     .toList()) {
                 if (Files.isSymbolicLink(path)) {
-                    throw new IllegalStateException("symlinks are forbidden in protected run paths: " + path);
+                    continue;
                 }
                 if (Files.getFileAttributeView(
                         path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS
@@ -1084,19 +1121,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             return changes(currentRunSnapshot, actual, excludedRoot, compareIdentity, "current run");
         }
 
-        private List<String> exactChanges(
-                Map<Path, SnapshotEntry> expected,
-                boolean compareIdentity,
-                String label
-        ) throws IOException {
-            Map<Path, CurrentEntry> actual = new LinkedHashMap<>();
-            for (Path path : expected.keySet()) {
-                CurrentEntry entry = currentEntryOrNull(path);
-                if (entry != null) {
-                    actual.put(path, entry);
-                }
-            }
-            return changes(expected, actual, null, compareIdentity, label);
+        private List<String> protectedChanges(boolean compareIdentity) throws IOException {
+            return changes(
+                    protectedSnapshot,
+                    currentProtectedTree(),
+                    null,
+                    compareIdentity,
+                    "protected repository/stable"
+            );
         }
 
         private List<String> changes(
@@ -1136,9 +1168,31 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         }
 
         private void restoreProtectedPaths() throws IOException {
+            Map<Path, CurrentEntry> actual = currentProtectedTree();
+            makeRestorationWritable(actual.keySet());
             makeRestorationWritable(protectedSnapshot.keySet());
+            for (Path path : actual.keySet().stream()
+                    .filter(value -> !protectedSnapshot.containsKey(value))
+                    .sorted(Comparator.reverseOrder())
+                    .toList()) {
+                deleteNoFollow(path);
+            }
             restoreEntries(protectedSnapshot, null);
+            refreshRestoredIdentity(protectedSnapshot, null);
             reapplyGuardedPermissions(protectedSnapshot.keySet(), null);
+        }
+
+        private Map<Path, CurrentEntry> currentProtectedTree() throws IOException {
+            Map<Path, CurrentEntry> result = new LinkedHashMap<>();
+            for (TreeScope tree : protectedTrees) {
+                for (Path path : treePaths(tree)) {
+                    CurrentEntry entry = currentEntryOrNull(path);
+                    if (entry != null) {
+                        result.put(path, entry);
+                    }
+                }
+            }
+            return result;
         }
 
         private void restoreCurrentRun(Path excludedRoot) throws IOException {
@@ -1287,6 +1341,39 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             return result;
         }
 
+        private static List<Path> treePaths(TreeScope scope) throws IOException {
+            List<Path> result = new ArrayList<>();
+            collectTreePaths(scope.root(), scope, result, true);
+            return List.copyOf(result);
+        }
+
+        private static void collectTreePaths(
+                Path path,
+                TreeScope scope,
+                List<Path> result,
+                boolean root
+        ) throws IOException {
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            Path normalized = path.toAbsolutePath().normalize();
+            BasicFileAttributes attributes = Files.readAttributes(
+                    normalized, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            if (!root && attributes.isDirectory() && scope.excludesDirectory(normalized)) {
+                return;
+            }
+            result.add(normalized);
+            if (!attributes.isDirectory()) {
+                return;
+            }
+            try (var children = Files.list(normalized)) {
+                for (Path child : children.sorted().toList()) {
+                    collectTreePaths(child, scope, result, false);
+                }
+            }
+        }
+
         private static CurrentEntry currentEntryOrNull(Path path) throws IOException {
             BasicFileAttributes attributes = readAttributesOrNull(path);
             if (attributes == null) {
@@ -1304,43 +1391,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     hash,
                     symbolicLink
             );
-        }
-
-        private static List<Path> declaredStableArtifacts(
-                ObjectMapper objectMapper,
-                Path stableRoot,
-                Path manifest
-        ) throws IOException {
-            JsonNode root;
-            try (InputStream input = Files.newInputStream(
-                    manifest, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
-            )) {
-                root = objectMapper.readTree(input);
-            }
-            JsonNode artifacts = root == null ? null : root.path("artifacts");
-            if (artifacts == null || !artifacts.isArray()) {
-                throw new IllegalStateException("stable publication manifest artifacts must be an array");
-            }
-            List<Path> result = new ArrayList<>();
-            for (JsonNode artifact : artifacts) {
-                String value = artifact.path("path").asText("").trim();
-                if (value.isEmpty() || value.contains("\\")) {
-                    throw new IllegalStateException("invalid stable publication artifact path: " + value);
-                }
-                Path relative = Path.of(value);
-                if (relative.isAbsolute() || relative.normalize().startsWith("..")) {
-                    throw new IllegalStateException("stable publication artifact escapes stable root: " + value);
-                }
-                Path resolved = stableRoot.resolve(relative).normalize();
-                requireNoSymlinkPath(stableRoot, resolved, "stable publication artifact");
-                if (!Files.isRegularFile(resolved, LinkOption.NOFOLLOW_LINKS)) {
-                    throw new IllegalStateException(
-                            "stable publication artifact must be a non-symlink regular file: " + resolved
-                    );
-                }
-                result.add(resolved);
-            }
-            return List.copyOf(result);
         }
 
         private static List<Path> pathChain(Path base, Path target) {
@@ -1374,6 +1424,24 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 current = current.getParent();
             }
             return current == null ? path : current;
+        }
+
+        private record TreeScope(
+                Path root,
+                Set<Path> excludedRoots,
+                Set<String> excludedDirectoryNames
+        ) {
+            private TreeScope {
+                root = root.toAbsolutePath().normalize();
+                excludedRoots = Set.copyOf(excludedRoots);
+                excludedDirectoryNames = Set.copyOf(excludedDirectoryNames);
+            }
+
+            private boolean excludesDirectory(Path directory) {
+                Path normalized = directory.toAbsolutePath().normalize();
+                return excludedRoots.stream().anyMatch(normalized::startsWith)
+                        || excludedDirectoryNames.contains(normalized.getFileName().toString());
+            }
         }
     }
 

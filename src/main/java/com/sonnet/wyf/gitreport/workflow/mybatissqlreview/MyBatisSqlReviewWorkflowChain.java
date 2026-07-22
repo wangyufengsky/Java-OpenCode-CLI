@@ -1,6 +1,8 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.artifact.RepositoryExecutionLock;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
@@ -10,12 +12,16 @@ import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
+import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -27,6 +33,7 @@ import java.util.stream.Collectors;
 
 public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     public static final String ID = "mybatis-sql-review";
+    private static final String SOURCE_CONTRACT = "source-contract.json";
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[(?:\\\\.|[^]])*]\\(([^)]+)\\)");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
             "(?m)^[\\t ]{0,3}\\[[^]\\r\\n]+]:"
@@ -95,23 +102,37 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             WorkflowArtifactWorkspace activeWorkspace = workspace;
             try (var ignored = WorkflowArtifactContext.open(activeWorkspace);
                  var repositoryLock = RepositoryExecutionLock.acquire(configuration.getProject().getRepo())) {
-                MyBatisSqlInventory inventory = rerun
-                        ? publishedInventory(activeWorkspace)
-                        : inventoryBuilder.build(
-                                configuration.getProject().getRepo(),
-                                configuration.getSource().getInclude(),
-                                configuration.getSource().getExclude()
-                        );
-                reportRenderer.writeInventorySnapshot(activeWorkspace.bundleRoot(), inventory);
+                MyBatisSqlInventory inventory;
+                if (rerun) {
+                    inventory = publishedInventory(activeWorkspace);
+                    String rerunType = normalizeRerunType(request.rerunType());
+                    validateSourceContract(
+                            activeWorkspace.bundleRoot(), configuration, !"index".equals(rerunType)
+                    );
+                    if ("sql".equals(rerunType) || "xml".equals(rerunType)) {
+                        MyBatisSqlInventory rescanned = buildTargetedRerunInventory(configuration);
+                        requireSameInventory(inventory, rescanned, "targeted rerun source/config drift");
+                        inventory = rescanned;
+                    }
+                } else {
+                    inventory = buildInventory(configuration);
+                    reportRenderer.writeInventorySnapshot(activeWorkspace.bundleRoot(), inventory);
+                    writeSourceContract(activeWorkspace.bundleRoot(), configuration);
+                }
                 List<MyBatisSqlStatement> selected = selectTasks(mode, request, inventory);
-                MyBatisDatabasePreflight.Result database = databasePreflight.verify(
-                        URI.create(settings.getMcpUrl()),
-                        URI.create(settings.getWebBaseUrl()),
-                        configuration.getDatabase().toContract()
-                );
                 List<MyBatisSqlReviewTaskRunner.PreparedTask> prepared = new ArrayList<>();
-                for (MyBatisSqlStatement statement : selected) {
-                    prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
+                boolean indexRerun = rerun && "index".equals(normalizeRerunType(request.rerunType()));
+                if (indexRerun) {
+                    validatePublishedIndexInputs(activeWorkspace.bundleRoot(), inventory);
+                } else {
+                    MyBatisDatabasePreflight.Result database = databasePreflight.verify(
+                            URI.create(settings.getMcpUrl()),
+                            URI.create(settings.getWebBaseUrl()),
+                            configuration.getDatabase().toContract()
+                    );
+                    for (MyBatisSqlStatement statement : selected) {
+                        prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
+                    }
                 }
                 if (!prepared.isEmpty()) {
                     Path repository = configuration.getProject().getRepo().toAbsolutePath().normalize();
@@ -130,6 +151,12 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                                          mapperFiles,
                                          candidates
                                  )) {
+                        MyBatisSqlInventory guardedInventory = buildInventory(configuration);
+                        requireSameInventory(
+                                inventory,
+                                guardedInventory,
+                                "inventory changed before protected Agent execution"
+                        );
                         for (MyBatisSqlReviewTaskRunner.PreparedTask task : prepared) {
                             taskRunner.runPrepared(activeWorkspace, task, guard);
                         }
@@ -143,6 +170,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                                 configuration.getProject().getRepo()
                         ),
                         inventory
+                );
+                validateSourceContract(
+                        activeWorkspace.bundleRoot(), configuration, !indexRerun
                 );
                 validateCompleteBundle(activeWorkspace.bundleRoot(), inventory);
                 activeWorkspace.publish(MyBatisSqlReportRenderer.MAIN_REPORT);
@@ -166,6 +196,234 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             );
         }
         return reportRenderer.readInventory(snapshot);
+    }
+
+    private MyBatisSqlInventory buildInventory(Configuration configuration) {
+        return inventoryBuilder.build(
+                configuration.getProject().getRepo(),
+                configuration.getSource().getInclude(),
+                configuration.getSource().getExclude()
+        );
+    }
+
+    private MyBatisSqlInventory buildTargetedRerunInventory(Configuration configuration) {
+        try {
+            return buildInventory(configuration);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(
+                    "targeted rerun could not rescan the complete mapper inventory; run a full rerun",
+                    exception
+            );
+        }
+    }
+
+    private void requireSameInventory(
+            MyBatisSqlInventory expected,
+            MyBatisSqlInventory actual,
+            String reason
+    ) {
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException(reason + "; inventory changed, run a full rerun");
+        }
+    }
+
+    private void writeSourceContract(Path bundleRoot, Configuration configuration) throws Exception {
+        Path inventory = bundleRoot.resolve(MyBatisSqlReportRenderer.INVENTORY);
+        ObjectNode contract = objectMapper.createObjectNode();
+        contract.put("schema_version", "mybatis-sql-review-source-contract/v1");
+        contract.put("repository_real_path", repositoryRealPath(configuration));
+        contract.putPOJO("include", configuration.getSource().getInclude());
+        contract.putPOJO("exclude", configuration.getSource().getExclude());
+        contract.put("inventory_sha256", sha256(inventory));
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(
+                bundleRoot.resolve(SOURCE_CONTRACT).toFile(), contract
+        );
+    }
+
+    private void validateSourceContract(
+            Path bundleRoot,
+            Configuration configuration,
+            boolean requireCurrentConfiguration
+    ) throws Exception {
+        Path contractPath = bundleRoot.resolve(SOURCE_CONTRACT).toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(contractPath)
+                || !Files.isRegularFile(contractPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException(
+                    "published source contract is missing or unsafe; run a full rerun"
+            );
+        }
+        JsonNode contract = objectMapper.readTree(contractPath.toFile());
+        if (contract == null || !contract.isObject()) {
+            throw new IllegalStateException("published source contract is invalid; run a full rerun");
+        }
+        Set<String> fields = new LinkedHashSet<>();
+        contract.fieldNames().forEachRemaining(fields::add);
+        Set<String> expectedFields = Set.of(
+                "schema_version", "repository_real_path", "include", "exclude", "inventory_sha256"
+        );
+        if (!expectedFields.equals(fields)
+                || !"mybatis-sql-review-source-contract/v1".equals(
+                contract.path("schema_version").asText())) {
+            throw new IllegalStateException("published source contract is invalid; run a full rerun");
+        }
+        String expectedInventoryHash = contract.path("inventory_sha256").asText("");
+        String actualInventoryHash = sha256(bundleRoot.resolve(MyBatisSqlReportRenderer.INVENTORY));
+        if (!expectedInventoryHash.matches("[0-9a-f]{64}")
+                || !expectedInventoryHash.equals(actualInventoryHash)) {
+            throw new IllegalStateException(
+                    "published SQL inventory integrity does not match its source contract; run a full rerun"
+            );
+        }
+        if (requireCurrentConfiguration
+                && (!repositoryRealPath(configuration).equals(
+                contract.path("repository_real_path").asText())
+                || !configuration.getSource().getInclude().equals(textArray(contract.path("include")))
+                || !configuration.getSource().getExclude().equals(textArray(contract.path("exclude"))))) {
+            throw new IllegalStateException(
+                    "targeted rerun source root/include/exclude changed; run a full rerun"
+            );
+        }
+    }
+
+    private List<String> textArray(JsonNode node) {
+        if (!node.isArray()) {
+            throw new IllegalStateException("published source contract arrays are invalid; run a full rerun");
+        }
+        List<String> result = new ArrayList<>();
+        for (JsonNode value : node) {
+            if (!value.isTextual()) {
+                throw new IllegalStateException(
+                        "published source contract arrays are invalid; run a full rerun"
+                );
+            }
+            result.add(value.asText());
+        }
+        return List.copyOf(result);
+    }
+
+    private String repositoryRealPath(Configuration configuration) throws Exception {
+        Path repository = configuration.getProject().getRepo().toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(repository)) {
+            throw new IllegalStateException("project repository cannot be a symlink: " + repository);
+        }
+        return repository.toRealPath(LinkOption.NOFOLLOW_LINKS).toString();
+    }
+
+    private static String sha256(Path path) throws Exception {
+        if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("protected inventory file is missing or unsafe: " + path);
+        }
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = Files.newInputStream(
+                path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+        )) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private void validatePublishedIndexInputs(Path bundleRoot, MyBatisSqlInventory inventory) throws Exception {
+        Path root = bundleRoot.toAbsolutePath().normalize();
+        Path reports = root.resolve("reports");
+        Set<String> expected = new LinkedHashSet<>();
+        expected.add("reports");
+        for (MyBatisMapperInventory mapper : inventory.mappers()) {
+            String mapperRoot = "reports/" + mapper.mapperKey();
+            expected.add(mapperRoot);
+            expected.add(mapperRoot + "/index.md");
+            if (!mapper.statements().isEmpty()) {
+                expected.add(mapperRoot + "/sql");
+            }
+        }
+        for (MyBatisSqlStatement statement : inventory.statements()) {
+            String directory = "reports/" + statement.mapperKey()
+                    + "/sql/" + statement.statementKey();
+            expected.add(directory);
+            expected.add(directory + "/report.md");
+            expected.add(directory + "/summary.json");
+            expected.add(directory + "/database-evidence.json");
+        }
+        Set<String> actual = safeTreeEntries(root, reports);
+        if (!actual.equals(expected)) {
+            Set<String> missing = new LinkedHashSet<>(expected);
+            missing.removeAll(actual);
+            Set<String> unexpected = new LinkedHashSet<>(actual);
+            unexpected.removeAll(expected);
+            throw new IllegalStateException(
+                    "published MyBatis detail/mapper artifacts are invalid: missing="
+                            + missing + ", unexpected=" + unexpected
+            );
+        }
+        List<Path> publishedMarkdown = expected.stream()
+                .filter(value -> value.endsWith(".md"))
+                .map(root::resolve)
+                .toList();
+        validateMarkdownLinks(root, publishedMarkdown);
+        for (MyBatisSqlStatement statement : inventory.statements()) {
+            validatePublishedDatabaseEvidence(root, statement);
+        }
+    }
+
+    private void validatePublishedDatabaseEvidence(
+            Path root,
+            MyBatisSqlStatement statement
+    ) throws Exception {
+        Path evidencePath = MyBatisSqlReportRenderer.statementDirectory(root, statement)
+                .resolve("database-evidence.json");
+        JsonNode evidence = objectMapper.readTree(evidencePath.toFile());
+        String expectedCommand = statement.selectKey()
+                ? "selectKey"
+                : statement.commandType().toLowerCase(Locale.ROOT);
+        boolean valid = evidence != null
+                && evidence.isObject()
+                && "mybatis-sql-review-database-evidence/v1".equals(
+                evidence.path("schema_version").asText())
+                && statement.statementKey().equals(evidence.path("statement_key").asText())
+                && statement.mapperRelativePath().equals(
+                evidence.path("mapper_relative_path").asText())
+                && statement.namespace().equals(evidence.path("namespace").asText())
+                && statement.id().equals(evidence.path("statement_id").asText())
+                && expectedCommand.equals(evidence.path("command_type").asText())
+                && evidence.path("select_key").isBoolean()
+                && statement.selectKey() == evidence.path("select_key").booleanValue()
+                && !evidence.path("connection_id").asText().isBlank()
+                && !evidence.path("database_name").asText().isBlank()
+                && !evidence.path("schema_name").asText().isBlank()
+                && evidence.path("audit").isObject()
+                && evidence.path("metadata").isArray()
+                && evidence.path("scenarios").isArray()
+                && evidence.path("limitations").isArray();
+        if (!valid) {
+            throw new IllegalStateException(
+                    "published database evidence is invalid for " + statement.statementKey()
+            );
+        }
+    }
+
+    private static Set<String> safeTreeEntries(Path root, Path tree) throws Exception {
+        if (Files.isSymbolicLink(tree) || !Files.isDirectory(tree, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("published artifact tree is missing or unsafe: " + tree);
+        }
+        Path realRoot = root.toRealPath(LinkOption.NOFOLLOW_LINKS);
+        Set<String> entries = new LinkedHashSet<>();
+        try (var paths = Files.walk(tree)) {
+            for (Path path : paths.sorted().toList()) {
+                if (Files.isSymbolicLink(path)
+                        || (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                        || !path.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
+                    throw new IllegalStateException("published artifact path is unsafe: " + path);
+                }
+                entries.add(relative(root, path));
+            }
+        }
+        return entries;
     }
 
     private List<MyBatisSqlStatement> selectTasks(
@@ -248,7 +506,8 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 MyBatisSqlReportRenderer.INVENTORY,
                 MyBatisSqlReportRenderer.TASKS,
                 MyBatisSqlReportRenderer.TRACEABILITY,
-                MyBatisSqlReportRenderer.DATA_QUALITY
+                MyBatisSqlReportRenderer.DATA_QUALITY,
+                SOURCE_CONTRACT
         ));
         for (MyBatisMapperInventory mapper : inventory.mappers()) {
             expected.add("reports/" + mapper.mapperKey() + "/index.md");
@@ -260,9 +519,18 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             expected.add(base + "database-evidence.json");
         }
         Set<String> actual = new LinkedHashSet<>();
+        Path realRoot = root.toRealPath(LinkOption.NOFOLLOW_LINKS);
         try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
-                actual.add(relative(root, path));
+            for (Path path : paths.sorted().toList()) {
+                if (Files.isSymbolicLink(path)
+                        || (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                        || !path.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
+                    throw new IllegalStateException("MyBatis SQL review bundle contains unsafe path: " + path);
+                }
+                if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    actual.add(relative(root, path));
+                }
             }
         }
         if (!actual.equals(expected)) {
@@ -279,10 +547,18 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
 
     static void validateMarkdownLinks(Path bundleRoot) throws Exception {
         Path root = bundleRoot.toAbsolutePath().normalize();
+        List<Path> markdownFiles;
+        try (var paths = Files.walk(root)) {
+            markdownFiles = paths.filter(path -> path.toString().endsWith(".md")).toList();
+        }
+        validateMarkdownLinks(root, markdownFiles);
+    }
+
+    private static void validateMarkdownLinks(Path bundleRoot, List<Path> markdownFiles) throws Exception {
+        Path root = bundleRoot.toAbsolutePath().normalize();
         Path realRoot = root.toRealPath(LinkOption.NOFOLLOW_LINKS);
         List<String> invalid = new ArrayList<>();
-        try (var paths = Files.walk(root)) {
-            for (Path markdown : paths.filter(path -> path.toString().endsWith(".md")).toList()) {
+        for (Path markdown : markdownFiles) {
                 if (Files.isSymbolicLink(markdown)
                         || !Files.isRegularFile(markdown, LinkOption.NOFOLLOW_LINKS)
                         || !markdown.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
@@ -343,7 +619,6 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                         invalid.add(relative(root, markdown) + " -> " + link);
                     }
                 }
-            }
         }
         if (!invalid.isEmpty()) {
             throw new IllegalStateException("MyBatis SQL review contains invalid relative links: " + invalid);
@@ -379,6 +654,10 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
 
     private String normalizeMode(String mode) {
         return mode == null || mode.isBlank() ? "full" : mode.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeRerunType(String rerunType) {
+        return rerunType == null ? "" : rerunType.trim().toLowerCase(Locale.ROOT);
     }
 
     private String configDir(WorkflowRunRequest request) {
