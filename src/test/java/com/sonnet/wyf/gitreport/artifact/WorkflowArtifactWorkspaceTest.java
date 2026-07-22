@@ -118,6 +118,7 @@ class WorkflowArtifactWorkspaceTest {
 
         assertPublishedBytes(previous);
         assertThat(tempDir.resolve("new-only.txt")).doesNotExist();
+        assertPublicationScratchRemoved(workspace);
     }
 
     @Test
@@ -141,6 +142,7 @@ class WorkflowArtifactWorkspaceTest {
 
         assertPublishedBytes(previous);
         assertThat(tempDir.resolve("new-only.txt")).doesNotExist();
+        assertPublicationScratchRemoved(workspace);
     }
 
     @Test
@@ -148,7 +150,8 @@ class WorkflowArtifactWorkspaceTest {
         Files.createSymbolicLink(tempDir.resolve("broken.txt"), tempDir.resolve("missing-target.txt"));
 
         assertThatThrownBy(() -> workspace("run-seed-failure", true))
-                .isInstanceOf(java.io.IOException.class);
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("symlink");
 
         assertThat(tempDir.resolve("runs/run-seed-failure/run-manifest.json"))
                 .content().contains("\"state\" : \"FAILED\"");
@@ -181,6 +184,93 @@ class WorkflowArtifactWorkspaceTest {
 
         assertThat(tempDir.resolve("weekly-report.md")).hasContent("second");
         assertThat(tempDir.resolve("stale.txt")).doesNotExist();
+        assertPublicationScratchRemoved(workspace);
+    }
+
+    @Test
+    void rejectsASymlinkStableRootWithoutWritingItsTarget() throws Exception {
+        Path external = Files.createDirectories(tempDir.resolve("external-stable"));
+        Files.writeString(external.resolve("sentinel.txt"), "outside");
+        Path linkedStable = tempDir.resolve("linked-stable");
+        Files.createSymbolicLink(linkedStable, external);
+
+        assertThatThrownBy(() -> WorkflowArtifactWorkspace.start(
+                objectMapper, "test-chain", request("run-linked-root", false), linkedStable, false
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stable root").hasMessageContaining("symlink");
+
+        assertThat(external.resolve("sentinel.txt")).hasContent("outside");
+        assertThat(external.resolve("runs")).doesNotExist();
+    }
+
+    @Test
+    void rejectsSymlinkedStableArtifactParentBeforeReadingOrWritingExternalFiles() throws Exception {
+        WorkflowArtifactWorkspace initial = workspace("run-symlink-initial", false);
+        Files.writeString(initial.bundleRoot().resolve("weekly-report.md"), "old report");
+        Files.createDirectories(initial.bundleRoot().resolve("reports"));
+        Files.writeString(initial.bundleRoot().resolve("reports/old.txt"), "old nested");
+        initial.publish("weekly-report.md");
+        byte[] manifestBefore = Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST));
+
+        Path external = Files.createDirectories(tempDir.resolve("external-parent"));
+        Files.writeString(external.resolve("old.txt"), "outside old");
+        Files.delete(tempDir.resolve("reports/old.txt"));
+        Files.delete(tempDir.resolve("reports"));
+        Files.createSymbolicLink(tempDir.resolve("reports"), external);
+        WorkflowArtifactWorkspace replacement = workspace("run-symlink-replacement", false);
+        Files.writeString(replacement.bundleRoot().resolve("weekly-report.md"), "new report");
+        Files.createDirectories(replacement.bundleRoot().resolve("reports"));
+        Files.writeString(replacement.bundleRoot().resolve("reports/new.txt"), "new nested");
+
+        assertThatThrownBy(() -> replacement.publish("weekly-report.md"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("symlink");
+
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("old report");
+        assertThat(Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)))
+                .isEqualTo(manifestBefore);
+        assertThat(tempDir.resolve("reports")).isSymbolicLink();
+        assertThat(external.resolve("old.txt")).hasContent("outside old");
+        assertThat(external.resolve("new.txt")).doesNotExist();
+        assertPublicationScratchRemoved(replacement);
+    }
+
+    @Test
+    void rollbackRemovesInjectedSymlinkParentWithoutTouchingItsExternalTarget() throws Exception {
+        Map<String, byte[]> previous = publishInitialArtifactSet();
+        Path external = Files.createDirectories(tempDir.resolve("external-rollback"));
+        Files.writeString(external.resolve("sentinel.txt"), "outside");
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-symlink-rollback",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    private boolean injected;
+
+                    @Override
+                    public void afterReplacement(Path path) throws java.io.IOException {
+                        if (!injected && path.endsWith("reports/new.txt")) {
+                            injected = true;
+                            Files.delete(path);
+                            Files.delete(path.getParent());
+                            Files.createSymbolicLink(path.getParent(), external);
+                            throw new java.io.IOException("injected symlink during rollback");
+                        }
+                    }
+                }
+        );
+        writeReplacementBundle(workspace);
+        Files.createDirectories(workspace.bundleRoot().resolve("reports"));
+        Files.writeString(workspace.bundleRoot().resolve("reports/new.txt"), "new nested");
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("injected symlink during rollback");
+
+        assertPublishedBytes(previous);
+        assertThat(tempDir.resolve("reports")).doesNotExist();
+        assertThat(external.resolve("sentinel.txt")).hasContent("outside");
+        assertThat(external.resolve("new.txt")).doesNotExist();
+        assertPublicationScratchRemoved(workspace);
     }
 
     private WorkflowArtifactWorkspace workspace(String executionId, boolean seed) throws Exception {
@@ -249,5 +339,10 @@ class WorkflowArtifactWorkspaceTest {
                     .as(entry.getKey())
                     .isEqualTo(entry.getValue());
         }
+    }
+
+    private void assertPublicationScratchRemoved(WorkflowArtifactWorkspace workspace) {
+        assertThat(workspace.runRoot().resolve("publication/staged")).doesNotExist();
+        assertThat(workspace.runRoot().resolve("publication/backup")).doesNotExist();
     }
 }
