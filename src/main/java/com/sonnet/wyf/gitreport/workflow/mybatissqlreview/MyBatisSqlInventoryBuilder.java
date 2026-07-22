@@ -486,7 +486,7 @@ public final class MyBatisSqlInventoryBuilder {
         for (Object part : node.content()) {
             if (part instanceof String text) {
                 sql.append(fragmentContext
-                        ? resolveProperties(text, variables, strictProperties, statementId, mapperRelativePath)
+                        ? resolveProperties(text, variables, false, statementId, mapperRelativePath)
                         : text);
                 continue;
             }

@@ -348,18 +348,51 @@ class MyBatisSqlInventoryBuilderTest {
     }
 
     @Test
-    void rejectsUnresolvedCompileTimePropertiesInFragments() throws Exception {
-        write("mapper/UnresolvedPropertyMapper.xml", """
-                <mapper namespace="demo.UnresolvedPropertyMapper">
-                  <sql id="columns">${alias}.id</sql>
-                  <select id="find">SELECT <include refid="columns"/></select>
+    void preservesUnknownRuntimePropertiesInFragmentBodies() throws Exception {
+        write("mapper/RuntimePropertyMapper.xml", """
+                <mapper namespace="demo.RuntimePropertyMapper">
+                  <sql id="predicate">WHERE ${column}=#{value}</sql>
+                  <select id="find">SELECT * FROM users <include refid="predicate"/></select>
+                </mapper>
+                """);
+
+        assertThatCode(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .doesNotThrowAnyException();
+        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+                .statements().getFirst();
+
+        assertThat(statement.normalizedSql()).isEqualTo("SELECT * FROM users WHERE ${column}=#{value}");
+        assertThat(statement.parameterPlaceholders()).containsExactly("${column}", "#{value}");
+    }
+
+    @Test
+    void rejectsUnresolvedPropertiesInIncludeRefids() throws Exception {
+        write("mapper/UnresolvedRefidMapper.xml", """
+                <mapper namespace="demo.UnresolvedRefidMapper">
+                  <sql id="predicate">WHERE enabled = true</sql>
+                  <select id="find">SELECT * FROM users <include refid="${fragment}"/></select>
                 </mapper>
                 """);
 
         assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unresolved include property 'alias'")
-                .hasMessageContaining("demo.UnresolvedPropertyMapper.columns");
+                .hasMessageContaining("unresolved include property 'fragment'")
+                .hasMessageContaining("mapper/UnresolvedRefidMapper.xml");
+    }
+
+    @Test
+    void rejectsUnresolvedPropertiesInIncludePropertyValues() throws Exception {
+        write("mapper/UnresolvedPropertyValueMapper.xml", """
+                <mapper namespace="demo.UnresolvedPropertyValueMapper">
+                  <sql id="columns">${alias}.id</sql>
+                  <select id="find">SELECT <include refid="columns"><property name="alias" value="${missing}"/></include></select>
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unresolved include property 'missing'")
+                .hasMessageContaining("mapper/UnresolvedPropertyValueMapper.xml");
     }
 
     @Test
