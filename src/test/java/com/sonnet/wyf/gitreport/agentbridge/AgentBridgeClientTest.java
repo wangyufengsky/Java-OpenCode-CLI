@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -272,11 +273,15 @@ class AgentBridgeClientTest {
     @Test
     void readsTypedWebToolCallHistory() throws Exception {
         HttpServer server = server();
-        server.createContext("/tool-calls", exchange -> respond(
-                exchange,
-                200,
+        JsonNode fixtureCall = objectMapper.readTree(
                 resource("/mybatis-sql-review-fixtures/tool-calls.json")
-        ));
+        ).get(0);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                objectMapper.createObjectNode()
+                        .put("complete", true)
+                        .put("total", 1)
+                        .set("toolCalls", objectMapper.createArrayNode().add(fixtureCall.deepCopy()))
+                        .toString()));
         server.start();
 
         List<AgentBridgeClient.ToolCallRecord> calls = client.getToolCalls(
@@ -295,16 +300,187 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void rejectsAdvertisedWebToolCallPaginationWithoutKnownFetchContract() throws Exception {
+    void followsStableCursorPagesAndDeduplicatesOverlappingRecords() throws Exception {
+        List<String> queries = new ArrayList<>();
+        JsonNode firstCall = toolCall("call-1", "2026-07-22T09:15:30Z");
+        JsonNode secondCall = toolCall("call-2", "2026-07-22T09:16:30Z");
         HttpServer server = server();
-        server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
-                {"toolCalls":[],"nextCursor":"page-2","hasMore":true}
-                """));
+        server.createContext("/tool-calls", exchange -> {
+            queries.add(exchange.getRequestURI().getRawQuery());
+            if (exchange.getRequestURI().getRawQuery() == null) {
+                respond(exchange, 200, objectMapper.createObjectNode()
+                        .put("complete", false)
+                        .put("snapshotToken", "snapshot-1")
+                        .put("total", 2)
+                        .put("nextCursor", "page-2")
+                        .set("items", objectMapper.createArrayNode()
+                                .add(firstCall.deepCopy())
+                                .add(secondCall.deepCopy()))
+                        .toString());
+            } else {
+                respond(exchange, 200, objectMapper.createObjectNode()
+                        .put("complete", true)
+                        .put("snapshotToken", "snapshot-1")
+                        .put("total", 2)
+                        .set("items", objectMapper.createArrayNode().add(secondCall.deepCopy()))
+                        .toString());
+            }
+        });
         server.start();
 
+        List<AgentBridgeClient.ToolCallRecord> calls = client.getToolCalls(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
+        );
+
+        assertThat(calls).extracting(AgentBridgeClient.ToolCallRecord::id)
+                .containsExactly("call-1", "call-2");
+        assertThat(queries).containsExactly(null, "cursor=page-2");
+    }
+
+    @Test
+    void followsPageTokenPaginationWithStableBoundaryAndTotal() throws Exception {
+        List<String> queries = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/tool-calls", exchange -> {
+            queries.add(exchange.getRequestURI().getRawQuery());
+            boolean first = exchange.getRequestURI().getRawQuery() == null;
+            ObjectNode page = objectMapper.createObjectNode()
+                    .put("complete", !first)
+                    .put("snapshotToken", "snapshot-token")
+                    .put("total", 1);
+            if (first) {
+                page.put("nextPageToken", "token-2");
+                page.set("toolCalls", objectMapper.createArrayNode());
+            } else {
+                page.set("toolCalls", objectMapper.createArrayNode()
+                        .add(toolCall("call-token", "2026-07-22T09:17:30Z")));
+            }
+            respond(exchange, 200, page.toString());
+        });
+        server.start();
+
+        assertThat(client.getToolCalls(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
+        )).extracting(AgentBridgeClient.ToolCallRecord::id).containsExactly("call-token");
+        assertThat(queries).containsExactly(null, "pageToken=token-2");
+    }
+
+    @Test
+    void rejectsMissingOrRepeatedPaginationTokenAndPageDrift() throws Exception {
+        assertToolCallsRejected(List.of("""
+                {"items":[],"total":0}
+                """), "boolean complete");
+        assertToolCallsRejected(List.of("""
+                {"items":[],"complete":false,"snapshotToken":"stable","total":1}
+                """), "missing continuation token");
+        assertToolCallsRejected(List.of("""
+                {"items":[],"complete":true,"total":1}
+                """), "total does not match");
+        assertToolCallsRejected(List.of(
+                """
+                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"same"}
+                """,
+                """
+                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"same"}
+                """
+        ), "repeated continuation token");
+        assertToolCallsRejected(List.of(
+                """
+                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"page-2"}
+                """,
+                """
+                {"items":[],"complete":true,"snapshotToken":"changed","total":0}
+                """
+        ), "page drift");
+    }
+
+    @Test
+    void rejectsUnprovenArrayHistoryAndAcceptsOnlyExplicitCompleteArrayContract() throws Exception {
+        HttpServer server = server();
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, "[]"));
+        server.start();
+        URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+
+        assertThatThrownBy(() -> client.getToolCalls(base))
+                .hasMessageContaining("cannot prove complete");
+        server.stop(0);
+
+        HttpServer completeServer = server();
+        completeServer.createContext("/tool-calls", exchange -> {
+            exchange.getResponseHeaders().set("X-AgentBridge-Tool-Calls-Complete", "true");
+            respond(exchange, 200, "[]");
+        });
+        completeServer.start();
+        assertThat(client.getToolCalls(
+                URI.create("http://127.0.0.1:" + completeServer.getAddress().getPort())
+        )).isEmpty();
+    }
+
+    @Test
+    void abortsOversizedToolCallHistoryAndSqlToolResultBodies() throws Exception {
+        HttpServer historyServer = server();
+        historyServer.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                "{\"complete\":true,\"total\":0,\"items\":[],\"padding\":\""
+                        + "x".repeat(1_200_000) + "\"}"));
+        historyServer.start();
+        assertThatThrownBy(() -> client.getToolCalls(
+                URI.create("http://127.0.0.1:" + historyServer.getAddress().getPort())
+        )).hasMessageContaining("byte limit");
+
+        HttpServer mcpServer = server();
+        mcpServer.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "size-session", """
+                        {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{}}}
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "size-session", "");
+                case "tools/call" -> respondWithSession(exchange, 200, "size-session",
+                        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"structuredContent\":{\"padding\":\""
+                                + "x".repeat(300_000) + "\"}}}");
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        mcpServer.start();
+
+        assertThatThrownBy(() -> client.callTool(
+                URI.create("http://127.0.0.1:" + mcpServer.getAddress().getPort() + "/mcp"),
+                "execute_sql_query",
+                objectMapper.createObjectNode().put("queryText", "SELECT 1")
+        )).hasMessageContaining("byte limit");
+    }
+
+    private void assertToolCallsRejected(List<String> pages, String message) throws Exception {
+        AtomicInteger page = new AtomicInteger();
+        HttpServer server = server();
+        server.createContext("/tool-calls", exchange -> respond(
+                exchange, 200, pages.get(Math.min(page.getAndIncrement(), pages.size() - 1))
+        ));
+        server.start();
         assertThatThrownBy(() -> client.getToolCalls(
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort())
-        )).hasMessageContaining("incomplete paginated tool-call history");
+        )).hasMessageContaining(message);
+        server.stop(0);
+    }
+
+    private ObjectNode toolCall(String id, String timestamp) {
+        ObjectNode call = objectMapper.createObjectNode()
+                .put("id", id)
+                .put("title", "Execute SQL")
+                .put("toolName", "execute_sql_query")
+                .put("kind", "mcp")
+                .put("status", "completed")
+                .put("timestamp", timestamp)
+                .put("durationMs", 42);
+        call.set("arguments", objectMapper.createObjectNode()
+                .put("connectionId", "gauss-readonly")
+                .put("databaseName", "orders")
+                .put("schemaName", "audit")
+                .put("queryText", "SELECT id FROM orders LIMIT 1"));
+        call.set("result", objectMapper.createObjectNode()
+                .set("rows", objectMapper.createArrayNode().addObject().put("id", 1)));
+        call.set("hooks", objectMapper.createObjectNode().put("post", true));
+        return call;
     }
 
     private HttpServer server() throws IOException {

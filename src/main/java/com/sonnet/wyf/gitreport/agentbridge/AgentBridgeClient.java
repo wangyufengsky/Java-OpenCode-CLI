@@ -4,21 +4,29 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -27,6 +35,13 @@ import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
+    private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
+    private static final int MCP_METADATA_RESPONSE_BYTES = 1024 * 1024;
+    private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
+    private static final int GENERAL_TOOL_RESPONSE_BYTES = 4 * 1024 * 1024;
+    private static final int TOOL_CALL_PAGE_RESPONSE_BYTES = 1024 * 1024;
+    private static final int TOOL_CALL_HISTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_TOOL_CALL_PAGES = 1_000;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong requestIds = new AtomicLong();
@@ -77,7 +92,9 @@ public class AgentBridgeClient {
                 .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = sendBounded(
+                request, SMALL_JSON_RESPONSE_BYTES, "AgentBridge GET /info response"
+        );
         requireSuccess(response, "AgentBridge GET /info failed");
         return objectMapper.readTree(response.body()).path("running").asBoolean(false);
     }
@@ -93,7 +110,17 @@ public class AgentBridgeClient {
         body.put("method", "tools/call");
         body.set("params", params);
 
-        HttpResponse<String> response = sendJson(mcpUrl, body, toolCallTimeout(arguments), session);
+        int responseLimit = isSqlEvidenceTool(name)
+                ? SQL_TOOL_RESPONSE_BYTES
+                : GENERAL_TOOL_RESPONSE_BYTES;
+        HttpResponse<String> response = sendJson(
+                mcpUrl,
+                body,
+                toolCallTimeout(arguments),
+                session,
+                responseLimit,
+                "AgentBridge MCP tools/call response for " + name
+        );
         requireSuccess(response, "AgentBridge MCP tools/call failed: " + name);
         JsonNode root = objectMapper.readTree(response.body());
         if (root.hasNonNull("error")) {
@@ -120,7 +147,14 @@ public class AgentBridgeClient {
             body.put("method", "tools/list");
             body.set("params", params);
 
-            HttpResponse<String> response = sendJson(mcpUrl, body, Duration.ofSeconds(30), session);
+            HttpResponse<String> response = sendJson(
+                    mcpUrl,
+                    body,
+                    Duration.ofSeconds(30),
+                    session,
+                    MCP_METADATA_RESPONSE_BYTES,
+                    "AgentBridge MCP tools/list response"
+            );
             requireSuccess(response, "AgentBridge MCP tools/list failed");
             JsonNode root = objectMapper.readTree(response.body());
             if (root.hasNonNull("error")) {
@@ -148,31 +182,163 @@ public class AgentBridgeClient {
     }
 
     public List<ToolCallRecord> getToolCalls(URI webBaseUrl) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/tool-calls"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        requireSuccess(response, "AgentBridge GET /tool-calls failed");
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode items = root.isArray()
-                ? root
-                : root.path("toolCalls").isArray() ? root.path("toolCalls") : root.path("items");
-        if (!items.isArray()) {
-            throw new IllegalStateException("AgentBridge GET /tool-calls returned no tool-call array");
+        URI endpoint = webBaseUrl.resolve("/tool-calls");
+        URI pageUri = endpoint;
+        Map<String, JsonNode> uniqueItems = new LinkedHashMap<>();
+        Set<String> observedTokens = new HashSet<>();
+        String stableSnapshot = null;
+        Long stableTotal = null;
+        String paginationParameter = null;
+        long accumulatedBytes = 0;
+        boolean complete = false;
+
+        for (int pageNumber = 0; pageNumber < MAX_TOOL_CALL_PAGES && !complete; pageNumber++) {
+            HttpRequest request = HttpRequest.newBuilder(pageUri)
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = sendBounded(
+                    request,
+                    TOOL_CALL_PAGE_RESPONSE_BYTES,
+                    "AgentBridge GET /tool-calls page response"
+            );
+            requireSuccess(response, "AgentBridge GET /tool-calls failed");
+            accumulatedBytes += response.body().getBytes(StandardCharsets.UTF_8).length;
+            if (accumulatedBytes > TOOL_CALL_HISTORY_RESPONSE_BYTES) {
+                throw new IllegalStateException(
+                        "AgentBridge GET /tool-calls history exceeded cumulative byte limit of "
+                                + TOOL_CALL_HISTORY_RESPONSE_BYTES
+                );
+            }
+
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode items;
+            String nextToken = null;
+            String nextParameter = null;
+            if (root.isArray()) {
+                if (pageNumber != 0 || !response.headers()
+                        .firstValue("X-AgentBridge-Tool-Calls-Complete")
+                        .map("true"::equalsIgnoreCase)
+                        .orElse(false)) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls array response cannot prove complete history"
+                    );
+                }
+                items = root;
+                complete = true;
+            } else if (root.isObject()) {
+                boolean toolCallsArray = root.path("toolCalls").isArray();
+                boolean itemsArray = root.path("items").isArray();
+                if (toolCallsArray == itemsArray) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls must return exactly one toolCalls or items array"
+                    );
+                }
+                items = toolCallsArray ? root.path("toolCalls") : root.path("items");
+                if (!root.path("complete").isBoolean()) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls response cannot prove complete history without boolean complete"
+                    );
+                }
+                complete = root.path("complete").booleanValue();
+                if (root.has("hasMore") && (!root.path("hasMore").isBoolean()
+                        || root.path("hasMore").booleanValue() == complete)) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls complete/hasMore contract is inconsistent"
+                    );
+                }
+
+                String snapshot = root.path("snapshotToken").asText("").strip();
+                Long total = requiredOptionalTotal(root);
+                boolean paginationStarted = pageNumber > 0 || !complete;
+                if (paginationStarted) {
+                    if (snapshot.isBlank() || total == null) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls pagination lacks a stable snapshotToken/total boundary"
+                        );
+                    }
+                    if (stableSnapshot == null) {
+                        stableSnapshot = snapshot;
+                        stableTotal = total;
+                    } else if (!stableSnapshot.equals(snapshot) || !stableTotal.equals(total)) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls page drift changed snapshotToken or total"
+                        );
+                    }
+                }
+
+                String cursor = root.path("nextCursor").asText("").strip();
+                String pageToken = root.path("nextPageToken").asText("").strip();
+                if (!cursor.isBlank() && !pageToken.isBlank()) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls returned multiple continuation token fields"
+                    );
+                }
+                if (complete) {
+                    if (!cursor.isBlank() || !pageToken.isBlank()) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls complete page unexpectedly returned a continuation token"
+                        );
+                    }
+                } else {
+                    if (cursor.isBlank() && pageToken.isBlank()) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls incomplete page is missing continuation token"
+                        );
+                    }
+                    nextParameter = cursor.isBlank() ? "pageToken" : "cursor";
+                    nextToken = cursor.isBlank() ? pageToken : cursor;
+                    if (paginationParameter == null) {
+                        paginationParameter = nextParameter;
+                    } else if (!paginationParameter.equals(nextParameter)) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls page drift changed continuation token type"
+                        );
+                    }
+                    String observed = nextParameter + "=" + nextToken;
+                    if (!observedTokens.add(observed)) {
+                        throw new IllegalStateException(
+                                "AgentBridge GET /tool-calls repeated continuation token: " + nextToken
+                        );
+                    }
+                }
+            } else {
+                throw new IllegalStateException("AgentBridge GET /tool-calls returned no tool-call array");
+            }
+
+            for (JsonNode item : items) {
+                String id = item.path("id").asText("");
+                if (id.isBlank()) {
+                    throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
+                }
+                JsonNode previous = uniqueItems.putIfAbsent(id, item.deepCopy());
+                if (previous != null && !previous.equals(item)) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls page drift returned conflicting duplicate id: " + id
+                    );
+                }
+            }
+            if (complete) {
+                Long declaredTotal = root.isObject() ? requiredOptionalTotal(root) : null;
+                Long expectedTotal = stableTotal == null ? declaredTotal : stableTotal;
+                if (expectedTotal != null && expectedTotal != uniqueItems.size()) {
+                    throw new IllegalStateException(
+                            "AgentBridge GET /tool-calls complete history total does not match unique records"
+                    );
+                }
+            } else {
+                pageUri = continuationUri(endpoint, nextParameter, nextToken);
+            }
         }
-        if (!root.isArray() && (root.path("hasMore").asBoolean(false)
-                || !root.path("nextCursor").asText("").isBlank()
-                || !root.path("nextPageToken").asText("").isBlank()
-                || (root.path("total").isIntegralNumber() && root.path("total").asLong() > items.size()))) {
+        if (!complete) {
             throw new IllegalStateException(
-                    "AgentBridge GET /tool-calls returned incomplete paginated tool-call history; "
-                            + "the target Web pagination fetch contract is not verified"
+                    "AgentBridge GET /tool-calls exceeded page limit without proving complete history"
             );
         }
+
         List<ToolCallRecord> calls = new ArrayList<>();
-        for (JsonNode item : items) {
+        for (JsonNode item : uniqueItems.values()) {
             calls.add(new ToolCallRecord(
                     item.path("id").asText(),
                     item.path("title").asText(""),
@@ -198,6 +364,24 @@ public class AgentBridgeClient {
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body, Duration timeout, McpSession session) throws IOException, InterruptedException {
+        return sendJson(
+                uri,
+                body,
+                timeout,
+                session,
+                GENERAL_TOOL_RESPONSE_BYTES,
+                "AgentBridge JSON response"
+        );
+    }
+
+    private HttpResponse<String> sendJson(
+            URI uri,
+            JsonNode body,
+            Duration timeout,
+            McpSession session,
+            int maximumResponseBytes,
+            String responseLabel
+    ) throws IOException, InterruptedException {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri)
                 .timeout(timeout)
                 .header("Content-Type", "application/json")
@@ -206,8 +390,11 @@ public class AgentBridgeClient {
             request.header("Mcp-Session-Id", session.id())
                     .header("MCP-Protocol-Version", session.protocolVersion());
         }
-        return httpClient.send(request.POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))).build(),
-                HttpResponse.BodyHandlers.ofString());
+        return sendBounded(
+                request.POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))).build(),
+                maximumResponseBytes,
+                responseLabel
+        );
     }
 
     private McpSession mcpSession(URI mcpUrl) throws IOException, InterruptedException {
@@ -235,7 +422,14 @@ public class AgentBridgeClient {
         initialize.put("id", requestIds.incrementAndGet());
         initialize.put("method", "initialize");
         initialize.set("params", params);
-        HttpResponse<String> response = sendJson(mcpUrl, initialize, Duration.ofSeconds(30));
+        HttpResponse<String> response = sendJson(
+                mcpUrl,
+                initialize,
+                Duration.ofSeconds(30),
+                null,
+                MCP_METADATA_RESPONSE_BYTES,
+                "AgentBridge MCP initialize response"
+        );
         requireSuccess(response, "AgentBridge MCP initialize failed");
 
         String sessionId = response.headers().firstValue("Mcp-Session-Id")
@@ -249,7 +443,14 @@ public class AgentBridgeClient {
         initialized.put("jsonrpc", "2.0");
         initialized.put("method", "notifications/initialized");
         initialized.set("params", objectMapper.createObjectNode());
-        HttpResponse<String> notificationResponse = sendJson(mcpUrl, initialized, Duration.ofSeconds(30), session);
+        HttpResponse<String> notificationResponse = sendJson(
+                mcpUrl,
+                initialized,
+                Duration.ofSeconds(30),
+                session,
+                SMALL_JSON_RESPONSE_BYTES,
+                "AgentBridge MCP initialized notification response"
+        );
         requireSuccess(notificationResponse, "AgentBridge MCP initialization notification failed");
         return session;
     }
@@ -262,6 +463,42 @@ public class AgentBridgeClient {
             }
         }
         return Duration.ofSeconds(30);
+    }
+
+    private boolean isSqlEvidenceTool(String name) {
+        return "execute_sql_query".equals(name) || "preview_table_data".equals(name);
+    }
+
+    private Long requiredOptionalTotal(JsonNode root) {
+        if (!root.has("total")) {
+            return null;
+        }
+        if (!root.path("total").isIntegralNumber() || root.path("total").longValue() < 0) {
+            throw new IllegalStateException(
+                    "AgentBridge GET /tool-calls total must be a non-negative integer"
+            );
+        }
+        return root.path("total").longValue();
+    }
+
+    private URI continuationUri(URI endpoint, String parameter, String token) {
+        String query = parameter + "=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
+        return URI.create(endpoint.toString() + "?" + query);
+    }
+
+    private HttpResponse<String> sendBounded(
+            HttpRequest request,
+            int maximumResponseBytes,
+            String responseLabel
+    ) throws IOException, InterruptedException {
+        return httpClient.send(
+                request,
+                responseInfo -> new LimitedStringBodySubscriber(
+                        maximumResponseBytes,
+                        responseLabel,
+                        responseInfo.headers().firstValueAsLong("Content-Length").orElse(-1L)
+                )
+        );
     }
 
     private void requireSuccess(HttpResponse<String> response, String message) {
@@ -324,6 +561,76 @@ public class AgentBridgeClient {
     }
 
     private record McpSession(String id, String protocolVersion) {
+    }
+
+    private static final class LimitedStringBodySubscriber implements HttpResponse.BodySubscriber<String> {
+        private final int maximumBytes;
+        private final String label;
+        private final long declaredBytes;
+        private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        private final CompletableFuture<String> body = new CompletableFuture<>();
+        private Flow.Subscription subscription;
+
+        private LimitedStringBodySubscriber(int maximumBytes, String label, long declaredBytes) {
+            this.maximumBytes = maximumBytes;
+            this.label = label;
+            this.declaredBytes = declaredBytes;
+        }
+
+        @Override
+        public CompletionStage<String> getBody() {
+            return body;
+        }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subscription = subscription;
+            if (declaredBytes > maximumBytes) {
+                subscription.cancel();
+                body.completeExceptionally(limitException(declaredBytes));
+                return;
+            }
+            subscription.request(1);
+        }
+
+        @Override
+        public void onNext(List<ByteBuffer> buffers) {
+            if (body.isDone()) {
+                return;
+            }
+            long incoming = 0;
+            for (ByteBuffer buffer : buffers) {
+                incoming += buffer.remaining();
+            }
+            if ((long) bytes.size() + incoming > maximumBytes) {
+                subscription.cancel();
+                body.completeExceptionally(limitException((long) bytes.size() + incoming));
+                return;
+            }
+            for (ByteBuffer buffer : buffers) {
+                byte[] chunk = new byte[buffer.remaining()];
+                buffer.get(chunk);
+                bytes.writeBytes(chunk);
+            }
+            subscription.request(1);
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            body.completeExceptionally(throwable);
+        }
+
+        @Override
+        public void onComplete() {
+            if (!body.isDone()) {
+                body.complete(bytes.toString(StandardCharsets.UTF_8));
+            }
+        }
+
+        private IOException limitException(long observedBytes) {
+            return new IOException(label + " exceeded byte limit of " + maximumBytes
+                    + " bytes (observed at least " + observedBytes + ")");
+        }
     }
 
     private static HttpClient localAgentBridgeHttpClient() {

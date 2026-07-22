@@ -99,7 +99,7 @@ final class VerifiedMyBatisDatabaseFixture {
                     .map(name -> new ToolDefinition(
                             name,
                             name,
-                            objectMapper.createObjectNode().put("type", "object")
+                            toolSchema(name)
                     ))
                     .toList();
         }
@@ -112,6 +112,7 @@ final class VerifiedMyBatisDatabaseFixture {
                 case "list_database_schemas" -> schemas();
                 case "list_schema_object_kinds" -> objectKinds();
                 case "list_schema_objects" -> tableObjects();
+                case "execute_sql_query" -> safetyProbe();
                 default -> objectMapper.createObjectNode();
             };
             return new ToolResponse(structured, "", structured);
@@ -129,6 +130,9 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("name", connectionName)
                     .put("databaseSystem", "GaussDB")
                     .put("deployment", "centralized")
+                    .put("environment", "test")
+                    .put("environmentSource", "managed-connection-metadata")
+                    .put("readOnly", true)
                     .putArray("databases").add(databaseName);
             return response;
         }
@@ -157,6 +161,62 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("connectionId", connectionId)
                     .put("databaseName", databaseName)
                     .put("schemaName", schemaName);
+        }
+
+        private JsonNode toolSchema(String name) {
+            if (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name)) {
+                return objectMapper.createObjectNode().put("type", "object");
+            }
+            ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            ObjectNode properties = schema.putObject("properties");
+            for (String field : List.of("connectionId", "databaseName", "schemaName")) {
+                properties.putObject(field).put("type", "string");
+            }
+            if ("execute_sql_query".equals(name)) {
+                properties.putObject("queryText").put("type", "string");
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName").add("queryText");
+            } else {
+                properties.putObject("tableName").put("type", "string");
+                properties.putObject("maxRowCount").put("type", "integer")
+                        .put("minimum", 1).put("maximum", 20);
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName")
+                        .add("tableName").add("maxRowCount");
+            }
+            return schema;
+        }
+
+        private ObjectNode safetyProbe() {
+            ObjectNode row = objectMapper.createObjectNode()
+                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                    .put("currentDatabase", databaseName)
+                    .put("currentSchema", schemaName)
+                    .put("currentUser", "sql_auditor")
+                    .put("superuser", false)
+                    .put("systemAdmin", false)
+                    .put("auditAdmin", false)
+                    .put("roleAdmin", false)
+                    .put("roleMembershipCount", 0)
+                    .put("databaseOwner", false)
+                    .put("schemaOwner", false)
+                    .put("ownedBaseTableCount", 0)
+                    .put("sessionReadOnly", true)
+                    .put("transactionReadOnly", true)
+                    .put("unsafeTablePrivilegeCount", 0)
+                    .put("rlsEnabledBaseTableCount", 0)
+                    .put("forceRlsEnabledBaseTableCount", 0)
+                    .put("executableFunctionCount", 0)
+                    .put("statementTimeoutMs", 30_000)
+                    .put("baseTableNames", baseTables.stream().map(String::toLowerCase).sorted()
+                            .collect(java.util.stream.Collectors.joining(",")))
+                    .put("baseTableCount", baseTables.size())
+                    .put("readReplica", false);
+            ObjectNode result = objectMapper.createObjectNode();
+            ArrayNode columns = result.putArray("columns");
+            row.fieldNames().forEachRemaining(columns::add);
+            result.putArray("rows").add(row);
+            return result;
         }
     }
 }

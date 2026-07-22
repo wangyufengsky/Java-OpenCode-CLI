@@ -54,7 +54,8 @@ class MyBatisDatabasePreflightTest {
         assertThat(result.schemaName()).isEqualTo("audit");
         assertThat(result.databaseSystem()).isEqualTo("GaussDB");
         assertThat(result.environment()).isEqualTo(MyBatisDatabasePreflight.Environment.TEST);
-        assertThat(result.statementTimeout()).isEqualTo(timeoutContract());
+        assertThat(result.statementTimeout().maximum()).isEqualTo(Duration.ofSeconds(12));
+        assertThat(result.statementTimeout().confirmed()).isTrue();
         assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder("audit.orders", "audit.line_items");
         assertThatThrownBy(() -> result.safeBaseRelations().add("audit.injected"))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -63,12 +64,20 @@ class MyBatisDatabasePreflightTest {
                 "test_database_connection",
                 "list_database_schemas",
                 "list_schema_object_kinds",
-                "list_schema_objects"
+                "list_schema_objects",
+                "execute_sql_query"
         );
         assertThat(bridge.argumentsFor("list_schema_object_kinds"))
                 .isEqualTo(objectMapper.createObjectNode().put("connectionId", "gauss-readonly"));
         assertThat(bridge.argumentsFor("list_schema_objects"))
                 .isEqualTo(databaseArguments().put("kind", "TABLE"));
+        JsonNode probeArguments = bridge.argumentsFor("execute_sql_query");
+        assertThat(probeArguments.path("connectionId").asText()).isEqualTo("gauss-readonly");
+        assertThat(probeArguments.path("databaseName").asText()).isEqualTo("orders");
+        assertThat(probeArguments.path("schemaName").asText()).isEqualTo("audit");
+        assertThat(probeArguments.path("queryText").asText())
+                .contains("mybatis-sql-review-db-safety-v1")
+                .doesNotContain("Gauss Review");
         assertThat(bridge.toolCallHistoryRequested).isTrue();
     }
 
@@ -198,6 +207,140 @@ class MyBatisDatabasePreflightTest {
                 "confirmed");
     }
 
+    @Test
+    void rejectsYamlSelfAttestationWhenRuntimeProbeCannotProveDatabaseSafety() throws Exception {
+        ObjectNode valid = validSafetyProbe();
+        for (String unsafeBoolean : List.of(
+                "superuser",
+                "systemAdmin",
+                "auditAdmin",
+                "roleAdmin",
+                "databaseOwner",
+                "schemaOwner"
+        )) {
+            ObjectNode unsafe = valid.deepCopy();
+            probeRow(unsafe).put(unsafeBoolean, true);
+            assertRejectedProbe(unsafe, unsafeBoolean);
+        }
+        for (String unsafeCount : List.of(
+                "roleMembershipCount",
+                "ownedBaseTableCount",
+                "unsafeTablePrivilegeCount",
+                "rlsEnabledBaseTableCount",
+                "forceRlsEnabledBaseTableCount",
+                "executableFunctionCount"
+        )) {
+            ObjectNode unsafe = valid.deepCopy();
+            probeRow(unsafe).put(unsafeCount, 1);
+            assertRejectedProbe(unsafe, unsafeCount);
+        }
+        assertRejectedProbe(probeWith("sessionReadOnly", false), "sessionReadOnly");
+        assertRejectedProbe(probeWith("transactionReadOnly", false), "transactionReadOnly");
+        assertRejectedProbe(probeWith("statementTimeoutMs", 0), "statementTimeoutMs");
+        assertRejectedProbe(probeWith("statementTimeoutMs", 30_001), "statementTimeoutMs");
+        ObjectNode missing = valid.deepCopy();
+        probeRow(missing).remove("executableFunctionCount");
+        assertRejectedProbe(missing, "executableFunctionCount");
+    }
+
+    @Test
+    void rejectsProbeTargetOrInventoryMismatchAndUnprovedConnectionEnvironment() throws Exception {
+        assertRejectedProbe(probeWith("currentDatabase", "other"), "currentDatabase");
+        assertRejectedProbe(probeWith("currentSchema", "public"), "currentSchema");
+        assertRejectedProbe(probeWith("baseTableNames", "orders,substituted"), "baseTableNames");
+        assertRejectedProbe(probeWith("baseTableCount", 1), "baseTableCount");
+
+        ObjectNode connectionsWithoutEnvironmentEvidence = fixture("connections-centralized.json").deepCopy();
+        FakeDatabaseBridge bridge = startBridge(
+                connectionsWithoutEnvironmentEvidence,
+                fixture("schemas-orders.json"),
+                true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"),
+                fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(),
+                false,
+                true
+        );
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), contract()))
+                .hasMessageContaining("environment metadata");
+    }
+
+    @Test
+    void requiresDatabaseProbeToConfirmReadReplicaWhenMetadataSelectsReadReplica() throws Exception {
+        ObjectNode connections = fixture("connections-centralized.json").deepCopy();
+        ((ObjectNode) connections.at("/connections/0"))
+                .put("environment", "read-replica")
+                .put("environmentSource", "managed-connection-metadata")
+                .put("readOnly", true);
+        FakeDatabaseBridge bridge = startBridge(
+                connections,
+                fixture("schemas-orders.json"),
+                true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"),
+                fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(),
+                false,
+                true
+        );
+        MyBatisDatabasePreflight.DatabaseContract replicaContract =
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review",
+                        "orders",
+                        "audit",
+                        MyBatisDatabasePreflight.Environment.READ_REPLICA,
+                        true,
+                        true,
+                        true,
+                        timeoutContract()
+                );
+
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), replicaContract))
+                .hasMessageContaining("read-replica");
+    }
+
+    @Test
+    void rejectsUnsupportedDatabaseToolSchemaBeforeIssuingSafetyProbe() throws Exception {
+        FakeDatabaseBridge bridge = startBridge(
+                fixture("connections-centralized.json"),
+                fixture("schemas-orders.json"),
+                true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"),
+                fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(),
+                true,
+                false
+        );
+
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), contract()))
+                .hasMessageContaining("input schema")
+                .hasMessageContaining("execute_sql_query");
+        assertThat(bridge.calledTools).doesNotContain("execute_sql_query");
+    }
+
+    private void assertRejectedProbe(ObjectNode probe, String message) throws Exception {
+        FakeDatabaseBridge bridge = startBridge(
+                fixture("connections-centralized.json"),
+                fixture("schemas-orders.json"),
+                true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS,
+                fixture("schema-object-kinds-audit.json"),
+                fixture("schema-objects-table-audit.json"),
+                probe,
+                true,
+                true
+        );
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), contract()))
+                .hasMessageContaining(message);
+        stopServer();
+    }
+
     private void assertRejected(
             JsonNode connections,
             JsonNode schemas,
@@ -256,7 +399,10 @@ class MyBatisDatabasePreflightTest {
                 connectionAvailable,
                 tools,
                 fixture("schema-object-kinds-audit.json"),
-                fixture("schema-objects-table-audit.json")
+                fixture("schema-objects-table-audit.json"),
+                validSafetyProbe(),
+                true,
+                true
         );
     }
 
@@ -268,9 +414,42 @@ class MyBatisDatabasePreflightTest {
             JsonNode objectKinds,
             JsonNode schemaObjects
     ) throws IOException {
+        return startBridge(
+                connections,
+                schemas,
+                connectionAvailable,
+                tools,
+                objectKinds,
+                schemaObjects,
+                validSafetyProbe(),
+                true,
+                true
+        );
+    }
+
+    private FakeDatabaseBridge startBridge(
+            JsonNode connections,
+            JsonNode schemas,
+            boolean connectionAvailable,
+            Set<String> tools,
+            JsonNode objectKinds,
+            JsonNode schemaObjects,
+            JsonNode safetyProbe,
+            boolean addEnvironmentEvidence,
+            boolean strictToolSchemas
+    ) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         FakeDatabaseBridge bridge = new FakeDatabaseBridge(
-                server, connections, schemas, connectionAvailable, tools, objectKinds, schemaObjects);
+                server,
+                addEnvironmentEvidence ? withEnvironmentEvidence(connections) : connections,
+                schemas,
+                connectionAvailable,
+                tools,
+                objectKinds,
+                schemaObjects,
+                safetyProbe,
+                strictToolSchemas
+        );
         bridge.install();
         server.start();
         return bridge;
@@ -293,6 +472,8 @@ class MyBatisDatabasePreflightTest {
         private final Set<String> tools;
         private final JsonNode objectKinds;
         private final JsonNode schemaObjects;
+        private final JsonNode safetyProbe;
+        private final boolean strictToolSchemas;
         private final Set<String> calledTools = new LinkedHashSet<>();
         private final List<ToolInvocation> invocations = new ArrayList<>();
         private boolean toolCallHistoryRequested;
@@ -304,7 +485,9 @@ class MyBatisDatabasePreflightTest {
                 boolean connectionAvailable,
                 Set<String> tools,
                 JsonNode objectKinds,
-                JsonNode schemaObjects
+                JsonNode schemaObjects,
+                JsonNode safetyProbe,
+                boolean strictToolSchemas
         ) {
             this.httpServer = httpServer;
             this.connections = connections;
@@ -313,6 +496,8 @@ class MyBatisDatabasePreflightTest {
             this.tools = tools;
             this.objectKinds = objectKinds;
             this.schemaObjects = schemaObjects;
+            this.safetyProbe = safetyProbe;
+            this.strictToolSchemas = strictToolSchemas;
         }
 
         private void install() {
@@ -336,6 +521,7 @@ class MyBatisDatabasePreflightTest {
                             case "list_database_schemas" -> schemas;
                             case "list_schema_object_kinds" -> objectKinds;
                             case "list_schema_objects" -> schemaObjects;
+                            case "execute_sql_query" -> safetyProbe;
                             default -> objectMapper.createObjectNode();
                         };
                         respondMcp(exchange, result);
@@ -345,7 +531,7 @@ class MyBatisDatabasePreflightTest {
             });
             httpServer.createContext("/tool-calls", exchange -> {
                 toolCallHistoryRequested = true;
-                respond(exchange, 200, "[]");
+                respond(exchange, 200, "{\"complete\":true,\"total\":0,\"items\":[]}");
             });
         }
 
@@ -355,8 +541,33 @@ class MyBatisDatabasePreflightTest {
             tools.forEach(name -> array.addObject()
                     .put("name", name)
                     .put("description", name)
-                    .set("inputSchema", objectMapper.createObjectNode().put("type", "object")));
+                    .set("inputSchema", toolSchema(name)));
             return root;
+        }
+
+        private JsonNode toolSchema(String name) {
+            if (!strictToolSchemas
+                    || (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name))) {
+                return objectMapper.createObjectNode().put("type", "object");
+            }
+            ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            ObjectNode properties = schema.putObject("properties");
+            for (String field : List.of("connectionId", "databaseName", "schemaName")) {
+                properties.putObject(field).put("type", "string");
+            }
+            if ("execute_sql_query".equals(name)) {
+                properties.putObject("queryText").put("type", "string");
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName").add("queryText");
+            } else {
+                properties.putObject("tableName").put("type", "string");
+                properties.putObject("maxRowCount").put("type", "integer")
+                        .put("minimum", 1).put("maximum", 20);
+                schema.putArray("required")
+                        .add("connectionId").add("databaseName").add("schemaName")
+                        .add("tableName").add("maxRowCount");
+            }
+            return schema;
         }
 
         private void respondToolsList(HttpExchange exchange) throws IOException {
@@ -400,6 +611,68 @@ class MyBatisDatabasePreflightTest {
                 .put("connectionId", "gauss-readonly")
                 .put("databaseName", "orders")
                 .put("schemaName", "audit");
+    }
+
+    private ObjectNode withEnvironmentEvidence(JsonNode source) {
+        ObjectNode copy = source.deepCopy();
+        ((ObjectNode) copy.at("/connections/0"))
+                .put("environment", "test")
+                .put("environmentSource", "managed-connection-metadata")
+                .put("readOnly", true);
+        return copy;
+    }
+
+    private ObjectNode validSafetyProbe() {
+        ObjectNode row = objectMapper.createObjectNode()
+                .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                .put("currentDatabase", "orders")
+                .put("currentSchema", "audit")
+                .put("currentUser", "sql_auditor")
+                .put("superuser", false)
+                .put("systemAdmin", false)
+                .put("auditAdmin", false)
+                .put("roleAdmin", false)
+                .put("roleMembershipCount", 0)
+                .put("databaseOwner", false)
+                .put("schemaOwner", false)
+                .put("ownedBaseTableCount", 0)
+                .put("sessionReadOnly", true)
+                .put("transactionReadOnly", true)
+                .put("unsafeTablePrivilegeCount", 0)
+                .put("rlsEnabledBaseTableCount", 0)
+                .put("forceRlsEnabledBaseTableCount", 0)
+                .put("executableFunctionCount", 0)
+                .put("statementTimeoutMs", 12_000)
+                .put("baseTableNames", "line_items,orders")
+                .put("baseTableCount", 2)
+                .put("readReplica", false);
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode columns = result.putArray("columns");
+        row.fieldNames().forEachRemaining(columns::add);
+        result.putArray("rows").add(row);
+        return result;
+    }
+
+    private ObjectNode probeWith(String field, boolean value) {
+        ObjectNode result = validSafetyProbe();
+        probeRow(result).put(field, value);
+        return result;
+    }
+
+    private ObjectNode probeWith(String field, long value) {
+        ObjectNode result = validSafetyProbe();
+        probeRow(result).put(field, value);
+        return result;
+    }
+
+    private ObjectNode probeWith(String field, String value) {
+        ObjectNode result = validSafetyProbe();
+        probeRow(result).put(field, value);
+        return result;
+    }
+
+    private ObjectNode probeRow(ObjectNode result) {
+        return (ObjectNode) result.at("/rows/0");
     }
 
     private record ToolInvocation(String toolName, JsonNode arguments) {

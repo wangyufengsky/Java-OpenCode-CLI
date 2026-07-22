@@ -188,6 +188,48 @@ class MyBatisToolCallAuditTest {
                 .hasMessageContaining("tableName");
     }
 
+    @Test
+    void requiresExactlyOneSupportedIntegralPreviewLimitFromOneThroughTwenty() {
+        ObjectNode missing = databaseArguments().put("tableName", "orders");
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call("preview-missing-limit", "preview_table_data", missing, rows(1))),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("maxRowCount");
+
+        for (JsonNode invalid : List.of(
+                objectMapper.getNodeFactory().numberNode(0),
+                objectMapper.getNodeFactory().numberNode(21),
+                objectMapper.getNodeFactory().numberNode(1.5),
+                objectMapper.getNodeFactory().textNode("20"),
+                objectMapper.getNodeFactory().booleanNode(true)
+        )) {
+            ObjectNode arguments = previewArguments("orders").set("maxRowCount", invalid);
+            assertThatThrownBy(() -> audit.audit(
+                    List.of(call("preview-invalid-limit", "preview_table_data", arguments, rows(1))),
+                    boundary(), database, selectStatement()))
+                    .hasMessageContaining("maxRowCount")
+                    .hasMessageContaining("1..20");
+        }
+
+        for (String unsupportedField : List.of("limit", "rowLimit", "pageSize", "maxRows")) {
+            ObjectNode arguments = previewArguments("orders").put(unsupportedField, 10);
+            assertThatThrownBy(() -> audit.audit(
+                    List.of(call("preview-unknown-limit", "preview_table_data", arguments, rows(1))),
+                    boundary(), database, selectStatement()))
+                    .hasMessageContaining("unsupported preview argument")
+                    .hasMessageContaining(unsupportedField);
+        }
+
+        assertThat(audit.audit(
+                List.of(
+                        call("preview-one", "preview_table_data",
+                                previewArguments("orders").put("maxRowCount", 1), rows(1)),
+                        call("preview-twenty", "preview_table_data",
+                                previewArguments("orders").put("maxRowCount", 20), rows(20))
+                ), boundary(), database, selectStatement()).auditedCallIds())
+                .containsExactly("preview-one", "preview-twenty");
+    }
+
     @ParameterizedTest(name = "rejects SQL: {0}")
     @MethodSource("forbiddenSql")
     void rejectsUnsafeOrAmbiguousPostgresqlGaussSql(String label, String sql) {
@@ -355,6 +397,21 @@ class MyBatisToolCallAuditTest {
                 List.of(sqlCall("too-many", "SELECT id FROM orders LIMIT 20", 21)),
                 boundary(), database, selectStatement()))
                 .hasMessageContaining("at most 20 rows");
+    }
+
+    @Test
+    void rejectsSerializedSqlToolResultEvidenceAbove262144Bytes() {
+        ObjectNode oversized = rows(1);
+        oversized.put("padding", "x".repeat(262_144));
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call(
+                        "oversized-result",
+                        "execute_sql_query",
+                        databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1"),
+                        oversized
+                )), boundary(), database, selectStatement()))
+                .hasMessageContaining("262144 bytes");
     }
 
     @Test

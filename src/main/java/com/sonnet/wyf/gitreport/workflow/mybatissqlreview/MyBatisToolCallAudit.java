@@ -17,6 +17,7 @@ public final class MyBatisToolCallAudit {
     public static final int MAX_QUERY_SCENARIOS = 3;
     public static final int MAX_ROWS_PER_CALL = 20;
     public static final long MAX_QUERY_DURATION_MS = 30_000L;
+    public static final int MAX_TOOL_RESULT_BYTES = 262_144;
 
     private static final Set<String> ALLOWED_TOOLS = MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS;
     private static final Set<String> SCHEMA_BOUND_TOOLS = Set.of(
@@ -25,6 +26,13 @@ public final class MyBatisToolCallAudit {
             "preview_table_data",
             "get_database_object_description",
             "execute_sql_query"
+    );
+    private static final Set<String> PREVIEW_ARGUMENTS = Set.of(
+            "connectionId",
+            "databaseName",
+            "schemaName",
+            "tableName",
+            "maxRowCount"
     );
 
     private final ObjectMapper objectMapper;
@@ -106,6 +114,7 @@ public final class MyBatisToolCallAudit {
             List<String> columns = List.of();
             List<JsonNode> rows = List.of();
             if ("execute_sql_query".equals(call.toolName()) || "preview_table_data".equals(call.toolName())) {
+                requireBoundedResultEvidence(call);
                 RowData rowData = parseRowData(call);
                 resultData = rowData.payload();
                 columns = rowData.columns();
@@ -132,6 +141,17 @@ public final class MyBatisToolCallAudit {
         return new Result(facts, statement, database);
     }
 
+    private void requireBoundedResultEvidence(AgentBridgeClient.ToolCallRecord call) {
+        try {
+            int serializedBytes = objectMapper.writeValueAsBytes(call.result()).length;
+            if (serializedBytes > MAX_TOOL_RESULT_BYTES) {
+                throw violation(call, "SQL tool result evidence exceeds 262144 bytes");
+            }
+        } catch (IOException exception) {
+            throw violation(call, "SQL tool result evidence could not be serialized safely");
+        }
+    }
+
     private void requireSafePreviewRelation(
             AgentBridgeClient.ToolCallRecord call,
             MyBatisDatabasePreflight.Result database
@@ -153,6 +173,18 @@ public final class MyBatisToolCallAudit {
                     call,
                     "relation is not an explicitly verified safe base relation: " + canonicalRelation
             );
+        }
+        call.arguments().fieldNames().forEachRemaining(field -> {
+            if (!PREVIEW_ARGUMENTS.contains(field)) {
+                throw violation(call, "unsupported preview argument: " + field);
+            }
+        });
+        JsonNode maximumRows = call.arguments().path("maxRowCount");
+        if (!maximumRows.isIntegralNumber()
+                || !maximumRows.canConvertToInt()
+                || maximumRows.intValue() < 1
+                || maximumRows.intValue() > MAX_ROWS_PER_CALL) {
+            throw violation(call, "preview maxRowCount must be an integer in 1..20");
         }
     }
 

@@ -8,13 +8,98 @@ import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
 public final class MyBatisDatabasePreflight {
+    private static final String SAFETY_PROBE_CONTRACT_VERSION = "mybatis-sql-review-db-safety-v1";
+    private static final String VERIFIED_ENVIRONMENT_SOURCE = "managed-connection-metadata";
+    private static final List<String> SAFETY_PROBE_COLUMNS = List.of(
+            "probeContractVersion",
+            "currentDatabase",
+            "currentSchema",
+            "currentUser",
+            "superuser",
+            "systemAdmin",
+            "auditAdmin",
+            "roleAdmin",
+            "roleMembershipCount",
+            "databaseOwner",
+            "schemaOwner",
+            "ownedBaseTableCount",
+            "sessionReadOnly",
+            "transactionReadOnly",
+            "unsafeTablePrivilegeCount",
+            "rlsEnabledBaseTableCount",
+            "forceRlsEnabledBaseTableCount",
+            "executableFunctionCount",
+            "statementTimeoutMs",
+            "baseTableNames",
+            "baseTableCount",
+            "readReplica"
+    );
+    static final String SAFETY_PROBE_SQL = """
+            WITH target_tables AS (
+                SELECT c.oid, c.relowner, c.relrowsecurity, c.relforcerowsecurity
+                FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = pg_catalog.current_schema()
+                  AND c.relkind = 'r'
+            )
+            SELECT
+                'mybatis-sql-review-db-safety-v1' AS "probeContractVersion",
+                pg_catalog.current_database() AS "currentDatabase",
+                pg_catalog.current_schema() AS "currentSchema",
+                CURRENT_USER AS "currentUser",
+                r.rolsuper AS "superuser",
+                r.rolsystemadmin AS "systemAdmin",
+                r.rolauditadmin AS "auditAdmin",
+                (r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.roluseft
+                    OR r.rolmonitoradmin OR r.roloperatoradmin OR r.rolpolicyadmin) AS "roleAdmin",
+                (SELECT pg_catalog.count(*) FROM pg_catalog.pg_auth_members m WHERE m.member = r.oid)
+                    AS "roleMembershipCount",
+                (d.datdba = r.oid) AS "databaseOwner",
+                (n.nspowner = r.oid) AS "schemaOwner",
+                (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relowner = r.oid)
+                    AS "ownedBaseTableCount",
+                (pg_catalog.current_setting('default_transaction_read_only') IN ('on', 'true'))
+                    AS "sessionReadOnly",
+                (pg_catalog.current_setting('transaction_read_only') IN ('on', 'true'))
+                    AS "transactionReadOnly",
+                (SELECT pg_catalog.count(*) FROM target_tables t
+                    WHERE pg_catalog.has_table_privilege(
+                        CURRENT_USER, t.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+                    AS "unsafeTablePrivilegeCount",
+                (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relrowsecurity)
+                    AS "rlsEnabledBaseTableCount",
+                (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relforcerowsecurity)
+                    AS "forceRlsEnabledBaseTableCount",
+                (SELECT pg_catalog.count(*)
+                    FROM pg_catalog.pg_proc p
+                    JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace
+                    WHERE (pn.nspname NOT IN ('pg_catalog', 'information_schema') OR p.prosecdef)
+                      AND (pg_catalog.has_function_privilege(CURRENT_USER, p.oid, 'EXECUTE')
+                        OR pg_catalog.has_function_privilege('public', p.oid, 'EXECUTE')))
+                    AS "executableFunctionCount",
+                (EXTRACT(EPOCH FROM
+                    pg_catalog.current_setting('statement_timeout')::pg_catalog.interval) * 1000)::bigint
+                    AS "statementTimeoutMs",
+                (SELECT pg_catalog.string_agg(
+                    pg_catalog.lower(t.relname), ',' ORDER BY pg_catalog.lower(t.relname))
+                    FROM target_tables t) AS "baseTableNames",
+                (SELECT pg_catalog.count(*) FROM target_tables) AS "baseTableCount",
+                pg_catalog.pg_is_in_recovery() AS "readReplica"
+            FROM pg_catalog.pg_roles r
+            JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database()
+            JOIN pg_catalog.pg_namespace n ON n.nspname = pg_catalog.current_schema()
+            WHERE r.rolname = CURRENT_USER
+            """;
     public static final Set<String> REQUIRED_DATABASE_TOOLS = Set.of(
             "list_database_connections",
             "test_database_connection",
@@ -44,7 +129,12 @@ public final class MyBatisDatabasePreflight {
         verifyCredentialContract(contract);
 
         Set<String> availableTools = new LinkedHashSet<>();
+        Map<String, AgentBridgeClient.ToolDefinition> toolsByName = new HashMap<>();
         for (AgentBridgeClient.ToolDefinition tool : client.listTools(mcpUri)) {
+            if (tool.name() == null || tool.name().isBlank()
+                    || toolsByName.putIfAbsent(tool.name(), tool) != null) {
+                throw new IllegalStateException("AgentBridge tool catalog contains a missing or duplicate tool name");
+            }
             availableTools.add(tool.name());
         }
         Set<String> missingTools = new LinkedHashSet<>(REQUIRED_DATABASE_TOOLS);
@@ -52,6 +142,7 @@ public final class MyBatisDatabasePreflight {
         if (!missingTools.isEmpty()) {
             throw new IllegalStateException("AgentBridge database tools unavailable: " + missingTools);
         }
+        requireDatabaseToolSchemas(toolsByName);
 
         JsonNode connections = client.callTool(
                 mcpUri,
@@ -71,6 +162,7 @@ public final class MyBatisDatabasePreflight {
                 || !deployment.equalsIgnoreCase("centralized")) {
             throw new IllegalStateException("connection must identify a centralized GaussDB database");
         }
+        Environment verifiedEnvironment = verifiedEnvironment(connection, contract.environment());
         if (!containsText(connection.path("databases"), contract.databaseName())) {
             throw new IllegalStateException("configured database is not available on the selected connection: "
                     + contract.databaseName());
@@ -145,16 +237,264 @@ public final class MyBatisDatabasePreflight {
         Set<String> safeBaseRelations = safeBaseRelations(
                 tableObjects, connectionId, contract);
 
+        ObjectNode probeArguments = databaseArguments(
+                connectionId, contract.databaseName(), contract.schemaName());
+        probeArguments.put("queryText", SAFETY_PROBE_SQL);
+        AgentBridgeClient.ToolResponse probeResponse = client.callTool(
+                mcpUri,
+                "execute_sql_query",
+                probeArguments
+        );
+        if (probeResponse.rawResult().path("isError").asBoolean(false)) {
+            throw new IllegalStateException("database safety probe returned an MCP tool error");
+        }
+        SafetyProbe probe = verifySafetyProbe(
+                probeResponse.structured(),
+                contract,
+                verifiedEnvironment,
+                safeBaseRelations
+        );
+
         client.getToolCalls(webBaseUri);
         return new Result(
                 connectionId,
                 contract.databaseName(),
                 contract.schemaName(),
                 databaseSystem,
-                contract.environment(),
-                contract.statementTimeout(),
+                verifiedEnvironment,
+                new StatementTimeoutContract(
+                        Duration.ofMillis(probe.statementTimeoutMs()),
+                        StatementTimeoutScope.EFFECTIVE_SESSION,
+                        true
+                ),
                 safeBaseRelations
         );
+    }
+
+    private void requireDatabaseToolSchemas(
+            Map<String, AgentBridgeClient.ToolDefinition> toolsByName
+    ) {
+        requireInputSchema(
+                toolsByName.get("execute_sql_query"),
+                Map.of(
+                        "connectionId", "string",
+                        "databaseName", "string",
+                        "schemaName", "string",
+                        "queryText", "string"
+                )
+        );
+        AgentBridgeClient.ToolDefinition preview = toolsByName.get("preview_table_data");
+        requireInputSchema(
+                preview,
+                Map.of(
+                        "connectionId", "string",
+                        "databaseName", "string",
+                        "schemaName", "string",
+                        "tableName", "string",
+                        "maxRowCount", "integer"
+                )
+        );
+        JsonNode maximumRows = preview.inputSchema().path("properties").path("maxRowCount");
+        if (!maximumRows.path("minimum").isIntegralNumber()
+                || maximumRows.path("minimum").longValue() > 1
+                || !maximumRows.path("maximum").isIntegralNumber()
+                || maximumRows.path("maximum").longValue() < 20) {
+            throw new IllegalStateException(
+                    "AgentBridge preview_table_data input schema cannot prove maxRowCount supports 1..20"
+            );
+        }
+        for (String unsupported : List.of("limit", "rowLimit", "pageSize", "maxRows")) {
+            if (preview.inputSchema().path("properties").has(unsupported)) {
+                throw new IllegalStateException(
+                        "AgentBridge preview_table_data input schema exposes multiple limit fields: " + unsupported
+                );
+            }
+        }
+    }
+
+    private void requireInputSchema(
+            AgentBridgeClient.ToolDefinition tool,
+            Map<String, String> requiredProperties
+    ) {
+        JsonNode schema = tool.inputSchema();
+        if (schema == null || !schema.isObject()
+                || !"object".equals(schema.path("type").asText())
+                || !schema.path("properties").isObject()
+                || !schema.path("required").isArray()) {
+            throw new IllegalStateException(
+                    "AgentBridge " + tool.name() + " input schema is unsupported or incomplete"
+            );
+        }
+        Set<String> required = new HashSet<>();
+        for (JsonNode field : schema.path("required")) {
+            if (!field.isTextual() || field.asText().isBlank() || !required.add(field.asText())) {
+                throw new IllegalStateException(
+                        "AgentBridge " + tool.name() + " input schema has invalid required fields"
+                );
+            }
+        }
+        for (Map.Entry<String, String> property : requiredProperties.entrySet()) {
+            if (!required.contains(property.getKey())
+                    || !property.getValue().equals(
+                    schema.path("properties").path(property.getKey()).path("type").asText())) {
+                throw new IllegalStateException(
+                        "AgentBridge " + tool.name() + " input schema cannot prove required "
+                                + property.getKey() + " " + property.getValue() + " argument"
+                );
+            }
+        }
+    }
+
+    private Environment verifiedEnvironment(JsonNode connection, Environment configured) {
+        if (!connection.path("readOnly").isBoolean() || !connection.path("readOnly").booleanValue()
+                || !VERIFIED_ENVIRONMENT_SOURCE.equals(connection.path("environmentSource").asText())) {
+            throw new IllegalStateException(
+                    "connection environment metadata must prove a managed read-only target"
+            );
+        }
+        Environment actual = switch (connection.path("environment").asText("").toLowerCase(Locale.ROOT)) {
+            case "test" -> Environment.TEST;
+            case "read-replica" -> Environment.READ_REPLICA;
+            default -> throw new IllegalStateException(
+                    "connection environment metadata must prove read-replica or test"
+            );
+        };
+        if (actual != configured) {
+            throw new IllegalStateException(
+                    "connection environment metadata does not match configured environment"
+            );
+        }
+        return actual;
+    }
+
+    private SafetyProbe verifySafetyProbe(
+            JsonNode response,
+            DatabaseContract contract,
+            Environment environment,
+            Set<String> expectedBaseRelations
+    ) {
+        if (!response.isObject()
+                || !response.path("columns").isArray()
+                || !response.path("rows").isArray()
+                || response.path("rows").size() != 1
+                || !response.path("rows").get(0).isObject()) {
+            throw new IllegalStateException(
+                    "database safety probe must return the strict columns/one-row response contract"
+            );
+        }
+        List<String> columns = new ArrayList<>();
+        for (JsonNode column : response.path("columns")) {
+            if (!column.isTextual()) {
+                throw new IllegalStateException("database safety probe columns must be strings");
+            }
+            columns.add(column.asText());
+        }
+        if (!SAFETY_PROBE_COLUMNS.equals(columns)) {
+            throw new IllegalStateException(
+                    "database safety probe columns do not match contract " + SAFETY_PROBE_CONTRACT_VERSION
+            );
+        }
+        JsonNode row = response.path("rows").get(0);
+        Set<String> rowFields = new LinkedHashSet<>();
+        row.fieldNames().forEachRemaining(rowFields::add);
+        Set<String> expectedFields = new LinkedHashSet<>(SAFETY_PROBE_COLUMNS);
+        if (!rowFields.equals(expectedFields)) {
+            Set<String> missingFields = new LinkedHashSet<>(expectedFields);
+            missingFields.removeAll(rowFields);
+            Set<String> unexpectedFields = new LinkedHashSet<>(rowFields);
+            unexpectedFields.removeAll(expectedFields);
+            throw new IllegalStateException(
+                    "database safety probe row fields do not match the strict response contract; missing="
+                            + missingFields + ", unexpected=" + unexpectedFields
+            );
+        }
+        requireProbeText(row, "probeContractVersion", SAFETY_PROBE_CONTRACT_VERSION);
+        requireProbeText(row, "currentDatabase", contract.databaseName());
+        requireProbeText(row, "currentSchema", contract.schemaName());
+        String currentUser = requiredProbeText(row, "currentUser");
+        for (String field : List.of(
+                "superuser",
+                "systemAdmin",
+                "auditAdmin",
+                "roleAdmin",
+                "databaseOwner",
+                "schemaOwner"
+        )) {
+            if (requiredProbeBoolean(row, field)) {
+                throw new IllegalStateException("database safety probe rejected unsafe " + field);
+            }
+        }
+        for (String field : List.of(
+                "roleMembershipCount",
+                "ownedBaseTableCount",
+                "unsafeTablePrivilegeCount",
+                "rlsEnabledBaseTableCount",
+                "forceRlsEnabledBaseTableCount",
+                "executableFunctionCount"
+        )) {
+            if (requiredProbeLong(row, field) != 0) {
+                throw new IllegalStateException("database safety probe rejected non-zero " + field);
+            }
+        }
+        if (!requiredProbeBoolean(row, "sessionReadOnly")) {
+            throw new IllegalStateException("database safety probe requires sessionReadOnly=true");
+        }
+        if (!requiredProbeBoolean(row, "transactionReadOnly")) {
+            throw new IllegalStateException("database safety probe requires transactionReadOnly=true");
+        }
+        long timeoutMillis = requiredProbeLong(row, "statementTimeoutMs");
+        if (timeoutMillis < 1 || timeoutMillis > Duration.ofSeconds(30).toMillis()
+                || timeoutMillis > contract.statementTimeout().maximum().toMillis()) {
+            throw new IllegalStateException(
+                    "database safety probe statementTimeoutMs must be positive and no more than configured/30000"
+            );
+        }
+        List<String> expectedTableNames = expectedBaseRelations.stream()
+                .map(relation -> relation.substring(relation.indexOf('.') + 1))
+                .sorted()
+                .toList();
+        requireProbeText(row, "baseTableNames", String.join(",", expectedTableNames));
+        long baseTableCount = requiredProbeLong(row, "baseTableCount");
+        if (baseTableCount != expectedBaseRelations.size()) {
+            throw new IllegalStateException(
+                    "database safety probe baseTableCount does not match the verified inventory"
+            );
+        }
+        boolean readReplica = requiredProbeBoolean(row, "readReplica");
+        if (environment == Environment.READ_REPLICA && !readReplica) {
+            throw new IllegalStateException(
+                    "database safety probe could not prove the configured read-replica"
+            );
+        }
+        return new SafetyProbe(currentUser, timeoutMillis, readReplica);
+    }
+
+    private void requireProbeText(JsonNode row, String field, String expected) {
+        String actual = requiredProbeText(row, field);
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException("database safety probe " + field + " does not match target");
+        }
+    }
+
+    private String requiredProbeText(JsonNode row, String field) {
+        if (!row.path(field).isTextual() || row.path(field).asText().isBlank()) {
+            throw new IllegalStateException("database safety probe missing textual " + field);
+        }
+        return row.path(field).asText();
+    }
+
+    private boolean requiredProbeBoolean(JsonNode row, String field) {
+        if (!row.path(field).isBoolean()) {
+            throw new IllegalStateException("database safety probe missing boolean " + field);
+        }
+        return row.path(field).booleanValue();
+    }
+
+    private long requiredProbeLong(JsonNode row, String field) {
+        if (!row.path(field).isIntegralNumber() || !row.path(field).canConvertToLong()) {
+            throw new IllegalStateException("database safety probe missing integral " + field);
+        }
+        return row.path(field).longValue();
     }
 
     private void verifyCredentialContract(DatabaseContract contract) {
@@ -314,7 +654,8 @@ public final class MyBatisDatabasePreflight {
     public enum StatementTimeoutScope {
         DATABASE,
         SERVER,
-        ROLE
+        ROLE,
+        EFFECTIVE_SESSION
     }
 
     public record StatementTimeoutContract(
@@ -345,6 +686,9 @@ public final class MyBatisDatabasePreflight {
             Objects.requireNonNull(environment, "environment");
             Objects.requireNonNull(statementTimeout, "statementTimeout");
         }
+    }
+
+    private record SafetyProbe(String currentUser, long statementTimeoutMs, boolean readReplica) {
     }
 
     public static final class Result {
