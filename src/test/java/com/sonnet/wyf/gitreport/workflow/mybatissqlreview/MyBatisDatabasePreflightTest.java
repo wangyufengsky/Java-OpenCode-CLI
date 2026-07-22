@@ -16,7 +16,9 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,12 +51,40 @@ class MyBatisDatabasePreflightTest {
         assertThat(result.databaseName()).isEqualTo("orders");
         assertThat(result.schemaName()).isEqualTo("audit");
         assertThat(result.databaseSystem()).isEqualTo("GaussDB");
+        assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder("audit.orders", "audit.line_items");
+        assertThatThrownBy(() -> result.safeBaseRelations().add("audit.injected"))
+                .isInstanceOf(UnsupportedOperationException.class);
         assertThat(bridge.calledTools).containsExactly(
                 "list_database_connections",
                 "test_database_connection",
-                "list_database_schemas"
+                "list_database_schemas",
+                "list_schema_object_kinds",
+                "list_schema_objects"
         );
+        assertThat(bridge.argumentsFor("list_schema_object_kinds"))
+                .isEqualTo(objectMapper.createObjectNode().put("connectionId", "gauss-readonly"));
+        assertThat(bridge.argumentsFor("list_schema_objects"))
+                .isEqualTo(databaseArguments().put("kind", "TABLE"));
         assertThat(bridge.toolCallHistoryRequested).isTrue();
+    }
+
+    @Test
+    void failsClosedUnlessEverySafeRelationIsExplicitlyReportedAsConfiguredSchemaBaseTable() throws Exception {
+        ObjectNode missingKind = fixture("schema-objects-table-audit.json").deepCopy();
+        ((ObjectNode) missingKind.at("/objects/0")).remove("kind");
+        assertRejectedMetadata(fixture("schema-object-kinds-audit.json"), missingKind,
+                "explicitly report kind TABLE");
+
+        ObjectNode wrongSchema = fixture("schema-objects-table-audit.json").deepCopy();
+        wrongSchema.put("schemaName", "public");
+        assertRejectedMetadata(fixture("schema-object-kinds-audit.json"), wrongSchema,
+                "configured schema");
+
+        ObjectNode missingTableKind = fixture("schema-object-kinds-audit.json").deepCopy();
+        ((ArrayNode) missingTableKind.path("objectKinds")).removeAll()
+                .addObject().put("code", "VIEW").put("name", "View");
+        assertRejectedMetadata(missingTableKind, fixture("schema-objects-table-audit.json"),
+                "exact TABLE object kind");
     }
 
     @Test
@@ -62,7 +92,7 @@ class MyBatisDatabasePreflightTest {
         JsonNode baseConnections = fixture("connections-centralized.json");
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true, true, true,
                         timeoutContract()),
                 "exactly one connection");
 
@@ -72,7 +102,7 @@ class MyBatisDatabasePreflightTest {
 
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.TEST, true,
+                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.TEST, true, true, true,
                         timeoutContract()),
                 "schema");
     }
@@ -104,27 +134,45 @@ class MyBatisDatabasePreflightTest {
     void requiresReadReplicaOrTestAndExplicitReadOnlyCredentialContract() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY, true,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY,
+                        true, true, true,
                         timeoutContract()),
                 "read-replica or test");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, false,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        false, true, true,
                         timeoutContract()),
                 "non-owner/non-admin read-only account");
+    }
+
+    @Test
+    void requiresConfirmedRlsDisabledAndFunctionExecuteRevokedIncludingPublic() throws Exception {
+        assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        true, false, true, timeoutContract()),
+                "RLS disabled");
+        assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        true, true, false, timeoutContract()),
+                "including PUBLIC");
     }
 
     @Test
     void requiresConfirmedDatabaseServerOrRoleStatementTimeoutAtMostThirtySeconds() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        true, true, true,
                         new MyBatisDatabasePreflight.StatementTimeoutContract(
                                 Duration.ofSeconds(31), MyBatisDatabasePreflight.StatementTimeoutScope.ROLE, true)),
                 "30 seconds");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST,
+                        true, true, true,
                         new MyBatisDatabasePreflight.StatementTimeoutContract(
                                 Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.DATABASE, false)),
                 "confirmed");
@@ -145,12 +193,24 @@ class MyBatisDatabasePreflightTest {
         stopServer();
     }
 
+    private void assertRejectedMetadata(JsonNode objectKinds, JsonNode schemaObjects, String message) throws Exception {
+        FakeDatabaseBridge bridge = startBridge(
+                fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS, objectKinds, schemaObjects);
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper))
+                .verify(bridge.mcpUri(), bridge.webUri(), contract()))
+                .hasMessageContaining(message);
+        stopServer();
+    }
+
     private MyBatisDatabasePreflight.DatabaseContract contract() {
         return new MyBatisDatabasePreflight.DatabaseContract(
                 "Gauss Review",
                 "orders",
                 "audit",
                 MyBatisDatabasePreflight.Environment.TEST,
+                true,
+                true,
                 true,
                 timeoutContract()
         );
@@ -170,8 +230,27 @@ class MyBatisDatabasePreflightTest {
             boolean connectionAvailable,
             Set<String> tools
     ) throws IOException {
+        return startBridge(
+                connections,
+                schemas,
+                connectionAvailable,
+                tools,
+                fixture("schema-object-kinds-audit.json"),
+                fixture("schema-objects-table-audit.json")
+        );
+    }
+
+    private FakeDatabaseBridge startBridge(
+            JsonNode connections,
+            JsonNode schemas,
+            boolean connectionAvailable,
+            Set<String> tools,
+            JsonNode objectKinds,
+            JsonNode schemaObjects
+    ) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        FakeDatabaseBridge bridge = new FakeDatabaseBridge(server, connections, schemas, connectionAvailable, tools);
+        FakeDatabaseBridge bridge = new FakeDatabaseBridge(
+                server, connections, schemas, connectionAvailable, tools, objectKinds, schemaObjects);
         bridge.install();
         server.start();
         return bridge;
@@ -192,7 +271,10 @@ class MyBatisDatabasePreflightTest {
         private final JsonNode schemas;
         private final boolean connectionAvailable;
         private final Set<String> tools;
+        private final JsonNode objectKinds;
+        private final JsonNode schemaObjects;
         private final Set<String> calledTools = new LinkedHashSet<>();
+        private final List<ToolInvocation> invocations = new ArrayList<>();
         private boolean toolCallHistoryRequested;
 
         private FakeDatabaseBridge(
@@ -200,13 +282,17 @@ class MyBatisDatabasePreflightTest {
                 JsonNode connections,
                 JsonNode schemas,
                 boolean connectionAvailable,
-                Set<String> tools
+                Set<String> tools,
+                JsonNode objectKinds,
+                JsonNode schemaObjects
         ) {
             this.httpServer = httpServer;
             this.connections = connections;
             this.schemas = schemas;
             this.connectionAvailable = connectionAvailable;
             this.tools = tools;
+            this.objectKinds = objectKinds;
+            this.schemaObjects = schemaObjects;
         }
 
         private void install() {
@@ -221,11 +307,15 @@ class MyBatisDatabasePreflightTest {
                     case "tools/call" -> {
                         String toolName = request.at("/params/name").asText();
                         calledTools.add(toolName);
+                        invocations.add(new ToolInvocation(
+                                toolName, request.at("/params/arguments").deepCopy()));
                         JsonNode result = switch (toolName) {
                             case "list_database_connections" -> connections;
                             case "test_database_connection" -> objectMapper.createObjectNode()
                                     .put("success", connectionAvailable);
                             case "list_database_schemas" -> schemas;
+                            case "list_schema_object_kinds" -> objectKinds;
+                            case "list_schema_objects" -> schemaObjects;
                             default -> objectMapper.createObjectNode();
                         };
                         respondMcp(exchange, result);
@@ -275,6 +365,24 @@ class MyBatisDatabasePreflightTest {
         private URI webUri() {
             return URI.create("http://127.0.0.1:" + httpServer.getAddress().getPort());
         }
+
+        private JsonNode argumentsFor(String toolName) {
+            return invocations.stream()
+                    .filter(invocation -> toolName.equals(invocation.toolName()))
+                    .map(ToolInvocation::arguments)
+                    .findFirst()
+                    .orElseThrow();
+        }
+    }
+
+    private ObjectNode databaseArguments() {
+        return objectMapper.createObjectNode()
+                .put("connectionId", "gauss-readonly")
+                .put("databaseName", "orders")
+                .put("schemaName", "audit");
+    }
+
+    private record ToolInvocation(String toolName, JsonNode arguments) {
     }
 
     private String readBody(HttpExchange exchange) throws IOException {

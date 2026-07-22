@@ -28,7 +28,7 @@ class MyBatisToolCallAuditTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisToolCallAudit audit = new MyBatisToolCallAudit(objectMapper);
     private final MyBatisDatabasePreflight.Result database = new MyBatisDatabasePreflight.Result(
-            "gauss-readonly", "orders", "audit", "GaussDB");
+            "gauss-readonly", "orders", "audit", "GaussDB", Set.of("audit.orders", "audit.line_items"));
 
     @Test
     void auditsOnlyCompletePostTaskHistoryDifferenceAndReturnsImmutableFacts() {
@@ -127,7 +127,7 @@ class MyBatisToolCallAuditTest {
     void acceptsBoundMetadataPreviewAndThreeReadOnlyScenarios() {
         List<AgentBridgeClient.ToolCallRecord> calls = List.of(
                 call("call-1", "list_schema_objects", databaseArguments(), objectMapper.createObjectNode()),
-                call("call-2", "preview_table_data", databaseArguments(), rows(2)),
+                call("call-2", "preview_table_data", previewArguments("orders"), rows(2)),
                 sqlCall("call-3", "SELECT id FROM orders LIMIT 20", 20),
                 sqlCall("call-4", "SELECT id, status FROM orders LIMIT 10", 10),
                 sqlCall("call-5", "SELECT * FROM audit.orders AS orders LIMIT 1", 1)
@@ -137,6 +137,55 @@ class MyBatisToolCallAuditTest {
 
         assertThat(result.auditedCallIds()).containsExactly("call-1", "call-2", "call-3", "call-4", "call-5");
         assertThat(result.queryScenarioCount()).isEqualTo(3);
+    }
+
+    @Test
+    void resolvesUnqualifiedAndQualifiedConfiguredSchemaBaseTables() {
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(
+                        sqlCall("unqualified", "SELECT id FROM orders LIMIT 1", 1),
+                        sqlCall("qualified", "SELECT id FROM audit.line_items LIMIT 1", 1),
+                        call("preview", "preview_table_data", previewArguments("line_items"), rows(1))
+                ),
+                boundary(), database, selectStatement()
+        );
+
+        assertThat(result.auditedCallIds()).containsExactly("unqualified", "qualified", "preview");
+    }
+
+    @ParameterizedTest(name = "rejects non-base relation: {0}")
+    @MethodSource("unsafeRelations")
+    void rejectsViewsMaterializedForeignUnknownAndOtherSchemaRelations(String label, String relation) {
+        assertThatThrownBy(() -> audit.audit(
+                List.of(sqlCall("unsafe-relation", "SELECT id FROM " + relation + " LIMIT 1", 1)),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("safe base relation")
+                .hasMessageContaining(label);
+    }
+
+    private static Stream<Arguments> unsafeRelations() {
+        return Stream.of(
+                Arguments.of("orders_view", "orders_view"),
+                Arguments.of("orders_materialized", "orders_materialized"),
+                Arguments.of("orders_foreign", "orders_foreign"),
+                Arguments.of("orders_unknown", "orders_unknown"),
+                Arguments.of("public.orders", "public.orders")
+        );
+    }
+
+    @Test
+    void rejectsPreviewOfViewAndMissingPreviewRelation() {
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call(
+                        "preview-view", "preview_table_data", previewArguments("orders_view"), rows(1))),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("safe base relation")
+                .hasMessageContaining("orders_view");
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call("preview-missing", "preview_table_data", databaseArguments(), rows(1))),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("tableName");
     }
 
     @ParameterizedTest(name = "rejects SQL: {0}")
@@ -357,6 +406,12 @@ class MyBatisToolCallAuditTest {
                 .put("connectionId", "gauss-readonly")
                 .put("databaseName", "orders")
                 .put("schemaName", "audit");
+    }
+
+    private ObjectNode previewArguments(String tableName) {
+        return databaseArguments()
+                .put("tableName", tableName)
+                .put("maxRowCount", 20);
     }
 
     private ObjectNode rows(int count) {

@@ -22,7 +22,12 @@ final class ReadOnlySqlPolicy {
         this.maximumRows = maximumRows;
     }
 
-    void validate(String sql, String callId) {
+    String validate(
+            String sql,
+            String callId,
+            String configuredSchema,
+            Set<String> safeBaseRelations
+    ) {
         if (sql == null || sql.isBlank()) {
             throw violation(callId, "queryText is required");
         }
@@ -33,7 +38,24 @@ final class ReadOnlySqlPolicy {
             throw violation(callId, exception.getMessage());
         }
         Parser parser = new Parser(tokens, callId);
-        parser.parse();
+        ParsedRelation relation = parser.parse();
+        if (relation.schemaName() != null
+                && !configuredSchema.equalsIgnoreCase(relation.schemaName())) {
+            throw violation(
+                    callId,
+                    "relation is outside the configured schema and is not a safe base relation: "
+                            + relation.qualifiedName()
+            );
+        }
+        String canonicalRelation = MyBatisDatabasePreflight.canonicalRelation(
+                configuredSchema, relation.relationName());
+        if (!safeBaseRelations.contains(canonicalRelation)) {
+            throw violation(
+                    callId,
+                    "relation is not an explicitly verified safe base relation: " + canonicalRelation
+            );
+        }
+        return canonicalRelation;
     }
 
     private List<Token> tokenize(String sql) {
@@ -168,11 +190,11 @@ final class ReadOnlySqlPolicy {
             this.callId = callId;
         }
 
-        private void parse() {
+        private ParsedRelation parse() {
             requireWord("SELECT", "only SELECT using the simple-read grammar is allowed");
             parseProjection();
             requireWord("FROM", "simple-read grammar requires FROM after plain columns");
-            parseRelation();
+            ParsedRelation relation = parseRelation();
             if (acceptWord("AS")) {
                 requireIdentifier("simple-read grammar requires a plain table alias after AS");
             }
@@ -190,6 +212,7 @@ final class ReadOnlySqlPolicy {
             if (index != tokens.size()) {
                 reject(classifyExpression(tokens.get(index)));
             }
+            return relation;
         }
 
         private void parseProjection() {
@@ -199,11 +222,14 @@ final class ReadOnlySqlPolicy {
             }
         }
 
-        private void parseRelation() {
-            requireIdentifier("simple-read grammar requires one plain table name");
+        private ParsedRelation parseRelation() {
+            String first = requireIdentifier("simple-read grammar requires one plain table name");
             if (acceptSymbol(".")) {
-                requireIdentifier("simple-read grammar requires a plain schema-qualified table name");
+                String second = requireIdentifier(
+                        "simple-read grammar requires a plain schema-qualified table name");
+                return new ParsedRelation(first, second);
             }
+            return new ParsedRelation(null, first);
         }
 
         private void parseColumnReference(boolean allowStar) {
@@ -244,11 +270,11 @@ final class ReadOnlySqlPolicy {
             }
         }
 
-        private void requireIdentifier(String message) {
+        private String requireIdentifier(String message) {
             if (!isIdentifier(peek())) {
                 reject(message);
             }
-            index++;
+            return tokens.get(index++).text();
         }
 
         private boolean isIdentifier(Token token) {
@@ -320,6 +346,13 @@ final class ReadOnlySqlPolicy {
     }
 
     private record Token(String text, TokenKind kind) {
+    }
+
+    private record ParsedRelation(String schemaName, String relationName) {
+        private String qualifiedName() {
+            String value = schemaName == null ? relationName : schemaName + "." + relationName;
+            return value.toLowerCase(Locale.ROOT);
+        }
     }
 
     private enum TokenKind {

@@ -101,8 +101,58 @@ public final class MyBatisDatabasePreflight {
                     + contract.databaseName() + "/" + contract.schemaName());
         }
 
+        ObjectNode objectKindArguments = JsonNodeFactory.instance.objectNode();
+        objectKindArguments.put("connectionId", connectionId);
+        JsonNode objectKinds = client.callTool(
+                mcpUri,
+                "list_schema_object_kinds",
+                objectKindArguments
+        ).structured();
+        requireMetadataBinding(objectKinds, connectionId, contract);
+        JsonNode kindValues = objectKinds.path("objectKinds");
+        if (!kindValues.isArray()) {
+            throw new IllegalStateException(
+                    "list_schema_object_kinds must return the exact tested objectKinds array contract"
+            );
+        }
+        int tableKindCount = 0;
+        for (JsonNode kind : kindValues) {
+            if (!kind.isObject()
+                    || kind.path("code").asText().isBlank()
+                    || kind.path("name").asText().isBlank()) {
+                throw new IllegalStateException(
+                        "schema object kinds must expose non-blank code and name fields"
+                );
+            }
+            if ("TABLE".equals(kind.path("code").asText())) {
+                tableKindCount++;
+            }
+        }
+        if (tableKindCount != 1) {
+            throw new IllegalStateException(
+                    "list_schema_object_kinds must expose exactly one exact TABLE object kind"
+            );
+        }
+
+        ObjectNode tableArguments = databaseArguments(
+                connectionId, contract.databaseName(), contract.schemaName());
+        tableArguments.put("kind", "TABLE");
+        JsonNode tableObjects = client.callTool(
+                mcpUri,
+                "list_schema_objects",
+                tableArguments
+        ).structured();
+        Set<String> safeBaseRelations = safeBaseRelations(
+                tableObjects, connectionId, contract);
+
         client.getToolCalls(webBaseUri);
-        return new Result(connectionId, contract.databaseName(), contract.schemaName(), databaseSystem);
+        return new Result(
+                connectionId,
+                contract.databaseName(),
+                contract.schemaName(),
+                databaseSystem,
+                safeBaseRelations
+        );
     }
 
     private void verifyCredentialContract(DatabaseContract contract) {
@@ -112,6 +162,16 @@ public final class MyBatisDatabasePreflight {
         if (!contract.nonOwnerNonAdminReadOnlyAccount()) {
             throw new IllegalStateException(
                     "runtime credentials must use a non-owner/non-admin read-only account; this is an external deployment contract"
+            );
+        }
+        if (!contract.rowLevelSecurityDisabledForSafeBaseTables()) {
+            throw new IllegalStateException(
+                    "RLS disabled for every safe base table must be explicitly confirmed before preflight"
+            );
+        }
+        if (!contract.userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic()) {
+            throw new IllegalStateException(
+                    "user-defined and security-definer function execution must be revoked from the audit account, including PUBLIC"
             );
         }
         StatementTimeoutContract timeout = contract.statementTimeout();
@@ -126,6 +186,77 @@ public final class MyBatisDatabasePreflight {
                     "confirmed database/server/role statement_timeout must be positive and <= 30 seconds"
             );
         }
+    }
+
+    private ObjectNode databaseArguments(String connectionId, String databaseName, String schemaName) {
+        ObjectNode arguments = JsonNodeFactory.instance.objectNode();
+        arguments.put("connectionId", connectionId);
+        arguments.put("databaseName", databaseName);
+        arguments.put("schemaName", schemaName);
+        return arguments;
+    }
+
+    private Set<String> safeBaseRelations(
+            JsonNode response,
+            String connectionId,
+            DatabaseContract contract
+    ) {
+        requireMetadataBinding(response, connectionId, contract);
+        if (!"TABLE".equals(response.path("kind").asText())) {
+            throw new IllegalStateException(
+                    "list_schema_objects must explicitly report the exact TABLE object kind"
+            );
+        }
+        JsonNode objects = response.path("objects");
+        if (!objects.isArray() || objects.isEmpty()) {
+            throw new IllegalStateException(
+                    "list_schema_objects must return at least one explicitly classified base TABLE"
+            );
+        }
+        Set<String> relations = new LinkedHashSet<>();
+        for (JsonNode object : objects) {
+            if (!object.isObject() || !"TABLE".equals(object.path("kind").asText())) {
+                throw new IllegalStateException(
+                        "every safe relation must explicitly report kind TABLE"
+                );
+            }
+            String name = requiredText(object, "name", "base table name");
+            if (!isUnquotedIdentifier(name)) {
+                throw new IllegalStateException(
+                        "safe base table names must be plain unquoted identifiers"
+                );
+            }
+            String relation = canonicalRelation(contract.schemaName(), name);
+            if (!relations.add(relation)) {
+                throw new IllegalStateException(
+                        "safe base table inventory contains a duplicate normalized relation: " + relation
+                );
+            }
+        }
+        return Set.copyOf(relations);
+    }
+
+    private void requireMetadataBinding(
+            JsonNode response,
+            String connectionId,
+            DatabaseContract contract
+    ) {
+        if (!response.isObject()
+                || !connectionId.equals(response.path("connectionId").asText())
+                || !contract.databaseName().equals(response.path("databaseName").asText())
+                || !contract.schemaName().equals(response.path("schemaName").asText())) {
+            throw new IllegalStateException(
+                    "schema metadata response does not match the configured schema/database target"
+            );
+        }
+    }
+
+    private static boolean isUnquotedIdentifier(String value) {
+        return value.matches("[A-Za-z_][A-Za-z0-9_]*");
+    }
+
+    static String canonicalRelation(String schemaName, String relationName) {
+        return schemaName.toLowerCase(Locale.ROOT) + "." + relationName.toLowerCase(Locale.ROOT);
     }
 
     private List<JsonNode> connectionMatches(JsonNode response, String connectionName) {
@@ -201,6 +332,8 @@ public final class MyBatisDatabasePreflight {
             String schemaName,
             Environment environment,
             boolean nonOwnerNonAdminReadOnlyAccount,
+            boolean rowLevelSecurityDisabledForSafeBaseTables,
+            boolean userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic,
             StatementTimeoutContract statementTimeout
     ) {
         public DatabaseContract {
@@ -216,7 +349,32 @@ public final class MyBatisDatabasePreflight {
             String connectionId,
             String databaseName,
             String schemaName,
-            String databaseSystem
+            String databaseSystem,
+            Set<String> safeBaseRelations
     ) {
+        public Result {
+            Objects.requireNonNull(connectionId, "connectionId");
+            Objects.requireNonNull(databaseName, "databaseName");
+            Objects.requireNonNull(schemaName, "schemaName");
+            Objects.requireNonNull(databaseSystem, "databaseSystem");
+            Objects.requireNonNull(safeBaseRelations, "safeBaseRelations");
+            Set<String> normalizedRelations = new LinkedHashSet<>();
+            for (String relation : safeBaseRelations) {
+                if (relation == null) {
+                    throw new IllegalArgumentException("safe base relations must be non-null");
+                }
+                String[] parts = relation.split("\\.", -1);
+                if (parts.length != 2
+                        || !isUnquotedIdentifier(parts[0])
+                        || !isUnquotedIdentifier(parts[1])
+                        || !schemaName.equalsIgnoreCase(parts[0])) {
+                    throw new IllegalArgumentException(
+                            "safe base relations must be configured-schema qualified plain identifiers"
+                    );
+                }
+                normalizedRelations.add(canonicalRelation(parts[0], parts[1]));
+            }
+            safeBaseRelations = Set.copyOf(normalizedRelations);
+        }
     }
 }

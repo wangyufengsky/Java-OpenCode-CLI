@@ -1,0 +1,12 @@
+{
+  "connectionId": "gauss-readonly",
+  "databaseName": "orders",
+  "schemaName": "audit",
+  "objectKinds": [
+    {"code": "TABLE", "name": "Table"},
+    {"code": "VIEW", "name": "View"},
+    {"code": "MATERIALIZED_VIEW", "name": "Materialized View"},
+    {"code": "FOREIGN_TABLE", "name": "Foreign Table"},
+    {"code": "UNKNOWN", "name": "Unknown"}
+  ]
+}

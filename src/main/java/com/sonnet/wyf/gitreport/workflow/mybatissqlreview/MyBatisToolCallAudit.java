@@ -92,7 +92,14 @@ public final class MyBatisToolCallAudit {
                     throw violation(call, "execute_sql_query duration exceeds 30000 ms");
                 }
                 queryText = call.arguments().path("queryText").asText("");
-                sqlPolicy.validate(queryText, call.id());
+                sqlPolicy.validate(
+                        queryText,
+                        call.id(),
+                        database.schemaName(),
+                        database.safeBaseRelations()
+                );
+            } else if ("preview_table_data".equals(call.toolName())) {
+                requireSafePreviewRelation(call, database);
             }
 
             JsonNode resultData = call.result().deepCopy();
@@ -123,6 +130,30 @@ public final class MyBatisToolCallAudit {
             ));
         }
         return new Result(facts, statement, database);
+    }
+
+    private void requireSafePreviewRelation(
+            AgentBridgeClient.ToolCallRecord call,
+            MyBatisDatabasePreflight.Result database
+    ) {
+        String tableName = call.arguments().path("tableName").asText("");
+        if (tableName.isBlank()) {
+            throw violation(call, "preview_table_data requires tableName");
+        }
+        if (!tableName.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw violation(
+                    call,
+                    "preview tableName must be a plain relation name in the configured schema"
+            );
+        }
+        String canonicalRelation = MyBatisDatabasePreflight.canonicalRelation(
+                database.schemaName(), tableName);
+        if (!database.safeBaseRelations().contains(canonicalRelation)) {
+            throw violation(
+                    call,
+                    "relation is not an explicitly verified safe base relation: " + canonicalRelation
+            );
+        }
     }
 
     private void requireHistoryIdentity(AgentBridgeClient.ToolCallRecord call) {

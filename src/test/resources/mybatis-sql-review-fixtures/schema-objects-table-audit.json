@@ -1,0 +1,16 @@
+{
+  "connectionId": "gauss-readonly",
+  "databaseName": "orders",
+  "schemaName": "audit",
+  "kind": "TABLE",
+  "objects": [
+    {
+      "name": "orders",
+      "kind": "TABLE"
+    },
+    {
+      "name": "line_items",
+      "kind": "TABLE"
+    }
+  ]
+}

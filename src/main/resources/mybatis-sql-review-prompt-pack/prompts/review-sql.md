@@ -4,7 +4,7 @@ Review one inventory statement using static analysis and tightly bounded read-on
 
 ## Runtime safety prerequisite
 
-The configured database must be a centralized GaussDB read replica or test database. Runtime credentials must belong to a non-owner, non-admin, read-only account. That account is the only hard safety boundary: the prompt and Java audit cannot prove or replace credential privileges. Deployment must satisfy this external contract before the task starts. A confirmed database/server/role statement_timeout greater than zero and no more than 30 seconds is also required before the task starts.
+The configured database must be a centralized GaussDB read replica or test database. Runtime credentials must belong to a non-owner, non-admin, read-only account. Deployment must also explicitly confirm that RLS is disabled for every safe base table and that the audit account cannot execute user-defined and security-definer functions, including PUBLIC grants. A confirmed database/server/role statement_timeout greater than zero and no more than 30 seconds is also required before the task starts. These database-side controls are the only hard safety boundary: the prompt and Java audit cannot prove or replace them, and preflight must fail closed when any confirmation is absent.
 
 Web Access `/tool-calls` review is a post-hoc audit. It is evidence gathering after calls occur, is never permission to execute a statement, and the post-hoc audit cannot prevent or undo an already executed SQL statement. A clean audit does not upgrade database credentials or make an unsafe call safe.
 
@@ -24,13 +24,15 @@ Use no tools except these exact AgentBridge database tools:
 
 Every database call must remain bound to the runtime `connectionId`, `databaseName`, and `schemaName` wherever the tool accepts them. Do not use shell, terminal, file-search, code-execution, or any other MCP tool for database access.
 
+Before agent execution, Java preflight enumerates schema object kinds and objects. It accepts only the exact `TABLE` kind code and retains only objects whose response explicitly reports that same base-table kind. It normalizes those objects into an immutable safe base-relation set for the configured schema; views, materialized views, foreign or external tables, and unknown kinds are never safe relations. The deployed object-kind codes and response shapes must be checked against the exact tested contract as a live release gate; if they cannot prove a base table, preflight fails closed.
+
 This database-tool allowlist is separate from native filesystem writes. Native filesystem writes are allowed only to the three exact absolute paths in the runtime task context. Do not create, modify, rename, or delete any other file.
 
 ## Query rules
 
 You must never execute the original DML or selectKey. Analyze `<insert>`, `<update>`, `<delete>`, and `<selectKey>` statements statically only. Do not treat the post-hoc audit as authorization to run them.
 
-You may use metadata tools and `preview_table_data`. You may make at most 3 `execute_sql_query` calls for representative scenarios. Each query must follow the deliberately small simple-read grammar: `SELECT`, then `*` or comma-separated plain column references, then `FROM` and one plain table reference, an optional `AS` table alias, a required integer-literal `LIMIT` from 1 through 20, and an optional non-negative integer-literal `OFFSET`. Plain columns and tables may have one unquoted qualifier. Each call must complete within 30 seconds. Retain at most 20 rows per preview or scenario.
+You may use metadata tools and `preview_table_data`. You may make at most 3 `execute_sql_query` calls for representative scenarios. Each query must follow the deliberately small simple-read grammar: `SELECT`, then `*` or comma-separated plain column references, then `FROM` and one plain table reference, an optional `AS` table alias, a required integer-literal `LIMIT` from 1 through 20, and an optional non-negative integer-literal `OFFSET`. Plain columns and tables may have one unquoted qualifier. An unqualified `FROM` relation resolves only against the configured schema; a qualified relation must name that exact schema. The resolved relation must exist in the immutable safe base-relation set. `preview_table_data.tableName` must likewise be a plain name in that same set. Missing, other-schema, view, materialized-view, foreign/external, or unknown relations are rejected. Each call must complete within 30 seconds. Retain at most 20 rows per preview or scenario.
 
 No expression grammar is available. WITH, WHERE, functions, casts, and operators are forbidden, including `CAST`, `::`, `OPERATOR(...)`, built-in-looking operators on custom types, literals in the projection, joins, subqueries, quoted identifiers, and all other clauses or symbols. Also forbidden are multiple statements or semicolons, DML/DDL, COPY, CALL, SELECT INTO, locks, sequence syntax, dollar-quoted strings, E/B/X/N/U& string forms, nested comments, unsupported quoting, and unresolved or ambiguous syntax.
 
