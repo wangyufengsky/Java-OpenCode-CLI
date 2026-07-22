@@ -248,14 +248,19 @@ class MyBatisSqlReviewWorkflowChainTest {
 
                 [local](local.md)
                 [reference][local-reference]
+                [multiline-reference][local-multiline-reference]
 
                 [local-reference]: local.md
+                [local-multiline-reference]:
+                  local.md
 
                 ```sql
                 SELECT '[not-a-link](https://sql.example)' AS value;
                 SELECT '<https://sql.example>' AS value;
                 SELECT '<table>' AS value;
                 [external-reference]: https://sql.example
+                [external-multiline-reference]:
+                  https://sql.example
                 ```
                 """);
         assertThatCode(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
@@ -266,6 +271,10 @@ class MyBatisSqlReviewWorkflowChainTest {
                 .hasMessageContaining("external");
 
         Files.writeString(root.resolve("report.md"), "[external][remote]\n\n[remote]: https://evil.example\n");
+        assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .hasMessageContaining("external reference definition");
+
+        Files.writeString(root.resolve("report.md"), "[remote]:\n  https://evil.example\n");
         assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
                 .hasMessageContaining("external reference definition");
 

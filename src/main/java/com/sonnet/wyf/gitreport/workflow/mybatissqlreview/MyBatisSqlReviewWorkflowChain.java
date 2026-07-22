@@ -29,7 +29,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     public static final String ID = "mybatis-sql-review";
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[(?:\\\\.|[^]])*]\\(([^)]+)\\)");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
-            "(?m)^[\\t ]{0,3}\\[[^]\\r\\n]+]:[\\t ]*(?:<([^>\\r\\n]+)>|(\\S+))"
+            "(?m)^[\\t ]{0,3}\\[[^]\\r\\n]+]:"
+                    + "(?:[\\t ]*(?:\\r\\n|\\n|\\r)[\\t ]{0,3}|[\\t ]*)"
+                    + "(?:<([^>\\r\\n]+)>|(\\S+))"
     );
     private static final Pattern EXTERNAL_SCHEME = Pattern.compile("(?i)^[a-z][a-z0-9+.-]*:");
     private static final Pattern AUTOLINK = Pattern.compile("(?i)<(?:https?|mailto):[^>]+>");
