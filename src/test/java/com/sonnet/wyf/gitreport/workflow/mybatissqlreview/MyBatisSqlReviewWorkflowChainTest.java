@@ -240,12 +240,13 @@ class MyBatisSqlReviewWorkflowChainTest {
         JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
         String mapperKey = publishedInventory.at("/mappers/0/mapper_key").asText();
         Path mapperIndex = stableOut.resolve("reports").resolve(mapperKey).resolve("index.md");
+        assertThat(mapperIndex.toFile().setWritable(true, true)).isTrue();
         Files.writeString(mapperIndex, "[escape](../../../../outside.md)\n");
         int beforeToolChecks = client.listToolsUris.size();
         client.missingRequiredTool = true;
 
         assertThatThrownBy(() -> chain.run(request("rerun", "index", "", "run-index-damaged")))
-                .hasMessageContaining("invalid relative links");
+                .hasMessageContaining("digest mismatch");
         assertThat(client.listToolsUris).hasSize(beforeToolChecks);
     }
 
@@ -254,12 +255,14 @@ class MyBatisSqlReviewWorkflowChainTest {
         chain.run(request("full", "", "", "run-original"));
         JsonNode publishedInventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
         String reportDirectory = publishedInventory.at("/statements/0/report_directory").asText();
-        Files.writeString(stableOut.resolve(reportDirectory).resolve("database-evidence.json"), "{}");
+        Path evidence = stableOut.resolve(reportDirectory).resolve("database-evidence.json");
+        assertThat(evidence.toFile().setWritable(true, true)).isTrue();
+        Files.writeString(evidence, "{}");
         int beforeToolChecks = client.listToolsUris.size();
         client.missingRequiredTool = true;
 
         assertThatThrownBy(() -> chain.run(request("rerun", "index", "", "run-index-evidence-damaged")))
-                .hasMessageContaining("database evidence");
+                .hasMessageContaining("digest mismatch");
         assertThat(client.listToolsUris).hasSize(beforeToolChecks);
     }
 
@@ -497,7 +500,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                   connection-name: Gauss Review
                   database-name: orders
                   schema-name: audit
-                  environment: test
+                  environment: read-replica
                   non-owner-non-admin-read-only-account: true
                   row-level-security-disabled-for-safe-base-tables: true
                   user-defined-and-security-definer-function-execution-revoked-including-public: true
@@ -538,6 +541,11 @@ class MyBatisSqlReviewWorkflowChainTest {
         private RecordingAgentBridgeClient(ObjectMapper objectMapper) {
             super(objectMapper);
             this.objectMapper = objectMapper;
+        }
+
+        @Override
+        public void requireMyBatisSqlReviewCapabilities(URI ignored) {
+            // The fixture exposes the strict capability/tool contract directly.
         }
 
         @Override
@@ -626,8 +634,10 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("name", "Gauss Review")
                     .put("databaseSystem", "GaussDB")
                     .put("deployment", "centralized")
-                    .put("environment", "test")
+                    .put("environment", "read-replica")
                     .put("environmentSource", "managed-connection-metadata")
+                    .put("topologyRole", "physical-standby")
+                    .put("topologySource", "server-observed")
                     .put("readOnly", true);
             connection.putArray("databases").add("orders");
             return response;
@@ -671,16 +681,23 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("databaseOwner", false)
                     .put("schemaOwner", false)
                     .put("ownedBaseTableCount", 0)
+                    .put("databaseCreate", false)
+                    .put("databaseTemporary", false)
+                    .put("schemaCreate", false)
+                    .put("dangerousAnyPrivilege", false)
                     .put("sessionReadOnly", true)
                     .put("transactionReadOnly", true)
                     .put("unsafeTablePrivilegeCount", 0)
+                    .put("unsafeColumnPrivilegeCount", 0)
+                    .put("unsafeSequencePrivilegeCount", 0)
                     .put("rlsEnabledBaseTableCount", 0)
                     .put("forceRlsEnabledBaseTableCount", 0)
                     .put("executableFunctionCount", 0)
+                    .put("executablePackageCount", 0)
                     .put("statementTimeoutMs", 12_000)
                     .put("baseTableNames", "orders")
                     .put("baseTableCount", 1)
-                    .put("readReplica", false);
+                    .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
             row.fieldNames().forEachRemaining(result.putArray("columns")::add);
             result.putArray("rows").add(row);

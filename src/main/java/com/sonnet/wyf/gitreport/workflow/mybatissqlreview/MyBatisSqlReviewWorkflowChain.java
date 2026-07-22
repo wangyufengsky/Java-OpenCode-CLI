@@ -107,7 +107,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     inventory = publishedInventory(activeWorkspace);
                     String rerunType = normalizeRerunType(request.rerunType());
                     validateSourceContract(
-                            activeWorkspace.bundleRoot(), configuration, !"index".equals(rerunType)
+                            activeWorkspace.bundleRoot(), configuration, inventory, !"index".equals(rerunType)
                     );
                     if ("sql".equals(rerunType) || "xml".equals(rerunType)) {
                         MyBatisSqlInventory rescanned = buildTargetedRerunInventory(configuration);
@@ -117,7 +117,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 } else {
                     inventory = buildInventory(configuration);
                     reportRenderer.writeInventorySnapshot(activeWorkspace.bundleRoot(), inventory);
-                    writeSourceContract(activeWorkspace.bundleRoot(), configuration);
+                    initializeJavaFile(activeWorkspace.bundleRoot().resolve(SOURCE_CONTRACT));
                 }
                 List<MyBatisSqlStatement> selected = selectTasks(mode, request, inventory);
                 List<MyBatisSqlReviewTaskRunner.PreparedTask> prepared = new ArrayList<>();
@@ -134,7 +134,15 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                         prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
                     }
                 }
+                MyBatisSqlReportRenderer.Project project = new MyBatisSqlReportRenderer.Project(
+                        configuration.getProject().getId(),
+                        configuration.getProject().getName(),
+                        configuration.getProject().getRepo()
+                );
+                MyBatisSqlInventory renderingInventory = inventory;
+                boolean renderedUnderGuard = false;
                 if (!prepared.isEmpty()) {
+                    List<Path> renderFiles = prepareRenderFiles(activeWorkspace.bundleRoot(), inventory);
                     Path repository = configuration.getProject().getRepo().toAbsolutePath().normalize();
                     List<Path> mapperFiles = inventory.mappers().stream()
                             .map(mapper -> repository.resolve(mapper.mapperRelativePath()).normalize())
@@ -160,21 +168,40 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                         for (MyBatisSqlReviewTaskRunner.PreparedTask task : prepared) {
                             taskRunner.runPrepared(activeWorkspace, task, guard);
                         }
+                        guard.withJavaWrites(renderFiles, () -> {
+                            reportRenderer.render(activeWorkspace.bundleRoot(), project, renderingInventory);
+                            writeSourceContract(
+                                    activeWorkspace.bundleRoot(), configuration, renderingInventory
+                            );
+                            return null;
+                        });
+                        validateSourceContract(
+                                activeWorkspace.bundleRoot(), configuration, inventory, true
+                        );
+                        validateCompleteBundle(activeWorkspace.bundleRoot(), inventory);
+                        requireSameInventory(
+                                inventory,
+                                buildInventory(configuration),
+                                "inventory changed before protected rendering completed"
+                        );
+                        renderedUnderGuard = true;
                     }
                 }
-                reportRenderer.render(
-                        activeWorkspace.bundleRoot(),
-                        new MyBatisSqlReportRenderer.Project(
-                                configuration.getProject().getId(),
-                                configuration.getProject().getName(),
-                                configuration.getProject().getRepo()
-                        ),
-                        inventory
-                );
-                validateSourceContract(
-                        activeWorkspace.bundleRoot(), configuration, !indexRerun
-                );
-                validateCompleteBundle(activeWorkspace.bundleRoot(), inventory);
+                if (!renderedUnderGuard) {
+                    reportRenderer.render(activeWorkspace.bundleRoot(), project, inventory);
+                    writeSourceContract(activeWorkspace.bundleRoot(), configuration, inventory);
+                    validateSourceContract(
+                            activeWorkspace.bundleRoot(), configuration, inventory, !indexRerun
+                    );
+                    validateCompleteBundle(activeWorkspace.bundleRoot(), inventory);
+                }
+                if (!indexRerun) {
+                    requireSameInventory(
+                            inventory,
+                            buildInventory(configuration),
+                            "inventory changed immediately before publication"
+                    );
+                }
                 activeWorkspace.publish(MyBatisSqlReportRenderer.MAIN_REPORT);
             }
         } catch (Exception exception) {
@@ -206,6 +233,43 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         );
     }
 
+    private List<Path> prepareRenderFiles(Path bundleRoot, MyBatisSqlInventory inventory) throws Exception {
+        Path root = bundleRoot.toAbsolutePath().normalize();
+        List<Path> paths = new ArrayList<>(List.of(
+                root.resolve(MyBatisSqlReportRenderer.INVENTORY),
+                root.resolve(MyBatisSqlReportRenderer.TASKS),
+                root.resolve(MyBatisSqlReportRenderer.TRACEABILITY),
+                root.resolve(MyBatisSqlReportRenderer.DATA_QUALITY),
+                root.resolve(MyBatisSqlReportRenderer.MAIN_REPORT),
+                root.resolve(SOURCE_CONTRACT)
+        ));
+        for (MyBatisMapperInventory mapper : inventory.mappers()) {
+            paths.add(root.resolve("reports").resolve(mapper.mapperKey()).resolve("index.md"));
+        }
+        for (Path path : paths) {
+            Files.createDirectories(path.getParent());
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createFile(path);
+            }
+            if (Files.isSymbolicLink(path)
+                    || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException("render output path is unsafe: " + path);
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    private static void initializeJavaFile(Path path) throws Exception {
+        Files.createDirectories(path.toAbsolutePath().normalize().getParent());
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            Files.createFile(path);
+        }
+        if (Files.isSymbolicLink(path)
+                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("Java-managed output path is unsafe: " + path);
+        }
+    }
+
     private MyBatisSqlInventory buildTargetedRerunInventory(Configuration configuration) {
         try {
             return buildInventory(configuration);
@@ -227,7 +291,11 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         }
     }
 
-    private void writeSourceContract(Path bundleRoot, Configuration configuration) throws Exception {
+    private void writeSourceContract(
+            Path bundleRoot,
+            Configuration configuration,
+            MyBatisSqlInventory inventorySnapshot
+    ) throws Exception {
         Path inventory = bundleRoot.resolve(MyBatisSqlReportRenderer.INVENTORY);
         ObjectNode contract = objectMapper.createObjectNode();
         contract.put("schema_version", "mybatis-sql-review-source-contract/v1");
@@ -235,6 +303,10 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         contract.putPOJO("include", configuration.getSource().getInclude());
         contract.putPOJO("exclude", configuration.getSource().getExclude());
         contract.put("inventory_sha256", sha256(inventory));
+        ObjectNode artifactHashes = contract.putObject("artifact_sha256");
+        for (String relative : sourceBoundArtifacts(inventorySnapshot)) {
+            artifactHashes.put(relative, sha256(bundleRoot.resolve(relative)));
+        }
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(
                 bundleRoot.resolve(SOURCE_CONTRACT).toFile(), contract
         );
@@ -243,6 +315,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     private void validateSourceContract(
             Path bundleRoot,
             Configuration configuration,
+            MyBatisSqlInventory inventorySnapshot,
             boolean requireCurrentConfiguration
     ) throws Exception {
         Path contractPath = bundleRoot.resolve(SOURCE_CONTRACT).toAbsolutePath().normalize();
@@ -259,7 +332,8 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         Set<String> fields = new LinkedHashSet<>();
         contract.fieldNames().forEachRemaining(fields::add);
         Set<String> expectedFields = Set.of(
-                "schema_version", "repository_real_path", "include", "exclude", "inventory_sha256"
+                "schema_version", "repository_real_path", "include", "exclude", "inventory_sha256",
+                "artifact_sha256"
         );
         if (!expectedFields.equals(fields)
                 || !"mybatis-sql-review-source-contract/v1".equals(
@@ -274,6 +348,25 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     "published SQL inventory integrity does not match its source contract; run a full rerun"
             );
         }
+        JsonNode artifactHashes = contract.path("artifact_sha256");
+        Set<String> expectedArtifacts = sourceBoundArtifacts(inventorySnapshot);
+        Set<String> declaredArtifacts = new LinkedHashSet<>();
+        artifactHashes.fieldNames().forEachRemaining(declaredArtifacts::add);
+        if (!artifactHashes.isObject() || !expectedArtifacts.equals(declaredArtifacts)) {
+            throw new IllegalStateException(
+                    "published detail artifact integrity contract is invalid; run a full rerun"
+            );
+        }
+        for (String relative : expectedArtifacts) {
+            String expectedHash = artifactHashes.path(relative).asText("");
+            if (!expectedHash.matches("[0-9a-f]{64}")
+                    || !expectedHash.equals(sha256(bundleRoot.resolve(relative)))) {
+                throw new IllegalStateException(
+                        "published detail artifact integrity mismatch for " + relative
+                                + "; run a full rerun"
+                );
+            }
+        }
         if (requireCurrentConfiguration
                 && (!repositoryRealPath(configuration).equals(
                 contract.path("repository_real_path").asText())
@@ -283,6 +376,21 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     "targeted rerun source root/include/exclude changed; run a full rerun"
             );
         }
+    }
+
+    private Set<String> sourceBoundArtifacts(MyBatisSqlInventory inventory) {
+        Set<String> paths = new LinkedHashSet<>();
+        for (MyBatisMapperInventory mapper : inventory.mappers()) {
+            paths.add("reports/" + mapper.mapperKey() + "/index.md");
+        }
+        for (MyBatisSqlStatement statement : inventory.statements()) {
+            String base = "reports/" + statement.mapperKey() + "/sql/"
+                    + statement.statementKey() + "/";
+            paths.add(base + "report.md");
+            paths.add(base + "summary.json");
+            paths.add(base + "database-evidence.json");
+        }
+        return Set.copyOf(paths);
     }
 
     private List<String> textArray(JsonNode node) {

@@ -170,12 +170,9 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void cachesRunProtectionOnceAcrossMultipleSqlTasksWithoutTraversingExcludedTrees() throws Exception {
+    void cachesRunProtectionOnceAndIncludesGitBuildAndHistoricalTrees() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
-        Files.setPosixFilePermissions(layout.gitDirectory(), permissions("---------"));
-        Files.setPosixFilePermissions(layout.buildDirectory(), permissions("---------"));
-        Files.setPosixFilePermissions(layout.historicalRun(), permissions("---------"));
         RecordingProtectionObserver observer = new RecordingProtectionObserver();
         Set<PosixFilePermission> mapperOnePermissions = Files.getPosixFilePermissions(layout.mapperOne());
         Set<PosixFilePermission> mapperTwoPermissions = Files.getPosixFilePermissions(layout.mapperTwo());
@@ -204,9 +201,9 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThat(observer.permissionChanges()).containsEntry(layout.mapperOne(), 1)
                 .containsEntry(layout.mapperTwo(), 1)
                 .containsEntry(layout.stableArtifact(), 1);
-        assertThat(observer.observedPaths()).noneMatch(path -> path.startsWith(layout.gitDirectory()))
-                .noneMatch(path -> path.startsWith(layout.buildDirectory()))
-                .noneMatch(path -> path.startsWith(layout.historicalRun()));
+        assertThat(observer.observedPaths()).anyMatch(path -> path.startsWith(layout.gitDirectory()))
+                .anyMatch(path -> path.startsWith(layout.buildDirectory()))
+                .anyMatch(path -> path.startsWith(layout.historicalRun()));
         assertThat(Files.getPosixFilePermissions(layout.mapperOne())).isEqualTo(mapperOnePermissions);
         assertThat(Files.getPosixFilePermissions(layout.mapperTwo())).isEqualTo(mapperTwoPermissions);
         assertThat(Files.getPosixFilePermissions(layout.stableArtifact())).isEqualTo(stableArtifactPermissions);
@@ -312,6 +309,51 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThatCode(() -> MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(
                 layout.candidateOne().getParent(), layout.candidateOne()
         )).doesNotThrowAnyException();
+    }
+
+    @Test
+    void restoresAnIntermediateDirectorySymlinkWithoutTouchingExternalPermissionsOrContent() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        Path external = Files.createDirectories(tempDir.resolve("external-tree"));
+        Path externalFile = external.resolve("outside.txt");
+        Files.writeString(externalFile, "outside remains unchanged");
+        Set<PosixFilePermission> externalPermissions = permissions("r-x------");
+        Set<PosixFilePermission> externalFilePermissions = permissions("r--------");
+        Files.setPosixFilePermissions(external, externalPermissions);
+        Files.setPosixFilePermissions(externalFile, externalFilePermissions);
+        Path javaRoot = layout.repository().resolve("src/main/java");
+        byte[] javaBefore = Files.readAllBytes(layout.javaSource());
+
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper,
+                layout.repository(),
+                layout.stableRoot(),
+                layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        );
+
+        assertThatThrownBy(() -> {
+            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
+                makeWritable(javaRoot.getParent());
+                makeWritable(javaRoot);
+                makeWritable(layout.javaSource().getParent());
+                makeWritable(layout.javaSource());
+                Files.delete(layout.javaSource());
+                Files.delete(layout.javaSource().getParent());
+                Files.delete(javaRoot);
+                Files.createSymbolicLink(javaRoot, external);
+            }
+        }).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected repository");
+        guard.close();
+
+        assertThat(javaRoot).isDirectory();
+        assertThat(layout.javaSource()).hasBinaryContent(javaBefore);
+        assertThat(externalFile).hasContent("outside remains unchanged");
+        assertThat(Files.getPosixFilePermissions(external)).isEqualTo(externalPermissions);
+        assertThat(Files.getPosixFilePermissions(externalFile)).isEqualTo(externalFilePermissions);
     }
 
     private Layout layout(boolean outputInsideRepository) throws Exception {

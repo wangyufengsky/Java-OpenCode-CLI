@@ -14,19 +14,25 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.LinkOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 public final class MyBatisSqlReviewTaskRunner {
+    static final long MAX_CANDIDATE_FILE_BYTES = 1_048_576L;
+    static final long MAX_CANDIDATE_TOTAL_BYTES = 2_359_296L;
     private static final List<String> CANDIDATE_ARTIFACTS = List.of(
             "report.md", "summary.json", "database-evidence.json"
     );
@@ -110,6 +116,11 @@ public final class MyBatisSqlReviewTaskRunner {
         writeStatus(layout, statement, "QUEUED", "created", "");
         Path bundleDirectory = MyBatisSqlReportRenderer.statementDirectory(workspace.bundleRoot(), statement);
         Files.createDirectories(bundleDirectory);
+        initializeJavaFile(layout.root().resolve("tool-call-boundary.json"));
+        initializeJavaFile(layout.validation());
+        for (String artifact : CANDIDATE_ARTIFACTS) {
+            initializeJavaFile(bundleDirectory.resolve(artifact));
+        }
         return new PreparedTask(statement, database, settings, layout, commandType, prompt,
                 "MyBatis SQL review: " + statement.statementKey(), bundleDirectory);
     }
@@ -156,7 +167,9 @@ public final class MyBatisSqlReviewTaskRunner {
                 MyBatisToolCallAudit.Boundary boundary = new MyBatisToolCallAudit.Boundary(
                         startedAt, preexistingIds
                 );
-                guard.withJavaWrites(List.of(layout.root()), () -> {
+                guard.withJavaWrites(List.of(
+                        layout.root().resolve("tool-call-boundary.json"), layout.status()
+                ), () -> {
                     writeBoundary(layout, boundary);
                     writeStatus(layout, statement, "RUNNING", "submitted", "");
                     return null;
@@ -198,11 +211,38 @@ public final class MyBatisSqlReviewTaskRunner {
                         database,
                         audit
                 );
+                CandidateSnapshot candidateSnapshot = captureCandidate(layout.candidate());
                 Path publishedDirectory = guard.withJavaWrites(
-                        List.of(layout.root(), prepared.bundleDirectory()),
+                        List.of(
+                                layout.validation(), layout.status(),
+                                prepared.bundleDirectory().resolve("report.md"),
+                                prepared.bundleDirectory().resolve("summary.json"),
+                                prepared.bundleDirectory().resolve("database-evidence.json")
+                        ),
                         () -> {
                             writeValidation(layout, validation);
-                            Path published = publishCandidateToBundle(workspace, layout, statement);
+                            Path published = publishCandidateToBundle(
+                                    workspace, layout, statement, candidateSnapshot
+                            );
+                            MyBatisSqlOutputValidator.Result copiedValidation = outputValidator.validate(
+                                    published,
+                                    new MyBatisSqlOutputValidator.ExpectedTaskContext(
+                                            statement.statementKey(),
+                                            statement.mapperRelativePath(),
+                                            statement.namespace(),
+                                            statement.id(),
+                                            commandType,
+                                            statement.selectKey()
+                                    ),
+                                    database,
+                                    audit
+                            );
+                            if (!validation.equals(copiedValidation)) {
+                                throw new IllegalStateException(
+                                        "bundle validation changed after candidate copy: "
+                                                + statement.statementKey()
+                                );
+                            }
                             writeStatus(layout, statement, "SUCCEEDED", "completed_by_output", "");
                             return published;
                         }
@@ -218,7 +258,7 @@ public final class MyBatisSqlReviewTaskRunner {
             } catch (Exception exception) {
                 String error = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
                 try {
-                    guard.withJavaWrites(List.of(layout.root()), () -> {
+                    guard.withJavaWrites(List.of(layout.status()), () -> {
                         writeStatus(layout, statement, "FAILED", "validation_failed_final", error);
                         return null;
                     });
@@ -322,30 +362,144 @@ public final class MyBatisSqlReviewTaskRunner {
     private Path publishCandidateToBundle(
             WorkflowArtifactWorkspace workspace,
             TaskArtifactLayout layout,
-            MyBatisSqlStatement statement
+            MyBatisSqlStatement statement,
+            CandidateSnapshot snapshot
     ) throws IOException {
         Path target = MyBatisSqlReportRenderer.statementDirectory(workspace.bundleRoot(), statement);
-        if (Files.exists(target)) {
-            try (var paths = Files.walk(target)) {
-                for (Path path : paths
-                        .filter(path -> !path.equals(target))
-                        .sorted((left, right) -> right.compareTo(left))
-                        .toList()) {
-                    Files.delete(path);
-                }
-            }
-        } else {
-            Files.createDirectories(target);
-        }
+        copyCandidateSnapshot(layout.candidate(), target, snapshot);
+        return target;
+    }
+
+    static void copyCandidateSnapshot(
+            Path candidate,
+            Path target,
+            CandidateSnapshot snapshot
+    ) throws IOException {
+        requireExactTargetTree(target);
         for (String artifact : CANDIDATE_ARTIFACTS) {
-            Path source = layout.candidate().resolve(artifact);
+            Path source = candidate.resolve(artifact);
+            Path destination = target.resolve(artifact);
+            CandidateFile expected = snapshot.files().get(artifact);
+            MessageDigest digest = sha256Digest();
+            long copied = 0;
             try (var input = Files.newInputStream(
                     source, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+            ); var output = Files.newOutputStream(
+                    destination,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    LinkOption.NOFOLLOW_LINKS
             )) {
-                Files.copy(input, target.resolve(artifact), StandardCopyOption.REPLACE_EXISTING);
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) {
+                        copied += read;
+                        if (copied > expected.size()) {
+                            throw new IllegalStateException(
+                                    "candidate changed while copying: " + artifact
+                            );
+                        }
+                        digest.update(buffer, 0, read);
+                        output.write(buffer, 0, read);
+                    }
+                }
+            }
+            String copiedDigest = HexFormat.of().formatHex(digest.digest());
+            if (copied != expected.size() || !copiedDigest.equals(expected.sha256())) {
+                throw new IllegalStateException("candidate changed after validation: " + artifact);
             }
         }
-        return target;
+    }
+
+    static CandidateSnapshot captureCandidate(Path candidate) throws IOException {
+        MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(candidate.getParent(), candidate);
+        Map<String, CandidateFile> files = new LinkedHashMap<>();
+        long total = 0;
+        for (String artifact : CANDIDATE_ARTIFACTS) {
+            Path path = candidate.resolve(artifact);
+            BasicFileAttributes before = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            if (!before.isRegularFile() || before.isSymbolicLink()
+                    || before.size() > MAX_CANDIDATE_FILE_BYTES) {
+                throw new IllegalStateException(
+                        "candidate artifact exceeds safe regular-file limit: " + artifact
+                );
+            }
+            MessageDigest digest = sha256Digest();
+            long size = 0;
+            try (var input = Files.newInputStream(
+                    path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+            )) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) {
+                        size += read;
+                        if (size > MAX_CANDIDATE_FILE_BYTES) {
+                            throw new IllegalStateException(
+                                    "candidate artifact exceeds safe size limit: " + artifact
+                            );
+                        }
+                        digest.update(buffer, 0, read);
+                    }
+                }
+            }
+            BasicFileAttributes after = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            if (!after.isRegularFile()
+                    || !Objects.equals(before.fileKey(), after.fileKey())
+                    || !before.lastModifiedTime().equals(after.lastModifiedTime())
+                    || before.size() != after.size()
+                    || size != after.size()) {
+                throw new IllegalStateException("candidate changed while capturing: " + artifact);
+            }
+            total += size;
+            if (total > MAX_CANDIDATE_TOTAL_BYTES) {
+                throw new IllegalStateException("candidate artifacts exceed total safe size limit");
+            }
+            files.put(artifact, new CandidateFile(size, HexFormat.of().formatHex(digest.digest())));
+        }
+        return new CandidateSnapshot(Map.copyOf(files), total);
+    }
+
+    private static void requireExactTargetTree(Path target) throws IOException {
+        if (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("bundle target is missing or unsafe: " + target);
+        }
+        Set<String> actual = new LinkedHashSet<>();
+        try (var entries = Files.list(target)) {
+            for (Path entry : entries.toList()) {
+                actual.add(entry.getFileName().toString());
+                if (Files.isSymbolicLink(entry)
+                        || !Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalStateException("bundle target contains unsafe artifact: " + entry);
+                }
+            }
+        }
+        if (!actual.equals(Set.copyOf(CANDIDATE_ARTIFACTS))) {
+            throw new IllegalStateException("bundle target tree changed before copy: " + actual);
+        }
+    }
+
+    private static void initializeJavaFile(Path path) throws IOException {
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException("Java-managed output path is unsafe: " + path);
+            }
+            return;
+        }
+        Files.createFile(path);
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
     }
 
     private void settle(int seconds) throws InterruptedException {
@@ -371,5 +525,14 @@ public final class MyBatisSqlReviewTaskRunner {
             Path bundleDirectory,
             MyBatisSqlOutputValidator.Result validation
     ) {
+    }
+
+    record CandidateSnapshot(Map<String, CandidateFile> files, long totalBytes) {
+        CandidateSnapshot {
+            files = Map.copyOf(files);
+        }
+    }
+
+    record CandidateFile(long size, String sha256) {
     }
 }
