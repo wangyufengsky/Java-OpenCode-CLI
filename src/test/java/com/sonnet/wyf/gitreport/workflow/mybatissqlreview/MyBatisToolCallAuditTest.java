@@ -124,6 +124,32 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
+    void rejectsHistoryFromAnotherBridgePolicyDatabaseOrTopology() {
+        AgentBridgeClient.ToolCallRecord valid = sqlCall(
+                "bound", "SELECT id FROM orders LIMIT 1", 1);
+        assertThatThrownBy(() -> audit.audit(
+                List.of(withBinding(valid, "other-instance", valid.policyFingerprint(),
+                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
+                        valid.topologyFingerprint())),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("AgentBridge identity");
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(withBinding(valid, valid.bridgeInstanceId(), "sha256:" + "e".repeat(64),
+                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
+                        valid.topologyFingerprint())),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("policy fingerprint");
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(withBinding(valid, valid.bridgeInstanceId(), valid.policyFingerprint(),
+                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
+                        "sha256:" + "f".repeat(64))),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("host/instance/topology fingerprint");
+    }
+
+    @Test
     void acceptsBoundMetadataPreviewAndThreeReadOnlyScenarios() {
         List<AgentBridgeClient.ToolCallRecord> calls = List.of(
                 call("call-1", "list_schema_objects", databaseArguments(), objectMapper.createObjectNode()),
@@ -453,9 +479,33 @@ class MyBatisToolCallAuditTest {
             Instant timestamp,
             Long durationMs
     ) {
+        AgentBridgeClient.MyBatisAuditBinding binding = database.bridgeBinding();
+        MyBatisDatabasePreflight.DatabaseFingerprints fingerprints = database.databaseFingerprints();
         return new AgentBridgeClient.ToolCallRecord(
                 id, name, name, "mcp", "completed", timestamp,
-                arguments, result, durationMs, objectMapper.createObjectNode());
+                arguments, result, durationMs, objectMapper.createObjectNode(),
+                binding.identity().instanceId(),
+                binding.identity().projectId(),
+                binding.identity().instanceNonce(),
+                binding.policyFingerprint(),
+                fingerprints.hostFingerprint(),
+                fingerprints.instanceFingerprint(),
+                fingerprints.topologyFingerprint());
+    }
+
+    private AgentBridgeClient.ToolCallRecord withBinding(
+            AgentBridgeClient.ToolCallRecord source,
+            String instanceId,
+            String policyFingerprint,
+            String hostFingerprint,
+            String instanceFingerprint,
+            String topologyFingerprint
+    ) {
+        return new AgentBridgeClient.ToolCallRecord(
+                source.id(), source.title(), source.toolName(), source.kind(), source.status(),
+                source.timestamp(), source.arguments(), source.result(), source.durationMs(), source.hooks(),
+                instanceId, source.bridgeProjectId(), source.bridgeInstanceNonce(), policyFingerprint,
+                hostFingerprint, instanceFingerprint, topologyFingerprint);
     }
 
     private ObjectNode databaseArguments() {

@@ -57,7 +57,7 @@ public final class MyBatisToolCallAudit {
         Set<String> observedPreexistingIds = new HashSet<>();
         List<AgentBridgeClient.ToolCallRecord> newCalls = new ArrayList<>();
         for (AgentBridgeClient.ToolCallRecord call : history) {
-            requireHistoryIdentity(call);
+            requireHistoryIdentity(call, database);
             if (!historyIds.add(call.id())) {
                 throw violation(call, "duplicate tool-call id");
             }
@@ -188,9 +188,26 @@ public final class MyBatisToolCallAudit {
         }
     }
 
-    private void requireHistoryIdentity(AgentBridgeClient.ToolCallRecord call) {
+    private void requireHistoryIdentity(
+            AgentBridgeClient.ToolCallRecord call,
+            MyBatisDatabasePreflight.Result database
+    ) {
         if (call == null || call.id() == null || call.id().isBlank() || call.timestamp() == null) {
             throw new IllegalStateException("tool-call history contains a call with missing id or timestamp");
+        }
+        AgentBridgeClient.MyBatisAuditBinding binding = database.bridgeBinding();
+        MyBatisDatabasePreflight.DatabaseFingerprints fingerprints = database.databaseFingerprints();
+        AgentBridgeClient.BridgeIdentity identity = binding.identity();
+        if (!identity.instanceId().equals(call.bridgeInstanceId())
+                || !identity.projectId().equals(call.bridgeProjectId())
+                || !identity.instanceNonce().equals(call.bridgeInstanceNonce())
+                || !binding.policyFingerprint().equals(call.policyFingerprint())) {
+            throw violation(call, "tool-call history AgentBridge identity or policy fingerprint mismatch");
+        }
+        if (!fingerprints.hostFingerprint().equals(call.databaseHostFingerprint())
+                || !fingerprints.instanceFingerprint().equals(call.databaseInstanceFingerprint())
+                || !fingerprints.topologyFingerprint().equals(call.topologyFingerprint())) {
+            throw violation(call, "tool-call history database host/instance/topology fingerprint mismatch");
         }
     }
 

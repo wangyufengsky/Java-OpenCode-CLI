@@ -76,7 +76,9 @@ class MyBatisDatabasePreflightTest {
         assertThat(probeArguments.path("databaseName").asText()).isEqualTo("orders");
         assertThat(probeArguments.path("schemaName").asText()).isEqualTo("audit");
         assertThat(probeArguments.path("queryText").asText())
-                .contains("mybatis-sql-review-db-safety-v1")
+                .contains("mybatis-sql-review-db-safety-v2")
+                .contains("audited_schemas")
+                .contains("n.nspname NOT LIKE 'pg_%'")
                 .contains("pg_is_in_recovery()")
                 .contains("has_database_privilege")
                 .contains("has_schema_privilege")
@@ -85,8 +87,37 @@ class MyBatisDatabasePreflightTest {
                 .contains("has_sequence_privilege")
                 .contains("role_tab_privs")
                 .contains("gs_package")
+                .contains("pg_foreign_server")
+                .contains("pg_directory")
                 .doesNotContain("Gauss Review");
         assertThat(bridge.toolCallHistoryRequested).isTrue();
+    }
+
+    @Test
+    void rechecksTheSameBridgeDatabaseTopologyAndPhysicalStandbyBeforeEachTask() throws Exception {
+        FakeDatabaseBridge bridge = startBridge(
+                fixture("connections-centralized.json"),
+                fixture("schemas-orders.json"),
+                true,
+                MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS
+        );
+        MyBatisDatabasePreflight preflight =
+                new MyBatisDatabasePreflight(new AgentBridgeClient(objectMapper));
+        MyBatisDatabasePreflight.Result result =
+                preflight.verify(bridge.mcpUri(), bridge.webUri(), contract());
+
+        preflight.recheck(bridge.mcpUri(), bridge.webUri(), result);
+        assertThat(bridge.calledTools).contains("list_database_connections", "test_database_connection");
+
+        ObjectNode changedTopology = withEnvironmentEvidence(
+                fixture("connections-centralized.json"));
+        ((ObjectNode) changedTopology.at("/connections/0"))
+                .put("topologyRole", "primary")
+                .put("topologyFingerprint", "sha256:" + "e".repeat(64));
+        bridge.connections = changedTopology;
+
+        assertThatThrownBy(() -> preflight.recheck(bridge.mcpUri(), bridge.webUri(), result))
+                .hasMessageContaining("host/instance/topology fingerprint mismatch");
     }
 
     @Test
@@ -258,14 +289,18 @@ class MyBatisDatabasePreflightTest {
         }
         for (String unsafeCount : List.of(
                 "roleMembershipCount",
+                "ownedNonSystemSchemaCount",
                 "ownedBaseTableCount",
+                "unsafeNonSystemSchemaCreateCount",
                 "unsafeTablePrivilegeCount",
                 "unsafeColumnPrivilegeCount",
                 "unsafeSequencePrivilegeCount",
                 "rlsEnabledBaseTableCount",
                 "forceRlsEnabledBaseTableCount",
                 "executableFunctionCount",
-                "executablePackageCount"
+                "executablePackageCount",
+                "unsafeForeignServerPrivilegeCount",
+                "unsafeDirectoryPrivilegeCount"
         )) {
             ObjectNode unsafe = valid.deepCopy();
             probeRow(unsafe).put(unsafeCount, 1);
@@ -287,7 +322,11 @@ class MyBatisDatabasePreflightTest {
         assertRejectedProbe(probeWith("baseTableNames", "orders,substituted"), "baseTableNames");
         assertRejectedProbe(probeWith("baseTableCount", 1), "baseTableCount");
 
-        ObjectNode connectionsWithoutEnvironmentEvidence = fixture("connections-centralized.json").deepCopy();
+        ObjectNode connectionsWithoutEnvironmentEvidence =
+                withEnvironmentEvidence(fixture("connections-centralized.json"));
+        ((ObjectNode) connectionsWithoutEnvironmentEvidence.at("/connections/0"))
+                .remove(List.of(
+                        "environment", "environmentSource", "topologyRole", "topologySource", "readOnly"));
         FakeDatabaseBridge bridge = startBridge(
                 connectionsWithoutEnvironmentEvidence,
                 fixture("schemas-orders.json"),
@@ -319,13 +358,7 @@ class MyBatisDatabasePreflightTest {
 
     @Test
     void requiresDatabaseProbeToConfirmReadReplicaWhenMetadataSelectsReadReplica() throws Exception {
-        ObjectNode connections = fixture("connections-centralized.json").deepCopy();
-        ((ObjectNode) connections.at("/connections/0"))
-                .put("environment", "read-replica")
-                .put("environmentSource", "managed-connection-metadata")
-                .put("topologyRole", "physical-standby")
-                .put("topologySource", "server-observed")
-                .put("readOnly", true);
+        ObjectNode connections = withEnvironmentEvidence(fixture("connections-centralized.json"));
         FakeDatabaseBridge bridge = startBridge(
                 connections,
                 fixture("schemas-orders.json"),
@@ -538,7 +571,7 @@ class MyBatisDatabasePreflightTest {
 
     private final class FakeDatabaseBridge {
         private final HttpServer httpServer;
-        private final JsonNode connections;
+        private JsonNode connections;
         private final JsonNode schemas;
         private final boolean connectionAvailable;
         private final Set<String> tools;
@@ -584,7 +617,11 @@ class MyBatisDatabasePreflightTest {
                 JsonNode request = objectMapper.readTree(readBody(exchange));
                 switch (request.path("method").asText()) {
                     case "initialize" -> respondWithSession(exchange, 200, "db-session", """
-                            {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{}}}
+                            {"jsonrpc":"2.0","id":1,"result":{
+                              "protocolVersion":"2025-11-25",
+                              "identity":{"instanceId":"instance-a","projectId":"project-a","instanceNonce":"nonce-a-0123456789"},
+                              "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            }}
                             """);
                     case "notifications/initialized" -> respondWithSession(exchange, 202, "db-session", "");
                     case "tools/list" -> respondToolsList(exchange);
@@ -611,12 +648,17 @@ class MyBatisDatabasePreflightTest {
             httpServer.createContext("/tool-calls", exchange -> {
                 toolCallHistoryRequested = true;
                 respond(exchange, 200,
-                        "{\"complete\":true,\"snapshotToken\":\"preflight-snapshot\",\"total\":0,\"items\":[]}");
+                        "{\"complete\":true,\"snapshotToken\":\"preflight-snapshot\",\"total\":0,"
+                                + "\"identity\":{\"instanceId\":\"instance-a\",\"projectId\":\"project-a\","
+                                + "\"instanceNonce\":\"nonce-a-0123456789\"},"
+                                + "\"policyFingerprint\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+                                + "\"items\":[]}");
             });
         }
 
         private JsonNode toolsResponse() {
             ObjectNode root = objectMapper.createObjectNode();
+            addBridgeBinding(root);
             ArrayNode array = root.putArray("tools");
             tools.forEach(name -> array.addObject()
                     .put("name", name)
@@ -630,6 +672,7 @@ class MyBatisDatabasePreflightTest {
                 return objectMapper.createObjectNode().put("type", "object");
             }
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            schema.put("x-agentbridge-policyFingerprint", policyFingerprint());
             ObjectNode properties = schema.putObject("properties");
             for (String field : List.of("connectionId", "databaseName", "schemaName")) {
                 properties.putObject(field).put("type", "string");
@@ -665,6 +708,7 @@ class MyBatisDatabasePreflightTest {
             root.put("jsonrpc", "2.0");
             root.put("id", 2);
             ObjectNode result = root.putObject("result");
+            addBridgeBinding(result);
             result.putArray("content").addObject()
                     .put("type", "text")
                     .put("text", objectMapper.writeValueAsString(structured));
@@ -702,7 +746,13 @@ class MyBatisDatabasePreflightTest {
                 .put("environmentSource", "managed-connection-metadata")
                 .put("topologyRole", "physical-standby")
                 .put("topologySource", "server-observed")
+                .put("fingerprintSource", "server-generated")
+                .put("policyFingerprint", policyFingerprint())
+                .put("databaseHostFingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                .put("databaseInstanceFingerprint", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+                .put("topologyFingerprint", "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
                 .put("readOnly", true);
+        addIdentity((ObjectNode) copy.at("/connections/0"));
         return copy;
     }
 
@@ -710,6 +760,7 @@ class MyBatisDatabasePreflightTest {
         return """
                 {
                   "version":"1.200.0",
+                  "identity":{"instanceId":"instance-a","projectId":"project-a","instanceNonce":"nonce-a-0123456789"},
                   "capabilities":{
                     "mybatisSqlReviewAudit":{
                       "contractVersion":1,
@@ -719,7 +770,17 @@ class MyBatisDatabasePreflightTest {
                       "stableToolCallTotal":true,
                       "explicitToolCallHistoryComplete":true,
                       "serverEnforcedPreviewMaxRows":20,
-                      "previewMaxRowsRequired":true
+                      "previewMaxRowsRequired":true,
+                      "executeSqlQueryPolicy":{
+                        "simpleSelectGrammar":true,
+                        "safeRelationAllowlist":true,
+                        "functionsForbidden":true,
+                        "systemSideEffectsForbidden":true,
+                        "maxScenarios":3,
+                        "maxRows":20,
+                        "maxTimeoutSeconds":30,
+                        "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                      }
                     }
                   }
                 }
@@ -728,7 +789,7 @@ class MyBatisDatabasePreflightTest {
 
     private ObjectNode validSafetyProbe() {
         ObjectNode row = objectMapper.createObjectNode()
-                .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                .put("probeContractVersion", "mybatis-sql-review-db-safety-v2")
                 .put("currentDatabase", "orders")
                 .put("currentSchema", "audit")
                 .put("currentUser", "sql_auditor")
@@ -739,10 +800,12 @@ class MyBatisDatabasePreflightTest {
                 .put("roleMembershipCount", 0)
                 .put("databaseOwner", false)
                 .put("schemaOwner", false)
+                .put("ownedNonSystemSchemaCount", 0)
                 .put("ownedBaseTableCount", 0)
                 .put("databaseCreate", false)
                 .put("databaseTemporary", false)
                 .put("schemaCreate", false)
+                .put("unsafeNonSystemSchemaCreateCount", 0)
                 .put("dangerousAnyPrivilege", false)
                 .put("sessionReadOnly", true)
                 .put("transactionReadOnly", true)
@@ -753,15 +816,38 @@ class MyBatisDatabasePreflightTest {
                 .put("forceRlsEnabledBaseTableCount", 0)
                 .put("executableFunctionCount", 0)
                 .put("executablePackageCount", 0)
+                .put("unsafeForeignServerPrivilegeCount", 0)
+                .put("unsafeDirectoryPrivilegeCount", 0)
                 .put("statementTimeoutMs", 12_000)
                 .put("baseTableNames", "line_items,orders")
                 .put("baseTableCount", 2)
                 .put("readReplica", true);
         ObjectNode result = objectMapper.createObjectNode();
+        addBridgeBinding(result);
+        result.put("fingerprintSource", "server-generated")
+                .put("databaseHostFingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                .put("databaseInstanceFingerprint", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+                .put("topologyFingerprint", "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
         ArrayNode columns = result.putArray("columns");
         row.fieldNames().forEachRemaining(columns::add);
         result.putArray("rows").add(row);
         return result;
+    }
+
+    private void addBridgeBinding(ObjectNode node) {
+        addIdentity(node);
+        node.put("policyFingerprint", policyFingerprint());
+    }
+
+    private void addIdentity(ObjectNode node) {
+        node.putObject("identity")
+                .put("instanceId", "instance-a")
+                .put("projectId", "project-a")
+                .put("instanceNonce", "nonce-a-0123456789");
+    }
+
+    private String policyFingerprint() {
+        return "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     }
 
     private ObjectNode probeWith(String field, boolean value) {

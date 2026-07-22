@@ -404,7 +404,7 @@ agentbridge:
 | `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
 | `database.connection-name` | AgentBridge Database Tools 中必须唯一匹配的连接名。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
-| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。`test` 自证不构成硬只读边界。 |
+| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。每个 SQL task 提交前还会重验同一 AgentBridge、数据库主机/实例/拓扑指纹、physical standby 和连接可用性。`test` 自证不构成硬只读边界。 |
 | `database.non-owner-non-admin-read-only-account` | 运行前必须改成 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
 | `database.row-level-security-disabled-for-safe-base-tables` | 运行前必须改成 `true`，确认所有可取证基础表均禁用 RLS。 |
 | `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 运行前必须改成 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
@@ -420,10 +420,11 @@ agentbridge:
 
 #### 必要运行环境与安全边界
 
-- IntelliJ IDEA 需要启用 JetBrains AI Assistant，并提供可用的 AgentBridge Web Access 与 AgentBridge MCP；数据库插件需要启用 **Database Tools & SQL**，且 MCP 工具清单必须包含链路预检要求的数据库工具。
+- IntelliJ IDEA 需要启用 JetBrains AI Assistant，并提供可用的 AgentBridge Web Access 与 AgentBridge MCP；数据库插件需要启用 **Database Tools & SQL**，且 MCP 工具清单必须包含链路预检要求的数据库工具。MyBatis SQL review 的 Web/MCP URL 只接受 `http(s)://localhost`、`127.0.0.0/8` 或 `::1`；本地自签名 TLS 兼容仅限 loopback，远程 URL 一律拒绝，不能借用 trust-all TLS。
 - 只能连接集中式 GaussDB 的物理只读副本，不能连接生产主库，也不接受 `test` 环境声明代替物理 standby 证明。必须使用非 owner、非管理员、无角色继承的专用只读账号；应用层 prompt 或 Java 事后审计不能替代数据库凭证隔离。
-- 所有允许取证的基础表必须禁用 RLS。审计账号不得拥有表级或列级 DML、序列 `USAGE/UPDATE`、database `CREATE/TEMPORARY`、schema `CREATE`、GaussDB `ANY` 权限、包/用户函数或 `SECURITY DEFINER` 执行能力（包括 `PUBLIC`）；有效 `statement_timeout` 必须大于 0 且不超过配置值和 30 秒。探针返回字段缺失或目录事实无法证明时一律 fail closed。
-- AgentBridge release gate 要求版本不低于 `1.200.0`，且 `/info` 必须显式声明 MyBatis SQL review audit contract v1：工具参数/结果为结构化且未截断、`/tool-calls` 是带稳定 `snapshotToken`、`total`、`complete` 的不可变分页快照、`preview_table_data.maxRowCount` 必填并由服务端硬限制为 20。版本号本身不能代替能力握手。
+- 所有允许取证的基础表必须禁用 RLS。安全探针遍历全部非系统 schema，而不是只检查 `current_schema()`：审计账号不得拥有任何非系统 schema/table/column/sequence 的 owner、DML 或 `CREATE` 权限，也不得拥有 database `CREATE/TEMPORARY`、GaussDB `ANY`、package/function、foreign server 或 directory 危险权限（包括经 `PUBLIC` 获得的函数执行权）；有效 `statement_timeout` 必须大于 0 且不超过配置值和 30 秒。探针返回字段缺失或事实无法证明时一律 fail closed。
+- AgentBridge release gate 要求版本不低于 `1.200.0`，且 `/info` 必须显式声明 MyBatis SQL review audit contract v1，并提供不可复用的 `instanceId/projectId/instanceNonce`。Web `/info`、MCP `initialize`、`tools/list`、`tools/call`、`/tool-calls` 快照及其每一条记录必须绑定同一实例和 `policyFingerprint`；连接元数据、探针与历史还必须携带服务端生成的 database host/instance/topology SHA-256 指纹。
+- `execute_sql_query` 必须由 AgentBridge 服务端强制执行同一指纹策略：仅支持简单 SELECT 语法，只能访问预检得到的安全基础表 allowlist，禁止函数和系统副作用，每个 SQL 最多 3 个场景、每次最多 20 行、超时最多 30 秒。缺少这份策略时在首次数据库工具调用前 fail closed，不能只依赖 prompt 或 Java 事后解析。
 - 已检查的 AgentBridge v1.199.2 明确不兼容：`preview_table_data` 的上限参数可选，`/tool-calls` 仅提供 `{items}`，单字段会截断至 8000 字符且历史最多 200 条，无法形成完整审计证据；预检会在任何数据库工具调用前给出不兼容错误。只有未来版本同时满足上述版本与能力合同，并在集中式 GaussDB 物理只读副本上完成静态 SELECT、动态 SELECT、DML mapper 与 `selectKey` live smoke gate 后，才可发布启用。
 - `/tool-calls` 检查属于 post-hoc 事后审计：它只能在调用发生后拒绝产物，不能阻止或撤销已经发出的数据库调用。数据库侧只读账号、RLS/函数权限和 statement timeout 才是硬安全边界。
 

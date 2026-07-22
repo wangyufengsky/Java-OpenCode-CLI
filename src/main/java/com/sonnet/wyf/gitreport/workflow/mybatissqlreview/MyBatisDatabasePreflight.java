@@ -18,7 +18,7 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class MyBatisDatabasePreflight {
-    private static final String SAFETY_PROBE_CONTRACT_VERSION = "mybatis-sql-review-db-safety-v1";
+    private static final String SAFETY_PROBE_CONTRACT_VERSION = "mybatis-sql-review-db-safety-v2";
     private static final String VERIFIED_ENVIRONMENT_SOURCE = "managed-connection-metadata";
     private static final List<String> SAFETY_PROBE_COLUMNS = List.of(
             "probeContractVersion",
@@ -32,10 +32,12 @@ public final class MyBatisDatabasePreflight {
             "roleMembershipCount",
             "databaseOwner",
             "schemaOwner",
+            "ownedNonSystemSchemaCount",
             "ownedBaseTableCount",
             "databaseCreate",
             "databaseTemporary",
             "schemaCreate",
+            "unsafeNonSystemSchemaCreateCount",
             "dangerousAnyPrivilege",
             "sessionReadOnly",
             "transactionReadOnly",
@@ -46,27 +48,35 @@ public final class MyBatisDatabasePreflight {
             "forceRlsEnabledBaseTableCount",
             "executableFunctionCount",
             "executablePackageCount",
+            "unsafeForeignServerPrivilegeCount",
+            "unsafeDirectoryPrivilegeCount",
             "statementTimeoutMs",
             "baseTableNames",
             "baseTableCount",
             "readReplica"
     );
     static final String SAFETY_PROBE_SQL = """
-            WITH target_tables AS (
-                SELECT c.oid, c.relowner, c.relrowsecurity, c.relforcerowsecurity
+            WITH audited_schemas AS (
+                SELECT n.oid, n.nspname, n.nspowner
+                FROM pg_catalog.pg_namespace n
+                WHERE n.nspname <> 'information_schema'
+                  AND n.nspname NOT LIKE 'pg_%'
+            ), audited_tables AS (
+                SELECT c.oid, c.relname, c.relowner, c.relrowsecurity, c.relforcerowsecurity,
+                       n.nspname
                 FROM pg_catalog.pg_class c
-                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = pg_catalog.current_schema()
-                  AND c.relkind = 'r'
-            ), target_sequences AS (
-                SELECT c.oid
+                JOIN audited_schemas n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'r'
+            ), target_tables AS (
+                SELECT * FROM audited_tables WHERE nspname = pg_catalog.current_schema()
+            ), audited_sequences AS (
+                SELECT c.oid, n.nspname
                 FROM pg_catalog.pg_class c
-                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = pg_catalog.current_schema()
-                  AND c.relkind = 'S'
+                JOIN audited_schemas n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'S'
             )
             SELECT
-                'mybatis-sql-review-db-safety-v1' AS "probeContractVersion",
+                'mybatis-sql-review-db-safety-v2' AS "probeContractVersion",
                 pg_catalog.current_database() AS "currentDatabase",
                 pg_catalog.current_schema() AS "currentSchema",
                 CURRENT_USER AS "currentUser",
@@ -79,7 +89,9 @@ public final class MyBatisDatabasePreflight {
                     AS "roleMembershipCount",
                 (d.datdba = r.oid) AS "databaseOwner",
                 (n.nspowner = r.oid) AS "schemaOwner",
-                (SELECT pg_catalog.count(*) FROM target_tables t WHERE t.relowner = r.oid)
+                (SELECT pg_catalog.count(*) FROM audited_schemas s WHERE s.nspowner = r.oid)
+                    AS "ownedNonSystemSchemaCount",
+                (SELECT pg_catalog.count(*) FROM audited_tables t WHERE t.relowner = r.oid)
                     AS "ownedBaseTableCount",
                 pg_catalog.has_database_privilege(
                     CURRENT_USER, pg_catalog.current_database(), 'CREATE') AS "databaseCreate",
@@ -87,6 +99,9 @@ public final class MyBatisDatabasePreflight {
                     CURRENT_USER, pg_catalog.current_database(), 'TEMPORARY') AS "databaseTemporary",
                 pg_catalog.has_schema_privilege(
                     CURRENT_USER, pg_catalog.current_schema(), 'CREATE') AS "schemaCreate",
+                (SELECT pg_catalog.count(*) FROM audited_schemas s
+                    WHERE pg_catalog.has_schema_privilege(CURRENT_USER, s.oid, 'CREATE'))
+                    AS "unsafeNonSystemSchemaCreateCount",
                 (pg_catalog.has_any_privilege(CURRENT_USER, 'CREATE ANY TABLE')
                     OR pg_catalog.has_any_privilege(CURRENT_USER, 'ALTER ANY TABLE')
                     OR pg_catalog.has_any_privilege(CURRENT_USER, 'DROP ANY TABLE')
@@ -106,15 +121,15 @@ public final class MyBatisDatabasePreflight {
                     AS "sessionReadOnly",
                 (pg_catalog.current_setting('transaction_read_only') IN ('on', 'true'))
                     AS "transactionReadOnly",
-                (SELECT pg_catalog.count(*) FROM target_tables t
+                (SELECT pg_catalog.count(*) FROM audited_tables t
                     WHERE pg_catalog.has_table_privilege(
                         CURRENT_USER, t.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
                     AS "unsafeTablePrivilegeCount",
-                (SELECT pg_catalog.count(*) FROM target_tables t
+                (SELECT pg_catalog.count(*) FROM audited_tables t
                     WHERE pg_catalog.has_any_column_privilege(
                         CURRENT_USER, t.oid, 'INSERT,UPDATE'))
                     AS "unsafeColumnPrivilegeCount",
-                (SELECT pg_catalog.count(*) FROM target_sequences s
+                (SELECT pg_catalog.count(*) FROM audited_sequences s
                     WHERE pg_catalog.has_sequence_privilege(
                         CURRENT_USER, s.oid, 'USAGE,UPDATE'))
                     AS "unsafeSequencePrivilegeCount",
@@ -148,6 +163,14 @@ public final class MyBatisDatabasePreflight {
                                 OR pg_catalog.has_function_privilege(
                                     'public', pp.oid, 'EXECUTE')))))
                     AS "executablePackageCount",
+                (SELECT pg_catalog.count(*) FROM pg_catalog.pg_foreign_server fs
+                    WHERE pg_catalog.has_server_privilege(
+                        CURRENT_USER, fs.oid, 'USAGE,ALTER,DROP,COMMENT'))
+                    AS "unsafeForeignServerPrivilegeCount",
+                (SELECT pg_catalog.count(*) FROM pg_catalog.pg_directory dir
+                    WHERE pg_catalog.has_directory_privilege(
+                        CURRENT_USER, dir.dirname, 'READ,WRITE'))
+                    AS "unsafeDirectoryPrivilegeCount",
                 (EXTRACT(EPOCH FROM
                     pg_catalog.current_setting('statement_timeout')::pg_catalog.interval) * 1000)::bigint
                     AS "statementTimeoutMs",
@@ -188,7 +211,8 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(contract, "contract");
         verifyCredentialContract(contract);
-        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
+        AgentBridgeClient.MyBatisAuditBinding bridgeBinding =
+                client.bindMyBatisSqlReviewEndpoints(webBaseUri, mcpUri);
 
         Set<String> availableTools = new LinkedHashSet<>();
         Map<String, AgentBridgeClient.ToolDefinition> toolsByName = new HashMap<>();
@@ -217,6 +241,9 @@ public final class MyBatisDatabasePreflight {
                     + contract.connectionName() + "' but found " + matches.size());
         }
         JsonNode connection = matches.getFirst();
+        DatabaseFingerprints databaseFingerprints = requireDatabaseIdentity(
+                connection, bridgeBinding, null, "connection metadata"
+        );
         String connectionId = requiredText(connection, "id", "connection id");
         String databaseSystem = firstText(connection, "databaseSystem", "dbms", "databaseProductName", "databaseType");
         String deployment = firstText(connection, "deployment", "architecture", "mode");
@@ -313,7 +340,9 @@ public final class MyBatisDatabasePreflight {
         SafetyProbe probe = verifySafetyProbe(
                 probeResponse.structured(),
                 contract,
-                safeBaseRelations
+                safeBaseRelations,
+                bridgeBinding,
+                databaseFingerprints
         );
 
         client.getToolCalls(webBaseUri);
@@ -328,8 +357,87 @@ public final class MyBatisDatabasePreflight {
                         StatementTimeoutScope.EFFECTIVE_SESSION,
                         true
                 ),
-                safeBaseRelations
+                safeBaseRelations,
+                bridgeBinding,
+                databaseFingerprints
         );
+    }
+
+    /**
+     * Re-establishes the common-source identity and physical-standby evidence immediately
+     * before one SQL review task is submitted. This deliberately uses managed connection
+     * metadata rather than an arbitrary SQL function so the server's simple-SELECT policy
+     * remains authoritative for reviewer-generated queries.
+     */
+    public void recheck(
+            URI mcpUri,
+            URI webBaseUri,
+            Result verified
+    ) throws Exception {
+        Objects.requireNonNull(mcpUri, "mcpUri");
+        Objects.requireNonNull(webBaseUri, "webBaseUri");
+        Objects.requireNonNull(verified, "verified");
+        AgentBridgeClient.MyBatisAuditBinding currentBinding =
+                client.bindMyBatisSqlReviewEndpoints(webBaseUri, mcpUri);
+        if (!verified.bridgeBinding().equals(currentBinding)) {
+            throw new IllegalStateException(
+                    "per-task AgentBridge instance identity or SQL policy fingerprint changed after preflight"
+            );
+        }
+
+        JsonNode response = client.callTool(
+                mcpUri,
+                "list_database_connections",
+                JsonNodeFactory.instance.objectNode()
+        ).structured();
+        JsonNode connections = response.isArray() ? response : response.path("connections");
+        List<JsonNode> matches = new ArrayList<>();
+        if (connections.isArray()) {
+            for (JsonNode connection : connections) {
+                if (verified.connectionId().equals(connection.path("id").asText())) {
+                    matches.add(connection);
+                }
+            }
+        }
+        if (matches.size() != 1) {
+            throw new IllegalStateException(
+                    "per-task database identity recheck expected exactly one bound connection id but found "
+                            + matches.size()
+            );
+        }
+        JsonNode connection = matches.getFirst();
+        requireDatabaseIdentity(
+                connection,
+                verified.bridgeBinding(),
+                verified.databaseFingerprints(),
+                "per-task connection metadata"
+        );
+        String databaseSystem = firstText(
+                connection, "databaseSystem", "dbms", "databaseProductName", "databaseType");
+        String deployment = firstText(connection, "deployment", "architecture", "mode");
+        if (!verified.databaseSystem().equals(databaseSystem)
+                || !deployment.equalsIgnoreCase("centralized")) {
+            throw new IllegalStateException(
+                    "per-task database product/deployment changed after preflight"
+            );
+        }
+        verifiedEnvironment(connection, verified.environment());
+        if (!containsText(connection.path("databases"), verified.databaseName())) {
+            throw new IllegalStateException(
+                    "per-task connection metadata no longer exposes the bound database"
+            );
+        }
+
+        ObjectNode arguments = JsonNodeFactory.instance.objectNode();
+        arguments.put("connectionId", verified.connectionId());
+        JsonNode connectionTest = client.callTool(
+                mcpUri,
+                "test_database_connection",
+                arguments
+        ).structured();
+        if (!connectionTest.path("success").asBoolean(false)) {
+            throw new IllegalStateException("per-task bound database connection is unavailable");
+        }
     }
 
     private void requireDatabaseToolSchemas(
@@ -432,8 +540,11 @@ public final class MyBatisDatabasePreflight {
     private SafetyProbe verifySafetyProbe(
             JsonNode response,
             DatabaseContract contract,
-            Set<String> expectedBaseRelations
+            Set<String> expectedBaseRelations,
+            AgentBridgeClient.MyBatisAuditBinding bridgeBinding,
+            DatabaseFingerprints databaseFingerprints
     ) {
+        requireDatabaseIdentity(response, bridgeBinding, databaseFingerprints, "database safety probe");
         if (!response.isObject()
                 || !response.path("columns").isArray()
                 || !response.path("rows").isArray()
@@ -491,14 +602,18 @@ public final class MyBatisDatabasePreflight {
         }
         for (String field : List.of(
                 "roleMembershipCount",
+                "ownedNonSystemSchemaCount",
                 "ownedBaseTableCount",
+                "unsafeNonSystemSchemaCreateCount",
                 "unsafeTablePrivilegeCount",
                 "unsafeColumnPrivilegeCount",
                 "unsafeSequencePrivilegeCount",
                 "rlsEnabledBaseTableCount",
                 "forceRlsEnabledBaseTableCount",
                 "executableFunctionCount",
-                "executablePackageCount"
+                "executablePackageCount",
+                "unsafeForeignServerPrivilegeCount",
+                "unsafeDirectoryPrivilegeCount"
         )) {
             if (requiredProbeLong(row, field) != 0) {
                 throw new IllegalStateException("database safety probe rejected non-zero " + field);
@@ -535,6 +650,44 @@ public final class MyBatisDatabasePreflight {
             );
         }
         return new SafetyProbe(currentUser, timeoutMillis, readReplica);
+    }
+
+    private DatabaseFingerprints requireDatabaseIdentity(
+            JsonNode node,
+            AgentBridgeClient.MyBatisAuditBinding bridgeBinding,
+            DatabaseFingerprints expected,
+            String label
+    ) {
+        JsonNode identity = node.path("identity");
+        AgentBridgeClient.BridgeIdentity actualIdentity = new AgentBridgeClient.BridgeIdentity(
+                requiredText(identity, "instanceId", label + " instanceId"),
+                requiredText(identity, "projectId", label + " projectId"),
+                requiredText(identity, "instanceNonce", label + " instanceNonce")
+        );
+        if (!bridgeBinding.identity().equals(actualIdentity)
+                || !bridgeBinding.policyFingerprint().equals(node.path("policyFingerprint").asText())) {
+            throw new IllegalStateException(label + " AgentBridge identity or policy fingerprint mismatch");
+        }
+        if (!"server-generated".equals(node.path("fingerprintSource").asText())) {
+            throw new IllegalStateException(label + " fingerprints must be server-generated");
+        }
+        DatabaseFingerprints actual = new DatabaseFingerprints(
+                requiredSha256(node, "databaseHostFingerprint", label),
+                requiredSha256(node, "databaseInstanceFingerprint", label),
+                requiredSha256(node, "topologyFingerprint", label)
+        );
+        if (expected != null && !expected.equals(actual)) {
+            throw new IllegalStateException(label + " database host/instance/topology fingerprint mismatch");
+        }
+        return actual;
+    }
+
+    private String requiredSha256(JsonNode node, String field, String label) {
+        String value = node.path(field).asText("").strip().toLowerCase(Locale.ROOT);
+        if (!value.matches("sha256:[0-9a-f]{64}")) {
+            throw new IllegalStateException(label + " missing server-generated " + field);
+        }
+        return value;
     }
 
     private void requireProbeText(JsonNode row, String field, String expected) {
@@ -759,6 +912,13 @@ public final class MyBatisDatabasePreflight {
     private record SafetyProbe(String currentUser, long statementTimeoutMs, boolean readReplica) {
     }
 
+    public record DatabaseFingerprints(
+            String hostFingerprint,
+            String instanceFingerprint,
+            String topologyFingerprint
+    ) {
+    }
+
     public static final class Result {
         private final String connectionId;
         private final String databaseName;
@@ -767,6 +927,8 @@ public final class MyBatisDatabasePreflight {
         private final Environment environment;
         private final StatementTimeoutContract statementTimeout;
         private final Set<String> safeBaseRelations;
+        private final AgentBridgeClient.MyBatisAuditBinding bridgeBinding;
+        private final DatabaseFingerprints databaseFingerprints;
 
         private Result(
                 String connectionId,
@@ -775,7 +937,9 @@ public final class MyBatisDatabasePreflight {
                 String databaseSystem,
                 Environment environment,
                 StatementTimeoutContract statementTimeout,
-                Set<String> safeBaseRelations
+                Set<String> safeBaseRelations,
+                AgentBridgeClient.MyBatisAuditBinding bridgeBinding,
+                DatabaseFingerprints databaseFingerprints
         ) {
             this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
             this.databaseName = Objects.requireNonNull(databaseName, "databaseName");
@@ -783,6 +947,8 @@ public final class MyBatisDatabasePreflight {
             this.databaseSystem = Objects.requireNonNull(databaseSystem, "databaseSystem");
             this.environment = Objects.requireNonNull(environment, "environment");
             this.statementTimeout = Objects.requireNonNull(statementTimeout, "statementTimeout");
+            this.bridgeBinding = Objects.requireNonNull(bridgeBinding, "bridgeBinding");
+            this.databaseFingerprints = Objects.requireNonNull(databaseFingerprints, "databaseFingerprints");
             Objects.requireNonNull(safeBaseRelations, "safeBaseRelations");
             Set<String> normalizedRelations = new LinkedHashSet<>();
             for (String relation : safeBaseRelations) {
@@ -829,6 +995,14 @@ public final class MyBatisDatabasePreflight {
 
         public Set<String> safeBaseRelations() {
             return safeBaseRelations;
+        }
+
+        public AgentBridgeClient.MyBatisAuditBinding bridgeBinding() {
+            return bridgeBinding;
+        }
+
+        public DatabaseFingerprints databaseFingerprints() {
+            return databaseFingerprints;
         }
     }
 }

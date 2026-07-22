@@ -48,6 +48,8 @@ public class AgentBridgeClient {
     private final AtomicLong requestIds = new AtomicLong();
     private final Object mcpSessionLock = new Object();
     private final Map<URI, McpSession> mcpSessions = new HashMap<>();
+    private final Map<URI, MyBatisAuditBinding> myBatisWebBindings = new HashMap<>();
+    private final Map<URI, MyBatisAuditBinding> myBatisMcpBindings = new HashMap<>();
 
     public AgentBridgeClient(ObjectMapper objectMapper) {
         this(objectMapper, localAgentBridgeHttpClient());
@@ -95,6 +97,27 @@ public class AgentBridgeClient {
     public void requireMyBatisSqlReviewCapabilities(URI webBaseUrl)
             throws IOException, InterruptedException {
         JsonNode info = agentBridgeInfo(webBaseUrl);
+        strictMyBatisAuditBinding(info);
+    }
+
+    public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI webBaseUrl, URI mcpUrl)
+            throws IOException, InterruptedException {
+        requireLoopbackEndpoint(webBaseUrl);
+        requireLoopbackEndpoint(mcpUrl);
+        MyBatisAuditBinding binding = strictMyBatisAuditBinding(agentBridgeInfo(webBaseUrl));
+        synchronized (mcpSessionLock) {
+            myBatisWebBindings.put(normalizedWebBase(webBaseUrl), binding);
+            myBatisMcpBindings.put(mcpUrl, binding);
+            mcpSessions.remove(mcpUrl);
+        }
+        McpSession session = mcpSession(mcpUrl);
+        if (!binding.equals(session.auditBinding())) {
+            throw new IllegalStateException("AgentBridge Web/MCP identity mismatch");
+        }
+        return binding;
+    }
+
+    private MyBatisAuditBinding strictMyBatisAuditBinding(JsonNode info) {
         String version = info.path("version").asText("").strip();
         if (!isAtLeastVersion(version, MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION)) {
             throw incompatibleMyBatisAuditProtocol(version);
@@ -126,6 +149,30 @@ public class AgentBridgeClient {
                 || capability.path("serverEnforcedPreviewMaxRows").intValue() != 20) {
             throw incompatibleMyBatisAuditProtocol(version);
         }
+        JsonNode policy = capability.path("executeSqlQueryPolicy");
+        for (String requirement : List.of(
+                "simpleSelectGrammar",
+                "safeRelationAllowlist",
+                "functionsForbidden",
+                "systemSideEffectsForbidden"
+        )) {
+            if (!policy.path(requirement).isBoolean() || !policy.path(requirement).booleanValue()) {
+                throw new IllegalStateException(
+                        "AgentBridge " + version + " execute_sql_query policy is missing required " + requirement
+                );
+            }
+        }
+        if (!policy.path("maxScenarios").isIntegralNumber() || policy.path("maxScenarios").intValue() != 3
+                || !policy.path("maxRows").isIntegralNumber() || policy.path("maxRows").intValue() != 20
+                || !policy.path("maxTimeoutSeconds").isIntegralNumber()
+                || policy.path("maxTimeoutSeconds").intValue() != 30) {
+            throw new IllegalStateException(
+                    "AgentBridge " + version
+                            + " execute_sql_query policy must enforce scenarios<=3, rows<=20, timeout<=30"
+            );
+        }
+        String fingerprint = requiredFingerprint(policy, "policyFingerprint", "execute_sql_query policy");
+        return new MyBatisAuditBinding(requiredIdentity(info.path("identity"), "AgentBridge /info"), fingerprint);
     }
 
     private JsonNode agentBridgeInfo(URI webBaseUrl) throws IOException, InterruptedException {
@@ -142,6 +189,31 @@ public class AgentBridgeClient {
             throw new IllegalStateException("AgentBridge GET /info must return an object");
         }
         return info;
+    }
+
+    private BridgeIdentity requiredIdentity(JsonNode value, String label) {
+        String instanceId = value.path("instanceId").asText("").strip();
+        String projectId = value.path("projectId").asText("").strip();
+        String instanceNonce = value.path("instanceNonce").asText("").strip();
+        if (!isIdentityToken(instanceId, 3) || !isIdentityToken(projectId, 3)
+                || !isIdentityToken(instanceNonce, 16)) {
+            throw new IllegalStateException(label + " must provide non-reusable instanceId/projectId/instanceNonce identity");
+        }
+        return new BridgeIdentity(instanceId, projectId, instanceNonce);
+    }
+
+    private boolean isIdentityToken(String value, int minimumLength) {
+        return value.length() >= minimumLength
+                && value.length() <= 256
+                && value.matches("[A-Za-z0-9._:-]+");
+    }
+
+    private String requiredFingerprint(JsonNode node, String field, String label) {
+        String value = node.path(field).asText("").strip().toLowerCase(java.util.Locale.ROOT);
+        if (!value.matches("sha256:[0-9a-f]{64}")) {
+            throw new IllegalStateException(label + " must provide a SHA-256 " + field);
+        }
+        return value;
     }
 
     private IllegalStateException incompatibleMyBatisAuditProtocol(String version) {
@@ -208,6 +280,7 @@ public class AgentBridgeClient {
             throw new IllegalStateException("AgentBridge MCP tool failed: " + root.path("error"));
         }
         JsonNode result = root.path("result");
+        requireBoundPayload(mcpUrl, result, "AgentBridge MCP tools/call result");
         String text = contentText(result);
         return new ToolResponse(result, text, structured(text, result));
     }
@@ -242,10 +315,21 @@ public class AgentBridgeClient {
                 throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
             }
             JsonNode result = root.path("result");
+            MyBatisAuditBinding binding = requireBoundPayload(
+                    mcpUrl, result, "AgentBridge MCP tools/list result"
+            );
             if (!result.path("tools").isArray()) {
                 throw new IllegalStateException("AgentBridge MCP tools/list returned no tools array");
             }
             for (JsonNode tool : result.path("tools")) {
+                if (binding != null && isSqlEvidenceTool(tool.path("name").asText())
+                        && !binding.policyFingerprint().equals(
+                        tool.path("inputSchema").path("x-agentbridge-policyFingerprint").asText())) {
+                    throw new IllegalStateException(
+                            "AgentBridge MCP tool schema policy fingerprint mismatch: "
+                                    + tool.path("name").asText("<unknown>")
+                    );
+                }
                 tools.add(new ToolDefinition(
                         tool.path("name").asText(),
                         tool.path("description").asText(""),
@@ -294,6 +378,10 @@ public class AgentBridgeClient {
             }
 
             JsonNode root = objectMapper.readTree(response.body());
+            MyBatisAuditBinding historyBinding = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
+            if (historyBinding != null) {
+                requireBinding(root, historyBinding, "AgentBridge GET /tool-calls snapshot");
+            }
             JsonNode items;
             String nextToken = null;
             String nextParameter = null;
@@ -379,6 +467,9 @@ public class AgentBridgeClient {
             }
 
             for (JsonNode item : items) {
+                if (historyBinding != null) {
+                    requireBinding(item, historyBinding, "AgentBridge GET /tool-calls item");
+                }
                 String id = item.path("id").asText("");
                 if (id.isBlank()) {
                     throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
@@ -420,7 +511,14 @@ public class AgentBridgeClient {
                     item.path("arguments"),
                     item.path("result"),
                     item.hasNonNull("durationMs") ? item.path("durationMs").longValue() : null,
-                    item.path("hooks")
+                    item.path("hooks"),
+                    item.path("identity").path("instanceId").asText(""),
+                    item.path("identity").path("projectId").asText(""),
+                    item.path("identity").path("instanceNonce").asText(""),
+                    item.path("policyFingerprint").asText(""),
+                    item.path("databaseHostFingerprint").asText(""),
+                    item.path("databaseInstanceFingerprint").asText(""),
+                    item.path("topologyFingerprint").asText("")
             ));
         }
         return List.copyOf(calls);
@@ -506,9 +604,20 @@ public class AgentBridgeClient {
         String sessionId = response.headers().firstValue("Mcp-Session-Id")
                 .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new IllegalStateException("AgentBridge MCP initialize did not return Mcp-Session-Id"));
-        String protocolVersion = objectMapper.readTree(response.body()).path("result").path("protocolVersion")
-                .asText(MCP_CLIENT_PROTOCOL_VERSION);
-        McpSession session = new McpSession(sessionId, protocolVersion);
+        JsonNode initializeResult = objectMapper.readTree(response.body()).path("result");
+        String protocolVersion = initializeResult.path("protocolVersion").asText(MCP_CLIENT_PROTOCOL_VERSION);
+        MyBatisAuditBinding expectedBinding = myBatisMcpBindings.get(mcpUrl);
+        MyBatisAuditBinding actualBinding = null;
+        if (expectedBinding != null) {
+            actualBinding = new MyBatisAuditBinding(
+                    requiredIdentity(initializeResult.path("identity"), "AgentBridge MCP initialize"),
+                    requiredFingerprint(initializeResult, "policyFingerprint", "AgentBridge MCP initialize")
+            );
+            if (!expectedBinding.equals(actualBinding)) {
+                throw new IllegalStateException("AgentBridge Web/MCP identity mismatch");
+            }
+        }
+        McpSession session = new McpSession(sessionId, protocolVersion, actualBinding);
 
         ObjectNode initialized = objectMapper.createObjectNode();
         initialized.put("jsonrpc", "2.0");
@@ -552,6 +661,24 @@ public class AgentBridgeClient {
         return root.path("total").longValue();
     }
 
+    private MyBatisAuditBinding requireBoundPayload(URI mcpUrl, JsonNode payload, String label) {
+        MyBatisAuditBinding expected = myBatisMcpBindings.get(mcpUrl);
+        if (expected != null) {
+            requireBinding(payload, expected, label);
+        }
+        return expected;
+    }
+
+    private void requireBinding(JsonNode payload, MyBatisAuditBinding expected, String label) {
+        MyBatisAuditBinding actual = new MyBatisAuditBinding(
+                requiredIdentity(payload.path("identity"), label),
+                requiredFingerprint(payload, "policyFingerprint", label)
+        );
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException(label + " identity or policy fingerprint mismatch");
+        }
+    }
+
     private URI continuationUri(URI endpoint, String parameter, String token) {
         String query = parameter + "=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
         return URI.create(endpoint.toString() + "?" + query);
@@ -562,6 +689,7 @@ public class AgentBridgeClient {
             int maximumResponseBytes,
             String responseLabel
     ) throws IOException, InterruptedException {
+        requireLoopbackEndpoint(request.uri());
         return httpClient.send(
                 request,
                 responseInfo -> new LimitedStringBodySubscriber(
@@ -570,6 +698,28 @@ public class AgentBridgeClient {
                         responseInfo.headers().firstValueAsLong("Content-Length").orElse(-1L)
                 )
         );
+    }
+
+    private void requireLoopbackEndpoint(URI uri) {
+        if (uri == null || uri.getUserInfo() != null || uri.getFragment() != null
+                || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))) {
+            throw new IllegalArgumentException("AgentBridge endpoint must be an HTTP(S) loopback URL");
+        }
+        String host = uri.getHost();
+        boolean loopback = host != null && (host.equalsIgnoreCase("localhost")
+                || host.equals("::1")
+                || host.equals("0:0:0:0:0:0:0:1")
+                || host.matches("127(?:\\.[0-9]{1,3}){3}"));
+        if (!loopback) {
+            throw new IllegalArgumentException(
+                    "AgentBridge endpoint must use a loopback host; remote/self-signed endpoints are rejected"
+            );
+        }
+    }
+
+    private URI normalizedWebBase(URI uri) {
+        String value = uri.toString();
+        return URI.create(value.endsWith("/") ? value.substring(0, value.length() - 1) : value);
     }
 
     private void requireSuccess(HttpResponse<String> response, String message) {
@@ -628,10 +778,38 @@ public class AgentBridgeClient {
             JsonNode arguments,
             JsonNode result,
             Long durationMs,
-            JsonNode hooks) {
+            JsonNode hooks,
+            String bridgeInstanceId,
+            String bridgeProjectId,
+            String bridgeInstanceNonce,
+            String policyFingerprint,
+            String databaseHostFingerprint,
+            String databaseInstanceFingerprint,
+            String topologyFingerprint) {
+        public ToolCallRecord(
+                String id,
+                String title,
+                String toolName,
+                String kind,
+                String status,
+                Instant timestamp,
+                JsonNode arguments,
+                JsonNode result,
+                Long durationMs,
+                JsonNode hooks
+        ) {
+            this(id, title, toolName, kind, status, timestamp, arguments, result, durationMs, hooks,
+                    "", "", "", "", "", "", "");
+        }
     }
 
-    private record McpSession(String id, String protocolVersion) {
+    public record BridgeIdentity(String instanceId, String projectId, String instanceNonce) {
+    }
+
+    public record MyBatisAuditBinding(BridgeIdentity identity, String policyFingerprint) {
+    }
+
+    private record McpSession(String id, String protocolVersion, MyBatisAuditBinding auditBinding) {
     }
 
     private static final class LimitedStringBodySubscriber implements HttpResponse.BodySubscriber<String> {

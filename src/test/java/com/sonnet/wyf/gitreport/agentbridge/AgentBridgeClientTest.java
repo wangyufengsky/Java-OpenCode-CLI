@@ -79,6 +79,53 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void bindsStrictWebAndMcpEndpointsToTheSameInstanceAndPolicy() throws Exception {
+        HttpServer server = strictBindingServer("instance-a", "nonce-a-0123456789");
+        server.start();
+
+        AgentBridgeClient.MyBatisAuditBinding binding = client.bindMyBatisSqlReviewEndpoints(
+                baseUri(server), URI.create(baseUri(server) + "/mcp")
+        );
+
+        assertThat(binding.identity().instanceId()).isEqualTo("instance-a");
+        assertThat(binding.identity().projectId()).isEqualTo("project-a");
+        assertThat(binding.policyFingerprint()).startsWith("sha256:");
+    }
+
+    @Test
+    void rejectsWebAndMcpInstanceIdentityMismatch() throws Exception {
+        HttpServer server = strictBindingServer(
+                "instance-a", "nonce-a-0123456789",
+                "instance-b", "nonce-b-0123456789"
+        );
+        server.start();
+
+        assertThatThrownBy(() -> client.bindMyBatisSqlReviewEndpoints(
+                baseUri(server), URI.create(baseUri(server) + "/mcp")
+        )).hasMessageContaining("identity mismatch");
+    }
+
+    @Test
+    void rejectsNonLoopbackAgentBridgeEndpointsBeforeNetworkAccess() {
+        assertThatThrownBy(() -> client.bindMyBatisSqlReviewEndpoints(
+                URI.create("https://agentbridge.example.com"),
+                URI.create("https://agentbridge.example.com/mcp")
+        )).hasMessageContaining("loopback");
+    }
+
+    @Test
+    void rejectsStrictCapabilityWithoutServerEnforcedExecuteSqlPolicy() throws Exception {
+        HttpServer server = server();
+        ObjectNode info = (ObjectNode) objectMapper.readTree(strictAuditInfo());
+        ((ObjectNode) info.at("/capabilities/mybatisSqlReviewAudit")).remove("executeSqlQueryPolicy");
+        server.createContext("/info", exchange -> respond(exchange, 200, info.toString()));
+        server.start();
+
+        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+                .hasMessageContaining("execute_sql_query policy");
+    }
+
+    @Test
     void rejectsLegacy11992BeforeDatabaseToolsCanBeUsed() throws Exception {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(exchange, 200, """
@@ -550,9 +597,18 @@ class AgentBridgeClientTest {
     }
 
     private String strictAuditInfo() {
+        return strictAuditInfo("instance-a", "nonce-a-0123456789");
+    }
+
+    private String strictAuditInfo(String instanceId, String nonce) {
         return """
                 {
                   "version":"1.200.0",
+                  "identity":{
+                    "instanceId":"%s",
+                    "projectId":"project-a",
+                    "instanceNonce":"%s"
+                  },
                   "capabilities":{
                     "mybatisSqlReviewAudit":{
                       "contractVersion":1,
@@ -562,11 +618,62 @@ class AgentBridgeClientTest {
                       "stableToolCallTotal":true,
                       "explicitToolCallHistoryComplete":true,
                       "serverEnforcedPreviewMaxRows":20,
-                      "previewMaxRowsRequired":true
+                      "previewMaxRowsRequired":true,
+                      "executeSqlQueryPolicy":{
+                        "simpleSelectGrammar":true,
+                        "safeRelationAllowlist":true,
+                        "functionsForbidden":true,
+                        "systemSideEffectsForbidden":true,
+                        "maxScenarios":3,
+                        "maxRows":20,
+                        "maxTimeoutSeconds":30,
+                        "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                      }
                     }
                   }
                 }
-                """;
+                """.formatted(instanceId, nonce);
+    }
+
+    private HttpServer strictBindingServer(String instanceId, String nonce) throws IOException {
+        return strictBindingServer(instanceId, nonce, instanceId, nonce);
+    }
+
+    private HttpServer strictBindingServer(
+            String webInstanceId,
+            String webNonce,
+            String mcpInstanceId,
+            String mcpNonce
+    ) throws IOException {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(
+                exchange, 200, strictAuditInfo(webInstanceId, webNonce)
+        ));
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "strict-session", """
+                        {
+                          "jsonrpc":"2.0",
+                          "id":1,
+                          "result":{
+                            "protocolVersion":"2025-11-25",
+                            "identity":{
+                              "instanceId":"%s",
+                              "projectId":"project-a",
+                              "instanceNonce":"%s"
+                            },
+                            "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          }
+                        }
+                        """.formatted(mcpInstanceId, mcpNonce));
+                case "notifications/initialized" -> respondWithSession(
+                        exchange, 202, "strict-session", ""
+                );
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        return server;
     }
 
     private String resource(String path) throws IOException {

@@ -12,7 +12,16 @@ import java.util.List;
 import java.util.Set;
 
 final class VerifiedMyBatisDatabaseFixture {
-    private static final URI TEST_URI = URI.create("http://verified-preflight.invalid");
+    private static final URI TEST_URI = URI.create("http://127.0.0.1:1");
+    static final AgentBridgeClient.BridgeIdentity BRIDGE_IDENTITY =
+            new AgentBridgeClient.BridgeIdentity(
+                    "instance-a", "project-a", "nonce-a-0123456789");
+    static final String POLICY_FINGERPRINT = "sha256:" + "a".repeat(64);
+    static final MyBatisDatabasePreflight.DatabaseFingerprints DATABASE_FINGERPRINTS =
+            new MyBatisDatabasePreflight.DatabaseFingerprints(
+                    "sha256:" + "b".repeat(64),
+                    "sha256:" + "c".repeat(64),
+                    "sha256:" + "d".repeat(64));
 
     private VerifiedMyBatisDatabaseFixture() {
     }
@@ -94,8 +103,8 @@ final class VerifiedMyBatisDatabaseFixture {
         }
 
         @Override
-        public void requireMyBatisSqlReviewCapabilities(URI ignored) {
-            // This fixture models only the explicitly future, strict AgentBridge audit contract.
+        public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI ignoredWeb, URI ignoredMcp) {
+            return new MyBatisAuditBinding(BRIDGE_IDENTITY, POLICY_FINGERPRINT);
         }
 
         @Override
@@ -130,7 +139,7 @@ final class VerifiedMyBatisDatabaseFixture {
 
         private ObjectNode connections() {
             ObjectNode response = objectMapper.createObjectNode();
-            response.putArray("connections").addObject()
+            ObjectNode connection = response.putArray("connections").addObject()
                     .put("id", connectionId)
                     .put("name", connectionName)
                     .put("databaseSystem", "GaussDB")
@@ -139,8 +148,9 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("environmentSource", "managed-connection-metadata")
                     .put("topologyRole", "physical-standby")
                     .put("topologySource", "server-observed")
-                    .put("readOnly", true)
-                    .putArray("databases").add(databaseName);
+                    .put("readOnly", true);
+            addDatabaseBinding(connection);
+            connection.putArray("databases").add(databaseName);
             return response;
         }
 
@@ -175,6 +185,7 @@ final class VerifiedMyBatisDatabaseFixture {
                 return objectMapper.createObjectNode().put("type", "object");
             }
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            schema.put("x-agentbridge-policyFingerprint", POLICY_FINGERPRINT);
             ObjectNode properties = schema.putObject("properties");
             for (String field : List.of("connectionId", "databaseName", "schemaName")) {
                 properties.putObject(field).put("type", "string");
@@ -196,7 +207,7 @@ final class VerifiedMyBatisDatabaseFixture {
 
         private ObjectNode safetyProbe() {
             ObjectNode row = objectMapper.createObjectNode()
-                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v2")
                     .put("currentDatabase", databaseName)
                     .put("currentSchema", schemaName)
                     .put("currentUser", "sql_auditor")
@@ -207,10 +218,12 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("roleMembershipCount", 0)
                     .put("databaseOwner", false)
                     .put("schemaOwner", false)
+                    .put("ownedNonSystemSchemaCount", 0)
                     .put("ownedBaseTableCount", 0)
                     .put("databaseCreate", false)
                     .put("databaseTemporary", false)
                     .put("schemaCreate", false)
+                    .put("unsafeNonSystemSchemaCreateCount", 0)
                     .put("dangerousAnyPrivilege", false)
                     .put("sessionReadOnly", true)
                     .put("transactionReadOnly", true)
@@ -221,16 +234,31 @@ final class VerifiedMyBatisDatabaseFixture {
                     .put("forceRlsEnabledBaseTableCount", 0)
                     .put("executableFunctionCount", 0)
                     .put("executablePackageCount", 0)
+                    .put("unsafeForeignServerPrivilegeCount", 0)
+                    .put("unsafeDirectoryPrivilegeCount", 0)
                     .put("statementTimeoutMs", 30_000)
                     .put("baseTableNames", baseTables.stream().map(String::toLowerCase).sorted()
                             .collect(java.util.stream.Collectors.joining(",")))
                     .put("baseTableCount", baseTables.size())
                     .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
+            addDatabaseBinding(result);
             ArrayNode columns = result.putArray("columns");
             row.fieldNames().forEachRemaining(columns::add);
             result.putArray("rows").add(row);
             return result;
+        }
+
+        private void addDatabaseBinding(ObjectNode node) {
+            node.putObject("identity")
+                    .put("instanceId", BRIDGE_IDENTITY.instanceId())
+                    .put("projectId", BRIDGE_IDENTITY.projectId())
+                    .put("instanceNonce", BRIDGE_IDENTITY.instanceNonce());
+            node.put("policyFingerprint", POLICY_FINGERPRINT)
+                    .put("fingerprintSource", "server-generated")
+                    .put("databaseHostFingerprint", DATABASE_FINGERPRINTS.hostFingerprint())
+                    .put("databaseInstanceFingerprint", DATABASE_FINGERPRINTS.instanceFingerprint())
+                    .put("topologyFingerprint", DATABASE_FINGERPRINTS.topologyFingerprint());
         }
     }
 }
