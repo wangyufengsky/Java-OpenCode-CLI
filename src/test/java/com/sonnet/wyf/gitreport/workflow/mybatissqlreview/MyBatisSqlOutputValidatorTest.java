@@ -7,6 +7,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,6 +21,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -388,6 +392,98 @@ class MyBatisSqlOutputValidatorTest {
         writeJson(unsafePreview.resolve("database-evidence.json"), evidence);
         assertThatThrownBy(() -> validator.validatePublishedOffline(unsafePreview, expectedTask()))
                 .hasMessageContaining("maxRowCount").hasMessageContaining("1..20");
+    }
+
+    @ParameterizedTest(name = "database binding parity for {0}")
+    @MethodSource("metadataBindingCases")
+    void onlineAndOfflineApplyTheSameBindingTierForEveryMetadataTool(
+            String toolName,
+            String deepestRequiredField
+    ) throws Exception {
+        ObjectNode validArguments = metadataArguments(toolName);
+        ObjectNode result = objectMapper.createObjectNode();
+        if ("preview_table_data".equals(toolName)) {
+            result.putArray("columns").add("id");
+            result.putArray("rows");
+        } else {
+            result.put("ok", true);
+        }
+        AgentBridgeClient.ToolCallRecord validCall = toolCall(
+                "metadata-call", toolName, validArguments, result,
+                Instant.parse("2026-07-22T09:05:00Z"), 10L
+        );
+        assertThat(new MyBatisToolCallAudit(objectMapper).audit(
+                List.of(validCall),
+                new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of()),
+                database,
+                new MyBatisToolCallAudit.StatementContext("mapper-order-find-open", "select", false)
+        ).auditedCallIds()).containsExactly("metadata-call");
+
+        Path validOffline = validCandidates();
+        ObjectNode validEvidence = evidence(validOffline);
+        ObjectNode metadata = (ObjectNode) validEvidence.at("/metadata/0");
+        metadata.put("tool_name", toolName).set("arguments", validArguments);
+        writeJson(validOffline.resolve("database-evidence.json"), validEvidence);
+        assertThat(validator.validatePublishedOffline(validOffline, expectedTask()).scenarioCount())
+                .isEqualTo(1);
+
+        if (deepestRequiredField.isEmpty()) {
+            return;
+        }
+        ObjectNode wrongOnlineArguments = metadataArguments(toolName)
+                .put(deepestRequiredField, "wrong-target");
+        AgentBridgeClient.ToolCallRecord wrongCall = toolCall(
+                "metadata-call", toolName, wrongOnlineArguments, result,
+                Instant.parse("2026-07-22T09:05:00Z"), 10L
+        );
+        assertThatThrownBy(() -> new MyBatisToolCallAudit(objectMapper).audit(
+                List.of(wrongCall),
+                new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of()),
+                database,
+                new MyBatisToolCallAudit.StatementContext("mapper-order-find-open", "select", false)
+        )).hasMessageContaining(deepestRequiredField);
+
+        Path wrongOffline = validCandidates();
+        ObjectNode wrongEvidence = evidence(wrongOffline);
+        metadata = (ObjectNode) wrongEvidence.at("/metadata/0");
+        metadata.put("tool_name", toolName)
+                .set("arguments", metadataArguments(toolName).put(deepestRequiredField, "wrong-target"));
+        writeJson(wrongOffline.resolve("database-evidence.json"), wrongEvidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(wrongOffline, expectedTask()))
+                .hasMessageContaining(deepestRequiredField);
+    }
+
+    private static Stream<Arguments> metadataBindingCases() {
+        return Stream.of(
+                Arguments.of("list_database_connections", ""),
+                Arguments.of("test_database_connection", "connectionId"),
+                Arguments.of("list_recent_sql_queries", "connectionId"),
+                Arguments.of("list_database_schemas", "databaseName"),
+                Arguments.of("list_schema_object_kinds", "schemaName"),
+                Arguments.of("list_schema_objects", "schemaName"),
+                Arguments.of("preview_table_data", "schemaName"),
+                Arguments.of("get_database_object_description", "schemaName")
+        );
+    }
+
+    private ObjectNode metadataArguments(String toolName) {
+        ObjectNode arguments = objectMapper.createObjectNode();
+        if ("list_database_connections".equals(toolName)) {
+            return arguments;
+        }
+        arguments.put("connectionId", database.connectionId());
+        if ("test_database_connection".equals(toolName)
+                || "list_recent_sql_queries".equals(toolName)) {
+            return arguments;
+        }
+        arguments.put("databaseName", database.databaseName());
+        if (!"list_database_schemas".equals(toolName)) {
+            arguments.put("schemaName", database.schemaName());
+        }
+        if ("preview_table_data".equals(toolName)) {
+            arguments.put("tableName", "orders").put("maxRowCount", 20);
+        }
+        return arguments;
     }
 
     private MyBatisSqlOutputValidator.Result validateCandidates(Path candidates) throws Exception {

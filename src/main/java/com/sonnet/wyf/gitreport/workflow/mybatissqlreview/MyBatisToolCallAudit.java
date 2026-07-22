@@ -97,6 +97,42 @@ public final class MyBatisToolCallAudit {
         }
     }
 
+    static void validateDatabaseBinding(
+            String toolName,
+            JsonNode arguments,
+            String expectedConnectionId,
+            String expectedDatabaseName,
+            String expectedSchemaName,
+            String callId
+    ) {
+        if ("list_database_connections".equals(toolName)) {
+            return;
+        }
+        requireBoundArgument(arguments, "connectionId", expectedConnectionId, callId);
+        if ("test_database_connection".equals(toolName)
+                || "list_recent_sql_queries".equals(toolName)) {
+            return;
+        }
+        requireBoundArgument(arguments, "databaseName", expectedDatabaseName, callId);
+        if (SCHEMA_BOUND_TOOLS.contains(toolName)) {
+            requireBoundArgument(arguments, "schemaName", expectedSchemaName, callId);
+        }
+    }
+
+    private static void requireBoundArgument(
+            JsonNode arguments,
+            String field,
+            String expected,
+            String callId
+    ) {
+        if (!expected.equals(arguments.path(field).asText())) {
+            throw new IllegalStateException(
+                    "tool call " + callId
+                            + " arguments do not match the bound database target: " + field
+            );
+        }
+    }
+
     public Result audit(
             List<AgentBridgeClient.ToolCallRecord> history,
             Boundary boundary,
@@ -292,29 +328,10 @@ public final class MyBatisToolCallAudit {
             AgentBridgeClient.ToolCallRecord call,
             MyBatisDatabasePreflight.Result database
     ) {
-        JsonNode arguments = call.arguments();
-        String tool = call.toolName();
-        if ("list_database_connections".equals(tool)) {
-            return;
-        }
-        requireArgument(call, arguments, "connectionId", database.connectionId());
-        if (!"test_database_connection".equals(tool) && !"list_recent_sql_queries".equals(tool)) {
-            requireArgument(call, arguments, "databaseName", database.databaseName());
-        }
-        if (SCHEMA_BOUND_TOOLS.contains(tool)) {
-            requireArgument(call, arguments, "schemaName", database.schemaName());
-        }
-    }
-
-    private void requireArgument(
-            AgentBridgeClient.ToolCallRecord call,
-            JsonNode arguments,
-            String field,
-            String expected
-    ) {
-        if (!expected.equals(arguments.path(field).asText())) {
-            throw violation(call, "arguments do not match the bound database target: " + field);
-        }
+        validateDatabaseBinding(
+                call.toolName(), call.arguments(), database.connectionId(), database.databaseName(),
+                database.schemaName(), call.id()
+        );
     }
 
     private RowData parseRowData(AgentBridgeClient.ToolCallRecord call) {

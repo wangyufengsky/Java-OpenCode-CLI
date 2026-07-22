@@ -177,7 +177,7 @@ public final class MyBatisSqlOutputValidator {
             requireText(item, "timestamp", "metadata item");
             requireNonNegativeLong(item, "duration_ms", "metadata item");
             JsonNode arguments = requireObject(item, "arguments", "metadata item");
-            requireOfflineDatabaseArguments(arguments, evidence, "metadata item");
+            requireOfflineDatabaseArguments(toolName, arguments, evidence, callId);
             MyBatisToolCallAudit.validateDeterminableMetadata(toolName, arguments, callId);
             if (item.path("result").isMissingNode() || item.path("result").isNull()) {
                 throw new IllegalStateException("metadata item.result is required");
@@ -202,7 +202,7 @@ public final class MyBatisSqlOutputValidator {
             requireText(scenario, "timestamp", "scenario");
             String queryText = requireText(scenario, "query_text", "scenario");
             JsonNode arguments = requireObject(scenario, "arguments", "scenario");
-            requireOfflineDatabaseArguments(arguments, evidence, "scenario");
+            requireOfflineDatabaseArguments("execute_sql_query", arguments, evidence, callId);
             requireExactText(arguments, "queryText", queryText,
                     "scenario arguments");
             long durationMs = requireNonNegativeLong(scenario, "duration_ms", "scenario");
@@ -249,10 +249,20 @@ public final class MyBatisSqlOutputValidator {
         return scenarios.size();
     }
 
-    private void requireOfflineDatabaseArguments(JsonNode arguments, JsonNode evidence, String label) {
-        requireExactText(arguments, "connectionId", evidence.path("connection_id").asText(), label);
-        requireExactText(arguments, "databaseName", evidence.path("database_name").asText(), label);
-        requireExactText(arguments, "schemaName", evidence.path("schema_name").asText(), label);
+    private void requireOfflineDatabaseArguments(
+            String toolName,
+            JsonNode arguments,
+            JsonNode evidence,
+            String callId
+    ) {
+        MyBatisToolCallAudit.validateDatabaseBinding(
+                toolName,
+                arguments,
+                evidence.path("connection_id").asText(),
+                evidence.path("database_name").asText(),
+                evidence.path("schema_name").asText(),
+                callId
+        );
     }
 
     private long requireNonNegativeLong(JsonNode parent, String field, String label) {
