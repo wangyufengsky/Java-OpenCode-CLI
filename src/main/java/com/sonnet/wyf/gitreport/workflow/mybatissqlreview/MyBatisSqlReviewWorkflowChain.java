@@ -471,11 +471,11 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             resolved.setValidationMaxCorrections(source.getValidationMaxCorrections());
             resolved.setTaskMessage(source.getTaskMessage());
             resolved.setSynthesisTaskMessage(source.getSynthesisTaskMessage());
-            if (webBaseUrl != null) {
-                resolved.setWebBaseUrl(webBaseUrl);
+            if (webBaseUrl != null && !webBaseUrl.isBlank()) {
+                resolved.setWebBaseUrl(webBaseUrl.trim());
             }
-            if (mcpUrl != null) {
-                resolved.setMcpUrl(mcpUrl);
+            if (mcpUrl != null && !mcpUrl.isBlank()) {
+                resolved.setMcpUrl(mcpUrl.trim());
             }
             if (concurrency != null) {
                 resolved.setConcurrency(concurrency);

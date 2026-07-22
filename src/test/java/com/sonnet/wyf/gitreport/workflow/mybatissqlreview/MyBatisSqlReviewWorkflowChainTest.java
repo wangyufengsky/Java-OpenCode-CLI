@@ -252,6 +252,31 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
+    void blankYamlUrlsFallBackToGlobalWhileTaskMessageCanRemainExplicitlyBlank() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config) + """
+
+                agentbridge:
+                  web-base-url: "   "
+                  mcp-url: ""
+                  task-message: "   "
+                """);
+        AgentBridgeSettings global = settings();
+        global.setWebBaseUrl("http://global-agentbridge.test");
+        global.setMcpUrl("http://global-agentbridge.test/mcp");
+        global.setTaskMessage("GLOBAL TASK MESSAGE");
+
+        assertThatCode(() -> chain.run(request(
+                "full", "", "", "run-blank-agentbridge-urls", global
+        ))).doesNotThrowAnyException();
+
+        assertThat(client.listToolsUris).containsOnly(URI.create("http://global-agentbridge.test/mcp"));
+        assertThat(client.postedPromptUris).containsOnly(URI.create("http://global-agentbridge.test"));
+        assertThat(client.postedPrompts)
+                .allSatisfy(prompt -> assertThat(prompt).doesNotContain("GLOBAL TASK MESSAGE"));
+    }
+
+    @Test
     void recordsFailedRunManifestWhenConfigurationValidationFailsBeforeWorkspaceStart() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config)

@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -180,7 +181,9 @@ public class ConsoleApiController {
     }
 
     private void validate(WorkflowRunSubmission submission) {
-        String chainId = submission.chainId() == null ? "" : submission.chainId().trim();
+        String chainId = submission.chainId() == null
+                ? ""
+                : submission.chainId().trim().toLowerCase(Locale.ROOT);
         chainCatalog.chain(chainId);
         String mode = submission.mode() == null || submission.mode().isBlank() ? "full" : submission.mode().trim().toLowerCase();
         if (!"full".equals(mode) && !"rerun".equals(mode)) {

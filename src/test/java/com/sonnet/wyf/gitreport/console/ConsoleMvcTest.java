@@ -1203,6 +1203,27 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void runApiNormalizesMixedCaseChainBeforeApplyingRerunIdContract() throws Exception {
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"MyBatis-SQL-Review","mode":"rerun",
+                                 "rerunType":"index","rerunId":"stale-statement-key","config":{}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("该重跑类型不能填写重跑 ID"));
+
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"MyBatis-SQL-Review","mode":"rerun",
+                                 "rerunType":"sql","config":{}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("重跑模式必须填写重跑 ID"));
+    }
+
+    @Test
     void scheduleApiRejectsMyBatisIndexRerunWithAnId() throws Exception {
         mockMvc.perform(post("/api/schedules")
                         .contentType("application/json")
