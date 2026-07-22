@@ -2,7 +2,7 @@
 # Database credentials must be an isolated non-owner/non-admin read-only account on a
 # centralized GaussDB physical read replica. Every SQL task rechecks the bound local AgentBridge
 # instance/policy and server-generated database host/instance/topology fingerprints before submit.
-# TEST declarations are not a hard read-only boundary.
+# Test databases and self-attested environment labels are rejected.
 
 project:
   id: "example-project"

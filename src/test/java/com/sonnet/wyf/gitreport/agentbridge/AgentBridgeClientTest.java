@@ -106,11 +106,85 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void revalidatesBoundMyBatisWebIdentityBeforeSendingEachPrompt() throws Exception {
+        AtomicInteger infoCalls = new AtomicInteger();
+        AtomicInteger promptCalls = new AtomicInteger();
+        HttpServer server = server();
+        server.createContext("/info", exchange -> {
+            boolean initialBinding = infoCalls.getAndIncrement() == 0;
+            respond(exchange, 200, strictAuditInfo(
+                    initialBinding ? "instance-a" : "instance-b",
+                    initialBinding ? "nonce-a-0123456789" : "nonce-b-0123456789"
+            ));
+        });
+        server.createContext("/prompt", exchange -> {
+            promptCalls.incrementAndGet();
+            respond(exchange, 200, "{}");
+        });
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "strict-session", """
+                        {"jsonrpc":"2.0","id":1,"result":{
+                          "protocolVersion":"2025-11-25",
+                          "identity":{"instanceId":"instance-a","projectId":"project-a",
+                            "instanceNonce":"nonce-a-0123456789"},
+                          "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }}
+                        """);
+                case "notifications/initialized" -> respondWithSession(
+                        exchange, 202, "strict-session", "");
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+        URI web = baseUri(server);
+        client.bindMyBatisSqlReviewEndpoints(web, URI.create(web + "/mcp"));
+
+        assertThatThrownBy(() -> client.postPrompt(web, "must not reach another instance"))
+                .hasMessageContaining("identity or policy fingerprint mismatch");
+        assertThat(promptCalls).hasValue(0);
+    }
+
+    @Test
     void rejectsNonLoopbackAgentBridgeEndpointsBeforeNetworkAccess() {
-        assertThatThrownBy(() -> client.bindMyBatisSqlReviewEndpoints(
+        CapturingHttpClient transport = new CapturingHttpClient("{}");
+        AgentBridgeClient strictClient = new AgentBridgeClient(objectMapper, transport);
+
+        assertThatThrownBy(() -> strictClient.bindMyBatisSqlReviewEndpoints(
                 URI.create("https://agentbridge.example.com"),
                 URI.create("https://agentbridge.example.com/mcp")
         )).hasMessageContaining("loopback");
+        assertThat(transport.requestCount).isZero();
+    }
+
+    @Test
+    void preservesLegacyNonLoopbackWebAndMcpCompatibilityOutsideStrictMyBatisBinding() throws Exception {
+        CapturingHttpClient webTransport = new CapturingHttpClient("{}");
+        AgentBridgeClient legacyWebClient = new AgentBridgeClient(objectMapper, webTransport);
+        legacyWebClient.postPrompt(
+                URI.create("https://legacy-agentbridge.example.com"),
+                "legacy workflow"
+        );
+        assertThat(webTransport.lastRequest.uri()).isEqualTo(
+                URI.create("https://legacy-agentbridge.example.com/prompt")
+        );
+
+        CapturingHttpClient mcpTransport = new CapturingHttpClient("""
+                {"jsonrpc":"2.0","id":3,"result":{
+                  "content":[{"type":"text","text":"{\\\"ok\\\":true}"}]
+                }}
+                """);
+        AgentBridgeClient legacyMcpClient = new AgentBridgeClient(objectMapper, mcpTransport);
+        AgentBridgeClient.ToolResponse response = legacyMcpClient.callTool(
+                URI.create("https://legacy-agentbridge.example.com/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode()
+        );
+        assertThat(response.structured().path("ok").asBoolean()).isTrue();
+        assertThat(mcpTransport.lastRequest.uri()).isEqualTo(
+                URI.create("https://legacy-agentbridge.example.com/mcp")
+        );
     }
 
     @Test

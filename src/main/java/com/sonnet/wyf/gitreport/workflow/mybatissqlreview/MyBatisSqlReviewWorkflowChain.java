@@ -478,42 +478,6 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         }
     }
 
-    private void validatePublishedDatabaseEvidence(
-            Path root,
-            MyBatisSqlStatement statement
-    ) throws Exception {
-        Path evidencePath = MyBatisSqlReportRenderer.statementDirectory(root, statement)
-                .resolve("database-evidence.json");
-        JsonNode evidence = objectMapper.readTree(evidencePath.toFile());
-        String expectedCommand = statement.selectKey()
-                ? "selectKey"
-                : statement.commandType().toLowerCase(Locale.ROOT);
-        boolean valid = evidence != null
-                && evidence.isObject()
-                && "mybatis-sql-review-database-evidence/v1".equals(
-                evidence.path("schema_version").asText())
-                && statement.statementKey().equals(evidence.path("statement_key").asText())
-                && statement.mapperRelativePath().equals(
-                evidence.path("mapper_relative_path").asText())
-                && statement.namespace().equals(evidence.path("namespace").asText())
-                && statement.id().equals(evidence.path("statement_id").asText())
-                && expectedCommand.equals(evidence.path("command_type").asText())
-                && evidence.path("select_key").isBoolean()
-                && statement.selectKey() == evidence.path("select_key").booleanValue()
-                && !evidence.path("connection_id").asText().isBlank()
-                && !evidence.path("database_name").asText().isBlank()
-                && !evidence.path("schema_name").asText().isBlank()
-                && evidence.path("audit").isObject()
-                && evidence.path("metadata").isArray()
-                && evidence.path("scenarios").isArray()
-                && evidence.path("limitations").isArray();
-        if (!valid) {
-            throw new IllegalStateException(
-                    "published database evidence is invalid for " + statement.statementKey()
-            );
-        }
-    }
-
     private static Set<String> safeTreeEntries(Path root, Path tree) throws Exception {
         if (Files.isSymbolicLink(tree) || !Files.isDirectory(tree, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalStateException("published artifact tree is missing or unsafe: " + tree);

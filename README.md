@@ -404,7 +404,7 @@ agentbridge:
 | `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
 | `database.connection-name` | AgentBridge Database Tools 中必须唯一匹配的连接名。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
-| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。每个 SQL task 提交前还会重验同一 AgentBridge、数据库主机/实例/拓扑指纹、physical standby 和连接可用性。`test` 自证不构成硬只读边界。 |
+| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。每个 SQL task 提交前还会重验同一 AgentBridge、数据库主机/实例/拓扑指纹、physical standby 和连接可用性。测试库或其它自证环境标签均不接受。 |
 | `database.non-owner-non-admin-read-only-account` | 运行前必须改成 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
 | `database.row-level-security-disabled-for-safe-base-tables` | 运行前必须改成 `true`，确认所有可取证基础表均禁用 RLS。 |
 | `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 运行前必须改成 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |

@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
@@ -48,8 +49,8 @@ public class AgentBridgeClient {
     private final AtomicLong requestIds = new AtomicLong();
     private final Object mcpSessionLock = new Object();
     private final Map<URI, McpSession> mcpSessions = new HashMap<>();
-    private final Map<URI, MyBatisAuditBinding> myBatisWebBindings = new HashMap<>();
-    private final Map<URI, MyBatisAuditBinding> myBatisMcpBindings = new HashMap<>();
+    private final Map<URI, MyBatisAuditBinding> myBatisWebBindings = new ConcurrentHashMap<>();
+    private final Map<URI, MyBatisAuditBinding> myBatisMcpBindings = new ConcurrentHashMap<>();
 
     public AgentBridgeClient(ObjectMapper objectMapper) {
         this(objectMapper, localAgentBridgeHttpClient());
@@ -61,6 +62,11 @@ public class AgentBridgeClient {
     }
 
     public void postPrompt(URI webBaseUrl, String prompt) throws IOException, InterruptedException {
+        MyBatisAuditBinding strictBinding = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
+        if (strictBinding != null) {
+            requireLoopbackEndpoint(webBaseUrl);
+            agentBridgeInfo(webBaseUrl);
+        }
         ObjectNode body = objectMapper.createObjectNode();
         body.put("text", prompt);
         HttpResponse<String> response = sendJson(webBaseUrl.resolve("/prompt"), body);
@@ -96,6 +102,7 @@ public class AgentBridgeClient {
 
     public void requireMyBatisSqlReviewCapabilities(URI webBaseUrl)
             throws IOException, InterruptedException {
+        requireLoopbackEndpoint(webBaseUrl);
         JsonNode info = agentBridgeInfo(webBaseUrl);
         strictMyBatisAuditBinding(info);
     }
@@ -187,6 +194,12 @@ public class AgentBridgeClient {
         JsonNode info = objectMapper.readTree(response.body());
         if (!info.isObject()) {
             throw new IllegalStateException("AgentBridge GET /info must return an object");
+        }
+        MyBatisAuditBinding expected = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
+        if (expected != null && !expected.equals(strictMyBatisAuditBinding(info))) {
+            throw new IllegalStateException(
+                    "AgentBridge GET /info identity or policy fingerprint mismatch"
+            );
         }
         return info;
     }
@@ -689,7 +702,6 @@ public class AgentBridgeClient {
             int maximumResponseBytes,
             String responseLabel
     ) throws IOException, InterruptedException {
-        requireLoopbackEndpoint(request.uri());
         return httpClient.send(
                 request,
                 responseInfo -> new LimitedStringBodySubscriber(

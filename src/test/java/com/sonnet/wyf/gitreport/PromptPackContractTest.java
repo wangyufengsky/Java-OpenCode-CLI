@@ -19,7 +19,8 @@ class PromptPackContractTest {
         String readme = Files.readString(Path.of("README.md"));
 
         assertThat(prompt).contains(
-                "centralized GaussDB read replica or test database",
+                "centralized GaussDB physical read replica",
+                "Test databases and self-attested environment labels are not accepted",
                 "non-owner, non-admin, read-only account",
                 "RLS is disabled",
                 "security-definer functions",
