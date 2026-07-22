@@ -12,9 +12,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class MyBatisSqlReportRenderer {
     public static final String MAIN_REPORT = "mybatis-sql-review-report.md";
@@ -25,6 +28,8 @@ public final class MyBatisSqlReportRenderer {
     private static final List<String> TASK_ARTIFACTS = List.of(
             "report.md", "summary.json", "database-evidence.json"
     );
+    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern SAFE_KEY = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{12}");
 
     private final ObjectMapper objectMapper;
 
@@ -36,6 +41,7 @@ public final class MyBatisSqlReportRenderer {
         Path root = Objects.requireNonNull(bundleRoot, "bundleRoot").toAbsolutePath().normalize();
         Objects.requireNonNull(project, "project");
         Objects.requireNonNull(inventory, "inventory");
+        validateInventory(inventory);
         List<StatementSummary> summaries = validateAndReadSummaries(root, inventory);
         SeverityCounts severity = severityCounts(summaries);
         Files.createDirectories(root);
@@ -50,9 +56,10 @@ public final class MyBatisSqlReportRenderer {
     }
 
     public Path writeInventorySnapshot(Path bundleRoot, MyBatisSqlInventory inventory) throws IOException {
+        validateInventory(Objects.requireNonNull(inventory, "inventory"));
         Path target = Objects.requireNonNull(bundleRoot, "bundleRoot")
                 .toAbsolutePath().normalize().resolve(INVENTORY);
-        writeJson(target, inventoryJson(Objects.requireNonNull(inventory, "inventory")));
+        writeJson(target, inventoryJson(inventory));
         return target;
     }
 
@@ -63,34 +70,73 @@ public final class MyBatisSqlReportRenderer {
         }
         Map<String, List<MyBatisSqlStatement>> byMapper = new LinkedHashMap<>();
         List<MyBatisSqlStatement> statements = new ArrayList<>();
+        Set<String> publishedStatementKeys = new LinkedHashSet<>();
         JsonNode statementNodes = root.path("statements");
         if (!statementNodes.isArray()) {
             throw new IllegalStateException("published SQL inventory is missing statements array");
         }
         for (JsonNode node : statementNodes) {
             MyBatisSqlStatement statement = readStatement(node);
+            if (!publishedStatementKeys.add(statement.statementKey())) {
+                throw new IllegalStateException(
+                        "duplicate statement_key in published SQL inventory: " + statement.statementKey());
+            }
             statements.add(statement);
             byMapper.computeIfAbsent(statement.mapperKey(), ignored -> new ArrayList<>()).add(statement);
         }
         List<MyBatisMapperInventory> mappers = new ArrayList<>();
+        Set<String> publishedMapperKeys = new LinkedHashSet<>();
         JsonNode mapperNodes = root.path("mappers");
         if (!mapperNodes.isArray()) {
             throw new IllegalStateException("published SQL inventory is missing mappers array");
         }
         for (JsonNode node : mapperNodes) {
             String mapperKey = requiredText(node, "mapper_key", "published mapper inventory");
+            String mapperRelativePath = requiredText(node, "mapper_relative_path", "published mapper inventory");
+            String namespace = requiredText(node, "namespace", "published mapper inventory");
+            String sourceSha256 = requiredText(node, "source_sha256", "published mapper inventory");
+            if (!publishedMapperKeys.add(mapperKey)) {
+                throw new IllegalStateException("duplicate mapper_key in published SQL inventory: " + mapperKey);
+            }
+            requireSafeKey(mapperKey, "mapper_key");
+            requireSafeRelativePath(mapperRelativePath, "mapper_relative_path");
+            requireSha256(sourceSha256, "mapper source_sha256");
+            if (!MyBatisSqlInventoryBuilder.canonicalMapperKey(mapperRelativePath, namespace).equals(mapperKey)) {
+                throw new IllegalStateException("mapper_key does not match canonical mapper identity: " + mapperKey);
+            }
+            List<String> declaredStatementKeys = textList(node, "statement_keys", "published mapper inventory");
+            if (new LinkedHashSet<>(declaredStatementKeys).size() != declaredStatementKeys.size()) {
+                throw new IllegalStateException(
+                        "published mapper inventory.statement_keys must contain unique strings");
+            }
+            List<MyBatisSqlStatement> mapperStatements = byMapper.getOrDefault(mapperKey, List.of());
+            int statementCount = requiredInt(node, "statement_count", "published mapper inventory");
+            if (statementCount != mapperStatements.size()) {
+                throw new IllegalStateException("published mapper inventory.statement_count does not match " + mapperKey);
+            }
+            List<String> actualStatementKeys = mapperStatements.stream().map(MyBatisSqlStatement::statementKey).toList();
+            if (!declaredStatementKeys.equals(actualStatementKeys)) {
+                throw new IllegalStateException("published mapper inventory.statement_keys does not match " + mapperKey);
+            }
             mappers.add(new MyBatisMapperInventory(
-                    requiredText(node, "mapper_relative_path", "published mapper inventory"),
-                    requiredText(node, "namespace", "published mapper inventory"),
-                    requiredText(node, "source_sha256", "published mapper inventory"),
+                    mapperRelativePath,
+                    namespace,
+                    sourceSha256,
                     mapperKey,
-                    byMapper.getOrDefault(mapperKey, List.of())
+                    mapperStatements
             ));
         }
         if (mappers.stream().mapToInt(mapper -> mapper.statements().size()).sum() != statements.size()) {
             throw new IllegalStateException("published SQL inventory contains statements for an unknown mapper");
         }
-        return new MyBatisSqlInventory(mappers, statements);
+        if (requiredInt(root, "mapper_count", "published SQL inventory") != mappers.size()
+                || requiredInt(root, "statement_count", "published SQL inventory") != statements.size()) {
+            throw new IllegalStateException("published SQL inventory counts do not match its arrays");
+        }
+        MyBatisSqlInventory inventory = new MyBatisSqlInventory(mappers, statements);
+        validateInventory(inventory);
+        validateDeclaredPaths(root, inventory);
+        return inventory;
     }
 
     static Path statementDirectory(Path root, MyBatisSqlStatement statement) {
@@ -104,6 +150,125 @@ public final class MyBatisSqlReportRenderer {
             throw new IllegalArgumentException("SQL report path escapes bundle root: " + statement.statementKey());
         }
         return directory;
+    }
+
+    private void validateInventory(MyBatisSqlInventory inventory) {
+        Set<String> mapperKeys = new LinkedHashSet<>();
+        Map<String, MyBatisMapperInventory> mappersByKey = new LinkedHashMap<>();
+        Set<String> reportPaths = new LinkedHashSet<>();
+        for (MyBatisMapperInventory mapper : inventory.mappers()) {
+            requireSafeRelativePath(mapper.mapperRelativePath(), "mapper_relative_path");
+            requireSha256(mapper.sourceSha256(), "mapper source_sha256");
+            requireSafeKey(mapper.mapperKey(), "mapper_key");
+            String expectedKey = MyBatisSqlInventoryBuilder.canonicalMapperKey(
+                    mapper.mapperRelativePath(), mapper.namespace());
+            if (!expectedKey.equals(mapper.mapperKey())) {
+                throw new IllegalStateException("mapper_key does not match canonical mapper identity: " + mapper.mapperKey());
+            }
+            if (!mapperKeys.add(mapper.mapperKey())) {
+                throw new IllegalStateException("duplicate mapper_key in SQL inventory: " + mapper.mapperKey());
+            }
+            mappersByKey.put(mapper.mapperKey(), mapper);
+            if (!reportPaths.add(relative(statementIndex(mapper.mapperKey())))) {
+                throw new IllegalStateException("duplicate mapper report path in SQL inventory: " + mapper.mapperKey());
+            }
+        }
+
+        Set<String> statementKeys = new LinkedHashSet<>();
+        Map<String, List<MyBatisSqlStatement>> statementsByMapper = new LinkedHashMap<>();
+        for (MyBatisSqlStatement statement : inventory.statements()) {
+            requireSafeRelativePath(statement.mapperRelativePath(), "statement mapper_relative_path");
+            requireSha256(statement.sourceSha256(), "statement source_sha256");
+            requireSafeKey(statement.mapperKey(), "statement mapper_key");
+            requireSafeKey(statement.statementKey(), "statement_key");
+            MyBatisMapperInventory mapper = mappersByKey.get(statement.mapperKey());
+            if (mapper == null) {
+                throw new IllegalStateException("statement mapper binding references unknown mapper_key: "
+                        + statement.statementKey());
+            }
+            if (!mapper.mapperRelativePath().equals(statement.mapperRelativePath())
+                    || !mapper.namespace().equals(statement.namespace())
+                    || !mapper.sourceSha256().equals(statement.sourceSha256())) {
+                throw new IllegalStateException("statement mapper binding is inconsistent: " + statement.statementKey());
+            }
+            String expectedKey = MyBatisSqlInventoryBuilder.canonicalStatementKey(
+                    statement.mapperRelativePath(), statement.namespace(), statement.id(), statement.selectKeyOrdinal());
+            if (!expectedKey.equals(statement.statementKey())) {
+                throw new IllegalStateException(
+                        "statement_key does not match canonical statement identity: " + statement.statementKey());
+            }
+            if (!statementKeys.add(statement.statementKey())) {
+                throw new IllegalStateException("duplicate statement_key in SQL inventory: " + statement.statementKey());
+            }
+            if (statement.selectKey() != (statement.selectKeyOrdinal() > 0)) {
+                throw new IllegalStateException("statement select_key ordinal binding is inconsistent: "
+                        + statement.statementKey());
+            }
+            if (statement.startLine() < 1 || statement.endLine() < statement.startLine()) {
+                throw new IllegalStateException("statement source line range is invalid: " + statement.statementKey());
+            }
+            String reportPath = relativeStatementDirectory(statement);
+            if (!reportPaths.add(reportPath)) {
+                throw new IllegalStateException("duplicate SQL report path in inventory: " + reportPath);
+            }
+            statementsByMapper.computeIfAbsent(statement.mapperKey(), ignored -> new ArrayList<>()).add(statement);
+        }
+        for (MyBatisMapperInventory mapper : inventory.mappers()) {
+            List<MyBatisSqlStatement> globalStatements = statementsByMapper.getOrDefault(mapper.mapperKey(), List.of());
+            if (!mapper.statements().equals(globalStatements)) {
+                throw new IllegalStateException("mapper statement list does not exactly match global inventory: "
+                        + mapper.mapperKey());
+            }
+        }
+    }
+
+    private void validateDeclaredPaths(JsonNode root, MyBatisSqlInventory inventory) {
+        for (int index = 0; index < inventory.mappers().size(); index++) {
+            MyBatisMapperInventory mapper = inventory.mappers().get(index);
+            requireExactPublishedText(root.path("mappers").get(index), "report_index",
+                    relative(statementIndex(mapper.mapperKey())), mapper.mapperKey());
+        }
+        for (int index = 0; index < inventory.statements().size(); index++) {
+            MyBatisSqlStatement statement = inventory.statements().get(index);
+            requireExactPublishedText(root.path("statements").get(index), "report_directory",
+                    relativeStatementDirectory(statement), statement.statementKey());
+        }
+    }
+
+    private void requireExactPublishedText(JsonNode node, String field, String expected, String identity) {
+        String actual = requiredText(node, field, "published SQL inventory " + identity);
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException("published SQL inventory " + field + " does not match " + identity);
+        }
+    }
+
+    private void requireSafeRelativePath(String value, String field) {
+        if (value.isBlank() || value.indexOf('\\') >= 0) {
+            throw new IllegalStateException(field + " must be a canonical safe relative path: " + value);
+        }
+        Path path;
+        try {
+            path = Path.of(value);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(field + " must be a canonical safe relative path: " + value, exception);
+        }
+        if (path.isAbsolute() || path.getNameCount() == 0 || !relative(path.normalize()).equals(value)
+                || value.equals("..") || value.startsWith("../") || value.contains("/../")
+                || value.equals(".") || value.startsWith("./") || value.contains("/./")) {
+            throw new IllegalStateException(field + " must be a canonical safe relative path: " + value);
+        }
+    }
+
+    private void requireSafeKey(String value, String field) {
+        if (!SAFE_KEY.matcher(value).matches()) {
+            throw new IllegalStateException(field + " must be a canonical safe key: " + value);
+        }
+    }
+
+    private void requireSha256(String value, String field) {
+        if (!SHA256.matcher(value).matches()) {
+            throw new IllegalStateException(field + " must be a lowercase SHA-256 value");
+        }
     }
 
     private List<StatementSummary> validateAndReadSummaries(
@@ -127,14 +292,55 @@ public final class MyBatisSqlReportRenderer {
                 throw new IllegalStateException("SQL summary findings must be an array: " + statement.statementKey());
             }
             List<Finding> parsedFindings = new ArrayList<>();
+            Set<String> findingIds = new LinkedHashSet<>();
             for (JsonNode finding : findings) {
                 String id = requiredText(finding, "id", "SQL summary finding");
+                if (!findingIds.add(id)) {
+                    throw new IllegalStateException(
+                            "SQL summary finding id must be unique: " + statement.statementKey() + " / " + id);
+                }
                 String sourceSeverity = requiredText(finding, "severity", "SQL summary finding");
                 parsedFindings.add(new Finding(id, toProjectSeverity(sourceSeverity)));
             }
+            requireSummarySemantics(summary, statement, parsedFindings);
             summaries.add(new StatementSummary(statement, List.copyOf(parsedFindings)));
         }
         return List.copyOf(summaries);
+    }
+
+    private void requireSummarySemantics(
+            JsonNode summary,
+            MyBatisSqlStatement statement,
+            List<Finding> findings
+    ) {
+        String status = requiredText(summary, "status", "SQL summary " + statement.statementKey());
+        String expectedStatus = findings.isEmpty() ? "no-findings" : "reviewed";
+        if (!expectedStatus.equals(status)) {
+            throw new IllegalStateException("SQL summary status does not match findings: " + statement.statementKey());
+        }
+        String risk = requiredText(summary, "risk_level", "SQL summary " + statement.statementKey());
+        String expectedRisk = highestRisk(findings);
+        if (!expectedRisk.equals(risk)) {
+            throw new IllegalStateException("SQL summary risk_level does not match highest finding severity: "
+                    + statement.statementKey());
+        }
+    }
+
+    private String highestRisk(List<Finding> findings) {
+        Set<String> severities = findings.stream().map(Finding::severity).collect(java.util.stream.Collectors.toSet());
+        if (severities.contains("P0")) {
+            return "critical";
+        }
+        if (severities.contains("P1")) {
+            return "high";
+        }
+        if (severities.contains("P2")) {
+            return "medium";
+        }
+        if (severities.contains("P3")) {
+            return "low";
+        }
+        return "none";
     }
 
     private void requireSummaryBinding(JsonNode summary, MyBatisSqlStatement statement) {
@@ -156,6 +362,8 @@ public final class MyBatisSqlReportRenderer {
     private ObjectNode inventoryJson(MyBatisSqlInventory inventory) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("schema_version", "mybatis-sql-review-inventory/v1");
+        root.put("mapper_count", inventory.mappers().size());
+        root.put("statement_count", inventory.statements().size());
         ArrayNode mappers = root.putArray("mappers");
         for (MyBatisMapperInventory mapper : inventory.mappers()) {
             ObjectNode node = mappers.addObject();
@@ -164,6 +372,8 @@ public final class MyBatisSqlReportRenderer {
             node.put("source_sha256", mapper.sourceSha256());
             node.put("mapper_key", mapper.mapperKey());
             node.put("statement_count", mapper.statements().size());
+            ArrayNode statementKeys = node.putArray("statement_keys");
+            mapper.statements().forEach(statement -> statementKeys.add(statement.statementKey()));
             node.put("report_index", relative(statementIndex(mapper.mapperKey())));
         }
         ArrayNode statements = root.putArray("statements");
@@ -258,7 +468,7 @@ public final class MyBatisSqlReportRenderer {
         Map<String, StatementSummary> byKey = new LinkedHashMap<>();
         summaries.forEach(summary -> byKey.put(summary.statement().statementKey(), summary));
         for (MyBatisMapperInventory mapper : inventory.mappers()) {
-            Path index = root.resolve(statementIndex(mapper.mapperKey()));
+            Path index = resolveContained(root, statementIndex(mapper.mapperKey()), "mapper report index");
             Files.createDirectories(index.getParent());
             List<StatementSummary> mapperSummaries = mapper.statements().stream()
                     .map(statement -> byKey.get(statement.statementKey()))
@@ -266,8 +476,8 @@ public final class MyBatisSqlReportRenderer {
                     .toList();
             SeverityCounts counts = severityCounts(mapperSummaries);
             StringBuilder md = new StringBuilder("# Mapper SQL Review: ")
-                    .append(mapper.namespace()).append("\n\n")
-                    .append("- Mapper: `").append(mapper.mapperRelativePath()).append("`\n")
+                    .append(markdownText(mapper.namespace())).append("\n\n")
+                    .append("- Mapper: `").append(markdownText(mapper.mapperRelativePath())).append("`\n")
                     .append("- Statements: `").append(mapper.statements().size()).append("`\n")
                     .append("- Findings: `").append(counts.total()).append("`\n")
                     .append("- P0: `").append(counts.p0()).append("`\n")
@@ -280,9 +490,9 @@ public final class MyBatisSqlReportRenderer {
                 md.append("No mapped SQL statements were discovered in this mapper.\n");
             } else {
                 for (MyBatisSqlStatement statement : mapper.statements()) {
-                    md.append("- [`").append(statement.statementKey()).append("`](sql/")
+                    md.append("- [`").append(markdownText(statement.statementKey())).append("`](sql/")
                             .append(statement.statementKey()).append("/report.md) — `")
-                            .append(commandType(statement)).append("`, findings `")
+                            .append(markdownText(commandType(statement))).append("`, findings `")
                             .append(byKey.get(statement.statementKey()).findings().size()).append("`\n");
                 }
             }
@@ -296,9 +506,9 @@ public final class MyBatisSqlReportRenderer {
             SeverityCounts severity
     ) {
         StringBuilder md = new StringBuilder("# MyBatis SQL Review: ")
-                .append(project.name()).append("\n\n")
-                .append("- Project id: `").append(project.id()).append("`\n")
-                .append("- Repository: `").append(project.repository()).append("`\n")
+                .append(markdownText(project.name())).append("\n\n")
+                .append("- Project id: `").append(markdownText(project.id())).append("`\n")
+                .append("- Repository: `").append(markdownText(project.repository().toString())).append("`\n")
                 .append("- Mappers: `").append(inventory.mappers().size()).append("`\n")
                 .append("- Statements: `").append(inventory.statements().size()).append("`\n")
                 .append("- Findings: `").append(severity.total()).append("`\n")
@@ -316,12 +526,30 @@ public final class MyBatisSqlReportRenderer {
             md.append("No mapper XML files were discovered.\n");
         } else {
             for (MyBatisMapperInventory mapper : inventory.mappers()) {
-                md.append("- [").append(mapper.namespace()).append("](")
+                md.append("- [").append(markdownText(mapper.namespace())).append("](")
                         .append(relative(statementIndex(mapper.mapperKey()))).append(") — statements `")
                         .append(mapper.statements().size()).append("`\n");
             }
         }
         return md.toString();
+    }
+
+    private String markdownText(String value) {
+        return value.replace("\r", " ").replace("\n", " ")
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace(":", "&#58;")
+                .replace("`", "&#96;")
+                .replace("\\", "\\\\")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)")
+                .replace("|", "\\|")
+                .replace("*", "\\*")
+                .replace("_", "\\_")
+                .replace("#", "\\#");
     }
 
     private String renderDataQuality(MyBatisSqlInventory inventory, List<StatementSummary> summaries) {
@@ -403,14 +631,18 @@ public final class MyBatisSqlReportRenderer {
     }
 
     private List<String> textList(JsonNode node, String field) {
+        return textList(node, field, "published SQL inventory statement");
+    }
+
+    private List<String> textList(JsonNode node, String field, String label) {
         JsonNode array = node.path(field);
         if (!array.isArray()) {
-            throw new IllegalStateException("published SQL inventory statement." + field + " must be an array");
+            throw new IllegalStateException(label + "." + field + " must be an array");
         }
         List<String> result = new ArrayList<>();
         for (JsonNode item : array) {
             if (!item.isTextual()) {
-                throw new IllegalStateException("published SQL inventory statement." + field + " must contain strings");
+                throw new IllegalStateException(label + "." + field + " must contain strings");
             }
             result.add(item.asText());
         }
@@ -460,6 +692,15 @@ public final class MyBatisSqlReportRenderer {
 
     private static String relative(Path path) {
         return path.toString().replace('\\', '/');
+    }
+
+    private static Path resolveContained(Path root, Path relative, String label) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path resolved = normalizedRoot.resolve(relative).normalize();
+        if (relative.isAbsolute() || !resolved.startsWith(normalizedRoot)) {
+            throw new IllegalStateException(label + " escapes bundle root: " + relative);
+        }
+        return resolved;
     }
 
     public record Project(String id, String name, Path repository) {

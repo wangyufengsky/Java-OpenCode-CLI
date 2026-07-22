@@ -9,6 +9,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -95,7 +97,115 @@ class WorkflowArtifactWorkspaceTest {
         assertThat(tempDir.resolve("index.md")).doesNotExist();
     }
 
+    @Test
+    void rollsBackEveryPublishedByteWhenApplyFailsAfterADeletion() throws Exception {
+        Map<String, byte[]> previous = publishInitialArtifactSet();
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-delete-failure",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterDeletion(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("injected failure after deletion");
+                    }
+                }
+        );
+        writeReplacementBundle(workspace);
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("injected failure after deletion");
+
+        assertPublishedBytes(previous);
+        assertThat(tempDir.resolve("new-only.txt")).doesNotExist();
+    }
+
+    @Test
+    void rollsBackEveryPublishedByteAndRemovesNewArtifactsWhenApplyFailsAfterAReplacement() throws Exception {
+        Map<String, byte[]> previous = publishInitialArtifactSet();
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-replacement-failure",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterReplacement(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("injected failure after replacement");
+                    }
+                }
+        );
+        writeReplacementBundle(workspace);
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("injected failure after replacement");
+
+        assertPublishedBytes(previous);
+        assertThat(tempDir.resolve("new-only.txt")).doesNotExist();
+    }
+
+    @Test
+    void seedCopyFailureRecordsFailedRunManifestWithoutPublishingAnything() throws Exception {
+        Files.createSymbolicLink(tempDir.resolve("broken.txt"), tempDir.resolve("missing-target.txt"));
+
+        assertThatThrownBy(() -> workspace("run-seed-failure", true))
+                .isInstanceOf(java.io.IOException.class);
+
+        assertThat(tempDir.resolve("runs/run-seed-failure/run-manifest.json"))
+                .content().contains("\"state\" : \"FAILED\"");
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).doesNotExist();
+    }
+
+    @Test
+    void bestEffortStartFailureDoesNotOverwriteAnExistingExecutionDirectory() throws Exception {
+        Path existing = tempDir.resolve("runs/run-existing");
+        Files.createDirectories(existing);
+        Files.writeString(existing.resolve("run-manifest.json"), "unrelated");
+        WorkflowRunRequest request = request("run-existing", false);
+
+        WorkflowArtifactWorkspace.markStartFailedBestEffort(
+                objectMapper, "test-chain", request, tempDir, "invalid configuration");
+
+        assertThat(existing.resolve("run-manifest.json")).hasContent("unrelated");
+    }
+
+    @Test
+    void repeatedPublishRestagesTheExactCurrentBundleWithoutStaleFiles() throws Exception {
+        WorkflowArtifactWorkspace workspace = workspace("run-repeat", false);
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "first");
+        Files.writeString(workspace.bundleRoot().resolve("stale.txt"), "remove me");
+        workspace.publish("weekly-report.md");
+
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "second");
+        Files.delete(workspace.bundleRoot().resolve("stale.txt"));
+        workspace.publish("weekly-report.md");
+
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("second");
+        assertThat(tempDir.resolve("stale.txt")).doesNotExist();
+    }
+
     private WorkflowArtifactWorkspace workspace(String executionId, boolean seed) throws Exception {
+        WorkflowRunRequest request = request(executionId, seed);
+        return WorkflowArtifactWorkspace.start(objectMapper, "test-chain", request, tempDir, seed);
+    }
+
+    private WorkflowRunRequest request(String executionId, boolean seed) {
+        return new WorkflowRunRequest(
+                seed ? "rerun" : "full",
+                "",
+                "",
+                LocalDate.of(2026, 7, 20),
+                new AgentBridgeSettings(),
+                "",
+                executionId,
+                null
+        );
+    }
+
+    private WorkflowArtifactWorkspace workspace(
+            String executionId,
+            boolean seed,
+            WorkflowArtifactWorkspace.PublicationFailureInjector injector
+    ) throws Exception {
         WorkflowRunRequest request = new WorkflowRunRequest(
                 seed ? "rerun" : "full",
                 "",
@@ -106,6 +216,38 @@ class WorkflowArtifactWorkspaceTest {
                 executionId,
                 null
         );
-        return WorkflowArtifactWorkspace.start(objectMapper, "test-chain", request, tempDir, seed);
+        return WorkflowArtifactWorkspace.start(
+                objectMapper, "test-chain", request, tempDir, seed, injector
+        );
+    }
+
+    private Map<String, byte[]> publishInitialArtifactSet() throws Exception {
+        WorkflowArtifactWorkspace initial = workspace("run-initial", false);
+        Files.writeString(initial.bundleRoot().resolve("weekly-report.md"), "old report");
+        Files.writeString(initial.bundleRoot().resolve("replace.txt"), "old replacement");
+        Files.writeString(initial.bundleRoot().resolve("old-only.txt"), "old only");
+        initial.publish("weekly-report.md");
+        Map<String, byte[]> bytes = new LinkedHashMap<>();
+        for (String relative : java.util.List.of(
+                "weekly-report.md", "replace.txt", "old-only.txt",
+                WorkflowArtifactWorkspace.PUBLICATION_MANIFEST
+        )) {
+            bytes.put(relative, Files.readAllBytes(tempDir.resolve(relative)));
+        }
+        return bytes;
+    }
+
+    private void writeReplacementBundle(WorkflowArtifactWorkspace workspace) throws Exception {
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "new report");
+        Files.writeString(workspace.bundleRoot().resolve("replace.txt"), "new replacement");
+        Files.writeString(workspace.bundleRoot().resolve("new-only.txt"), "new only");
+    }
+
+    private void assertPublishedBytes(Map<String, byte[]> expected) throws Exception {
+        for (Map.Entry<String, byte[]> entry : expected.entrySet()) {
+            assertThat(Files.readAllBytes(tempDir.resolve(entry.getKey())))
+                    .as(entry.getKey())
+                    .isEqualTo(entry.getValue());
+        }
     }
 }

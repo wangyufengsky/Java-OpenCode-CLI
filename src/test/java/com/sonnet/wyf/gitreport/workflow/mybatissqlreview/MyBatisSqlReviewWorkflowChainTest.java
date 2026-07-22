@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MyBatisSqlReviewWorkflowChainTest {
@@ -90,7 +91,9 @@ class MyBatisSqlReviewWorkflowChainTest {
                 inventory.path("statements").findValuesAsText("statement_key")
         );
         assertThat(client.maximumActiveTasks).isEqualTo(1);
-        assertThat(client.events).containsSubsequence("clear", "history", "post", "wait", "history");
+        assertThat(client.events).containsSubsequence(
+                "clear", "wait-for-clear", "history", "post", "wait-for-task", "history"
+        );
         assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
         assertThat(stableOut.resolve("sql-tasks.json")).isRegularFile();
         assertThat(stableOut.resolve("traceability.json")).isRegularFile();
@@ -127,7 +130,7 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         assertThatThrownBy(() -> chain.run(request("full", "", "", "run-bad")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("candidate directory must contain exactly three candidate files");
+                .hasMessageContaining("candidate must contain exactly three non-symlink regular files");
 
         assertThat(stableOut.resolve("mybatis-sql-review-report.md")).hasContent(previousReport);
         assertThat(stableOut.resolve(".publication.json")).hasContent(previousManifest);
@@ -218,6 +221,54 @@ class MyBatisSqlReviewWorkflowChainTest {
         assertThat(client.postedStatementKeys).isEmpty();
     }
 
+    @Test
+    void recordsFailedRunManifestWhenConfigurationValidationFailsBeforeWorkspaceStart() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config)
+                .replace("statement-timeout-seconds: 30", "statement-timeout-seconds: 31"));
+
+        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-invalid-config")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("statement-timeout-seconds");
+
+        assertThat(stableOut.resolve("runs/run-invalid-config/run-manifest.json"))
+                .content().contains("\"state\" : \"FAILED\"")
+                .contains("statement-timeout-seconds");
+        assertThat(client.postedStatementKeys).isEmpty();
+    }
+
+    @Test
+    void markdownValidationIgnoresFencedSqlButRejectsExternalLinksAutolinksAndRawHtml() throws Exception {
+        Path root = tempDir.resolve("markdown");
+        Files.createDirectories(root);
+        Files.writeString(root.resolve("local.md"), "# Local\n");
+        Files.writeString(root.resolve("report.md"), """
+                # Safe
+
+                [local](local.md)
+
+                ```sql
+                SELECT '[not-a-link](https://sql.example)' AS value;
+                SELECT '<https://sql.example>' AS value;
+                SELECT '<table>' AS value;
+                ```
+                """);
+        assertThatCode(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .doesNotThrowAnyException();
+
+        Files.writeString(root.resolve("report.md"), "[external](https://evil.example)\n");
+        assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .hasMessageContaining("external");
+
+        Files.writeString(root.resolve("report.md"), "<https://evil.example>\n");
+        assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .hasMessageContaining("autolink");
+
+        Files.writeString(root.resolve("report.md"), "<img src=x>\n");
+        assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .hasMessageContaining("raw HTML");
+    }
+
     private WorkflowRunRequest request(String mode, String rerunType, String rerunId, String executionId) {
         return request(mode, rerunType, rerunId, executionId, settings());
     }
@@ -295,6 +346,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         private final List<ToolCallRecord> history = new ArrayList<>();
         private int activeTasks;
         private int maximumActiveTasks;
+        private boolean clearPending;
         private boolean omitEvidence;
         private boolean missingRequiredTool;
 
@@ -306,6 +358,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         @Override
         public void clearSession(URI ignored) {
             events.add("clear");
+            clearPending = true;
         }
 
         @Override
@@ -324,8 +377,13 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         @Override
         public void waitUntilIdle(URI ignored, Duration timeout, Duration pollInterval) {
-            events.add("wait");
-            activeTasks--;
+            if (clearPending) {
+                events.add("wait-for-clear");
+                clearPending = false;
+            } else {
+                events.add("wait-for-task");
+                activeTasks--;
+            }
         }
 
         @Override

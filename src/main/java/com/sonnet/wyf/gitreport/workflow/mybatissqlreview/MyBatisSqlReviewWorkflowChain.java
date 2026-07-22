@@ -12,6 +12,7 @@ import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,7 +27,10 @@ import java.util.stream.Collectors;
 
 public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     public static final String ID = "mybatis-sql-review";
-    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[[^]]*]\\(([^)]+)\\)");
+    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[(?:\\\\.|[^]])*]\\(([^)]+)\\)");
+    private static final Pattern EXTERNAL_SCHEME = Pattern.compile("(?i)^[a-z][a-z0-9+.-]*:");
+    private static final Pattern AUTOLINK = Pattern.compile("(?i)<(?:https?|mailto):[^>]+>");
+    private static final Pattern RAW_HTML = Pattern.compile("(?i)<\\s*/?\\s*[a-z][^>]*>");
 
     private final ChainConfigLoader configLoader;
     private final AgentBridgeRunnerProperties runnerProperties;
@@ -62,53 +66,68 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     @Override
     public void run(WorkflowRunRequest request) throws Exception {
         Objects.requireNonNull(request, "request");
-        Configuration configuration = configLoader.load(configDir(request), id(), Configuration.class);
-        configuration.validate();
-        AgentBridgeSettings settings = request.agentBridge() == null
-                ? configuration.getAgentbridge()
-                : request.agentBridge();
-        requireSerialSettings(settings);
-        String mode = normalizeMode(request.mode());
-        boolean rerun = "rerun".equals(mode);
-        WorkflowArtifactWorkspace workspace = WorkflowArtifactWorkspace.start(
-                objectMapper,
-                id(),
-                request,
-                configuration.getPaths().getOut(),
-                rerun
-        );
-        try (var ignored = WorkflowArtifactContext.open(workspace);
-             var repositoryLock = RepositoryExecutionLock.acquire(configuration.getProject().getRepo())) {
-            MyBatisSqlInventory inventory = rerun
-                    ? publishedInventory(workspace)
-                    : inventoryBuilder.build(
-                            configuration.getProject().getRepo(),
-                            configuration.getSource().getInclude(),
-                            configuration.getSource().getExclude()
-                    );
-            reportRenderer.writeInventorySnapshot(workspace.bundleRoot(), inventory);
-            List<MyBatisSqlStatement> selected = selectTasks(mode, request, inventory);
-            MyBatisDatabasePreflight.Result database = databasePreflight.verify(
-                    URI.create(settings.getMcpUrl()),
-                    URI.create(settings.getWebBaseUrl()),
-                    configuration.getDatabase().toContract()
-            );
-            for (MyBatisSqlStatement statement : selected) {
-                taskRunner.run(workspace, statement, database, settings);
+        WorkflowArtifactWorkspace workspace = null;
+        Path failureManifestRoot = null;
+        try {
+            Configuration configuration = configLoader.load(configDir(request), id(), Configuration.class);
+            if (configuration.getPaths() != null) {
+                failureManifestRoot = configuration.getPaths().getOut();
             }
-            reportRenderer.render(
-                    workspace.bundleRoot(),
-                    new MyBatisSqlReportRenderer.Project(
-                            configuration.getProject().getId(),
-                            configuration.getProject().getName(),
-                            configuration.getProject().getRepo()
-                    ),
-                    inventory
+            configuration.validate();
+            AgentBridgeSettings settings = request.agentBridge() == null
+                    ? configuration.getAgentbridge()
+                    : request.agentBridge();
+            requireSerialSettings(settings);
+            String mode = normalizeMode(request.mode());
+            boolean rerun = "rerun".equals(mode);
+            workspace = WorkflowArtifactWorkspace.start(
+                    objectMapper,
+                    id(),
+                    request,
+                    configuration.getPaths().getOut(),
+                    rerun
             );
-            validateCompleteBundle(workspace.bundleRoot(), inventory);
-            workspace.publish(MyBatisSqlReportRenderer.MAIN_REPORT);
+            WorkflowArtifactWorkspace activeWorkspace = workspace;
+            try (var ignored = WorkflowArtifactContext.open(activeWorkspace);
+                 var repositoryLock = RepositoryExecutionLock.acquire(configuration.getProject().getRepo())) {
+                MyBatisSqlInventory inventory = rerun
+                        ? publishedInventory(activeWorkspace)
+                        : inventoryBuilder.build(
+                                configuration.getProject().getRepo(),
+                                configuration.getSource().getInclude(),
+                                configuration.getSource().getExclude()
+                        );
+                reportRenderer.writeInventorySnapshot(activeWorkspace.bundleRoot(), inventory);
+                List<MyBatisSqlStatement> selected = selectTasks(mode, request, inventory);
+                MyBatisDatabasePreflight.Result database = databasePreflight.verify(
+                        URI.create(settings.getMcpUrl()),
+                        URI.create(settings.getWebBaseUrl()),
+                        configuration.getDatabase().toContract()
+                );
+                for (MyBatisSqlStatement statement : selected) {
+                    taskRunner.run(
+                            activeWorkspace, configuration.getProject().getRepo(), statement, database, settings
+                    );
+                }
+                reportRenderer.render(
+                        activeWorkspace.bundleRoot(),
+                        new MyBatisSqlReportRenderer.Project(
+                                configuration.getProject().getId(),
+                                configuration.getProject().getName(),
+                                configuration.getProject().getRepo()
+                        ),
+                        inventory
+                );
+                validateCompleteBundle(activeWorkspace.bundleRoot(), inventory);
+                activeWorkspace.publish(MyBatisSqlReportRenderer.MAIN_REPORT);
+            }
         } catch (Exception exception) {
-            workspace.markFailed(exception.getMessage());
+            if (workspace == null) {
+                WorkflowArtifactWorkspace.markStartFailedBestEffort(
+                        objectMapper, id(), request, failureManifestRoot, exception.getMessage());
+            } else {
+                workspace.markFailed(exception.getMessage());
+            }
             throw exception;
         }
     }
@@ -232,25 +251,57 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         validateMarkdownLinks(root);
     }
 
-    private void validateMarkdownLinks(Path root) throws Exception {
+    static void validateMarkdownLinks(Path bundleRoot) throws Exception {
+        Path root = bundleRoot.toAbsolutePath().normalize();
+        Path realRoot = root.toRealPath(LinkOption.NOFOLLOW_LINKS);
         List<String> invalid = new ArrayList<>();
         try (var paths = Files.walk(root)) {
             for (Path markdown : paths.filter(path -> path.toString().endsWith(".md")).toList()) {
-                Matcher matcher = MARKDOWN_LINK.matcher(Files.readString(markdown));
+                if (Files.isSymbolicLink(markdown)
+                        || !Files.isRegularFile(markdown, LinkOption.NOFOLLOW_LINKS)
+                        || !markdown.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
+                    invalid.add(relative(root, markdown) + " -> unsafe Markdown file");
+                    continue;
+                }
+                String prose = withoutFencedCode(Files.readString(markdown));
+                Matcher autolink = AUTOLINK.matcher(prose);
+                while (autolink.find()) {
+                    invalid.add(relative(root, markdown) + " -> external autolink " + autolink.group());
+                }
+                Matcher html = RAW_HTML.matcher(prose);
+                while (html.find()) {
+                    if (!AUTOLINK.matcher(html.group()).matches()) {
+                        invalid.add(relative(root, markdown) + " -> raw HTML " + html.group());
+                    }
+                }
+                Matcher matcher = MARKDOWN_LINK.matcher(prose);
                 while (matcher.find()) {
                     String link = matcher.group(1).trim();
                     if (link.isBlank() || link.startsWith("#")) {
                         continue;
                     }
+                    if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
+                        invalid.add(relative(root, markdown) + " -> external link " + link);
+                        continue;
+                    }
+                    int fragment = link.indexOf('#');
+                    String fileLink = fragment < 0 ? link : link.substring(0, fragment);
+                    if (fileLink.isBlank() || fileLink.indexOf('?') >= 0) {
+                        invalid.add(relative(root, markdown) + " -> invalid relative link " + link);
+                        continue;
+                    }
                     Path raw;
                     try {
-                        raw = Path.of(link);
+                        raw = Path.of(fileLink);
                     } catch (RuntimeException exception) {
                         invalid.add(relative(root, markdown) + " -> " + link);
                         continue;
                     }
                     Path target = markdown.getParent().resolve(raw).normalize();
-                    if (raw.isAbsolute() || !target.startsWith(root) || !Files.isRegularFile(target)) {
+                    if (raw.isAbsolute() || !target.startsWith(root)
+                            || Files.isSymbolicLink(target)
+                            || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                            || !target.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
                         invalid.add(relative(root, markdown) + " -> " + link);
                     }
                 }
@@ -259,6 +310,26 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         if (!invalid.isEmpty()) {
             throw new IllegalStateException("MyBatis SQL review contains invalid relative links: " + invalid);
         }
+    }
+
+    private static String withoutFencedCode(String markdown) {
+        StringBuilder prose = new StringBuilder(markdown.length());
+        boolean fenced = false;
+        char fenceCharacter = 0;
+        for (String line : markdown.split("\\R", -1)) {
+            String stripped = line.stripLeading();
+            boolean marker = stripped.startsWith("```") || stripped.startsWith("~~~");
+            if (marker && (!fenced || stripped.charAt(0) == fenceCharacter)) {
+                fenced = !fenced;
+                fenceCharacter = fenced ? stripped.charAt(0) : 0;
+                prose.append('\n');
+            } else if (fenced) {
+                prose.append('\n');
+            } else {
+                prose.append(line).append('\n');
+            }
+        }
+        return prose.toString();
     }
 
     private void requireSerialSettings(AgentBridgeSettings settings) {

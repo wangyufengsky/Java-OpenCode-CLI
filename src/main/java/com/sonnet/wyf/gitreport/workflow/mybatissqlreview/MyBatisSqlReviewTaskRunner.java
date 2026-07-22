@@ -15,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.LinkOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -54,11 +56,13 @@ public final class MyBatisSqlReviewTaskRunner {
 
     public TaskResult run(
             WorkflowArtifactWorkspace workspace,
+            Path repository,
             MyBatisSqlStatement statement,
             MyBatisDatabasePreflight.Result database,
             AgentBridgeSettings settings
     ) throws Exception {
         Objects.requireNonNull(workspace, "workspace");
+        Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(statement, "statement");
         Objects.requireNonNull(database, "database");
         Objects.requireNonNull(settings, "settings");
@@ -95,6 +99,11 @@ public final class MyBatisSqlReviewTaskRunner {
             try {
                 URI webUri = URI.create(settings.getWebBaseUrl());
                 client.clearSession(webUri);
+                client.waitUntilIdle(
+                        webUri,
+                        Duration.ofMinutes(Math.max(1, settings.getTimeoutMinutes())),
+                        Duration.ofMillis(Math.max(50, settings.getPollMillis()))
+                );
                 List<AgentBridgeClient.ToolCallRecord> before = client.getToolCalls(webUri);
                 Instant startedAt = Instant.now();
                 Set<String> preexistingIds = new LinkedHashSet<>();
@@ -115,14 +124,23 @@ public final class MyBatisSqlReviewTaskRunner {
                         statement.statementKey(), title, "RUNNING", "submitted",
                         layout.status().toString(), ""
                 );
-                client.postPrompt(webUri, composeMessage(settings.getTaskMessage(), prompt));
-                client.waitUntilIdle(
-                        webUri,
-                        Duration.ofMinutes(Math.max(1, settings.getTimeoutMinutes())),
-                        Duration.ofMillis(Math.max(50, settings.getPollMillis()))
-                );
+                try (MyBatisSqlReviewFilesystemGuard ignoredGuard =
+                             MyBatisSqlReviewFilesystemGuard.protect(
+                                     repository,
+                                     workspace.stableRoot(),
+                                     layout.root(),
+                                     layout.candidate()
+                             )) {
+                    client.postPrompt(webUri, composeMessage(settings.getTaskMessage(), prompt));
+                    client.waitUntilIdle(
+                            webUri,
+                            Duration.ofMinutes(Math.max(1, settings.getTimeoutMinutes())),
+                            Duration.ofMillis(Math.max(50, settings.getPollMillis()))
+                    );
+                }
                 settle(settings.getValidationSettleSeconds());
                 List<AgentBridgeClient.ToolCallRecord> after = client.getToolCalls(webUri);
+                MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(layout.root(), layout.candidate());
                 MyBatisToolCallAudit.Result audit = toolCallAudit.audit(
                         after,
                         boundary,
@@ -255,12 +273,12 @@ public final class MyBatisSqlReviewTaskRunner {
         }
         Files.createDirectories(target);
         for (String artifact : CANDIDATE_ARTIFACTS) {
-            Files.copy(
-                    layout.candidate().resolve(artifact),
-                    target.resolve(artifact),
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.COPY_ATTRIBUTES
-            );
+            Path source = layout.candidate().resolve(artifact);
+            try (var input = Files.newInputStream(
+                    source, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+            )) {
+                Files.copy(input, target.resolve(artifact), StandardCopyOption.REPLACE_EXISTING);
+            }
         }
         return target;
     }

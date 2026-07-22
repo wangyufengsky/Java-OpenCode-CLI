@@ -69,7 +69,7 @@ public final class MyBatisSqlInventoryBuilder {
         for (ParsedMapper mapper : parsedMappers) {
             List<MyBatisSqlStatement> mapperStatements = statementsFor(mapper, fragments, identities);
             mapperStatements.sort(STATEMENT_ORDER);
-            String mapperKey = mapperKey(mapper.relativePath(), mapper.namespace());
+            String mapperKey = canonicalMapperKey(mapper.relativePath(), mapper.namespace());
             mappers.add(new MyBatisMapperInventory(
                     mapper.relativePath(),
                     mapper.namespace(),
@@ -443,8 +443,8 @@ public final class MyBatisSqlInventoryBuilder {
                 false);
         String normalizedSql = normalizeSql(sql.toString());
         List<String> placeholders = placeholders(normalizedSql);
-        String mapperKey = mapperKey(mapper.relativePath(), mapper.namespace());
-        String statementKey = statementKey(
+        String mapperKey = canonicalMapperKey(mapper.relativePath(), mapper.namespace());
+        String statementKey = canonicalStatementKey(
                 mapper.relativePath(), mapper.namespace(), id, selectKeyOrdinal);
         return new MyBatisSqlStatement(
                 mapper.relativePath(),
@@ -657,14 +657,14 @@ public final class MyBatisSqlInventoryBuilder {
         return source.substring(start, end);
     }
 
-    private String mapperKey(String relativePath, String namespace) {
+    static String canonicalMapperKey(String relativePath, String namespace) {
         String fileName = Path.of(relativePath).getFileName().toString();
         String withoutExtension = fileName.replaceFirst("(?i)\\.xml$", "");
         return slug(withoutExtension + "-" + namespace, "mapper") + "-"
                 + shortSha256(relativePath + "\n" + namespace);
     }
 
-    private String statementKey(String relativePath, String namespace, String id, int selectKeyOrdinal) {
+    static String canonicalStatementKey(String relativePath, String namespace, String id, int selectKeyOrdinal) {
         String readable = namespace + "-" + id;
         if (selectKeyOrdinal > 0) {
             readable += "-select-key-" + selectKeyOrdinal;
@@ -673,7 +673,7 @@ public final class MyBatisSqlInventoryBuilder {
                 + shortSha256(relativePath + "\n" + namespace + "\n" + id + "\n" + selectKeyOrdinal);
     }
 
-    private String slug(String value, String fallback) {
+    private static String slug(String value, String fallback) {
         String slug = value.replaceAll("([A-Z]+)([A-Z][a-z])", "$1-$2")
                 .replaceAll("([a-z0-9])([A-Z])", "$1-$2")
                 .toLowerCase(Locale.ROOT)
@@ -682,11 +682,11 @@ public final class MyBatisSqlInventoryBuilder {
         return slug.isBlank() ? fallback : slug;
     }
 
-    private String shortSha256(String value) {
+    private static String shortSha256(String value) {
         return sha256(value.getBytes(StandardCharsets.UTF_8)).substring(0, 12);
     }
 
-    private String sha256(byte[] value) {
+    private static String sha256(byte[] value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
         } catch (NoSuchAlgorithmException ex) {

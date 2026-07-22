@@ -10,6 +10,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,6 +49,7 @@ public final class WorkflowArtifactWorkspace {
     private final Path preparationRoot;
     private final Path bundleRoot;
     private final long publicationGeneration;
+    private final PublicationFailureInjector publicationFailureInjector;
     private final Map<String, AtomicInteger> attempts = new ConcurrentHashMap<>();
     private final Map<String, String> pathMappings = new LinkedHashMap<>();
 
@@ -55,7 +58,8 @@ public final class WorkflowArtifactWorkspace {
             String chainId,
             WorkflowRunRequest request,
             Path stableRoot,
-            long publicationGeneration
+            long publicationGeneration,
+            PublicationFailureInjector publicationFailureInjector
     ) {
         this.objectMapper = objectMapper;
         this.chainId = chainId;
@@ -65,6 +69,7 @@ public final class WorkflowArtifactWorkspace {
         this.preparationRoot = inside(runRoot, runRoot.resolve("preparation"));
         this.bundleRoot = inside(runRoot, runRoot.resolve("bundle"));
         this.publicationGeneration = publicationGeneration;
+        this.publicationFailureInjector = publicationFailureInjector;
         this.pathMappings.put(this.stableRoot.toString(), this.bundleRoot.toString());
     }
 
@@ -75,30 +80,92 @@ public final class WorkflowArtifactWorkspace {
             Path stableRoot,
             boolean seedFromStable
     ) throws IOException {
+        return start(objectMapper, chainId, request, stableRoot, seedFromStable, new PublicationFailureInjector() {
+        });
+    }
+
+    static WorkflowArtifactWorkspace start(
+            ObjectMapper objectMapper,
+            String chainId,
+            WorkflowRunRequest request,
+            Path stableRoot,
+            boolean seedFromStable,
+            PublicationFailureInjector publicationFailureInjector
+    ) throws IOException {
+        Objects.requireNonNull(objectMapper, "objectMapper");
+        Objects.requireNonNull(chainId, "chainId");
+        Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(stableRoot, "stableRoot");
+        Objects.requireNonNull(publicationFailureInjector, "publicationFailureInjector");
         if (request.executionId() == null || request.executionId().isBlank()) {
             throw new IllegalArgumentException("workflow executionId is required");
         }
         Path normalizedRoot = stableRoot.toAbsolutePath().normalize();
         Files.createDirectories(normalizedRoot);
+        Path requestedRunRoot = inside(normalizedRoot, normalizedRoot.resolve("runs").resolve(request.executionId()));
+        if (Files.exists(requestedRunRoot)) {
+            throw new IllegalStateException("workflow execution directory already exists: " + requestedRunRoot);
+        }
         long generation = nextGeneration(normalizedRoot);
         WorkflowArtifactWorkspace workspace = new WorkflowArtifactWorkspace(
                 objectMapper,
                 chainId,
                 request,
                 normalizedRoot,
-                generation
+                generation,
+                publicationFailureInjector
         );
-        if (Files.exists(workspace.runRoot)) {
-            throw new IllegalStateException("workflow execution directory already exists: " + workspace.runRoot);
+        boolean ownsRunRoot = false;
+        try {
+            Files.createDirectories(workspace.runRoot.getParent());
+            Files.createDirectory(workspace.runRoot);
+            ownsRunRoot = true;
+            Files.createDirectories(workspace.preparationRoot);
+            Files.createDirectories(workspace.bundleRoot);
+            if (seedFromStable) {
+                workspace.copyStableToBundle();
+                workspace.rebaseBundlePaths(workspace.stableRoot.toString(), workspace.bundleRoot.toString());
+            }
+            workspace.writeRunManifest("CREATED", "");
+            return workspace;
+        } catch (IOException | RuntimeException startFailure) {
+            if (ownsRunRoot) {
+                workspace.markFailed(startFailure.getMessage());
+            }
+            throw startFailure;
         }
-        Files.createDirectories(workspace.preparationRoot);
-        Files.createDirectories(workspace.bundleRoot);
-        if (seedFromStable) {
-            workspace.copyStableToBundle();
-            workspace.rebaseBundlePaths(workspace.stableRoot.toString(), workspace.bundleRoot.toString());
+    }
+
+    public static void markStartFailedBestEffort(
+            ObjectMapper objectMapper,
+            String chainId,
+            WorkflowRunRequest request,
+            Path stableRoot,
+            String reason
+    ) {
+        if (objectMapper == null || chainId == null || request == null || stableRoot == null) {
+            return;
         }
-        workspace.writeRunManifest("CREATED", "");
-        return workspace;
+        Path normalizedRoot = stableRoot.toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(normalizedRoot);
+            Path runsRoot = inside(normalizedRoot, normalizedRoot.resolve("runs"));
+            Files.createDirectories(runsRoot);
+            Path runRoot = inside(normalizedRoot, runsRoot.resolve(request.executionId()));
+            try {
+                Files.createDirectory(runRoot);
+            } catch (FileAlreadyExistsException existingExecution) {
+                return;
+            }
+            WorkflowArtifactWorkspace workspace = new WorkflowArtifactWorkspace(
+                    objectMapper, chainId, request, normalizedRoot, readGeneration(normalizedRoot),
+                    new PublicationFailureInjector() {
+                    }
+            );
+            workspace.writeRunManifest("FAILED", reason == null ? "" : reason);
+        } catch (IOException | RuntimeException ignored) {
+            // Best effort only: never replace the failure that prevented workspace startup.
+        }
     }
 
     public String executionId() {
@@ -170,29 +237,55 @@ public final class WorkflowArtifactWorkspace {
                 return new PublicationResult(false, true, stableRoot.resolve(mainArtifact));
             }
 
-            Map<String, String> newArtifacts = bundleArtifacts();
+            Path publicationRoot = inside(runRoot, runRoot.resolve("publication"));
+            Path stagedRoot = inside(publicationRoot, publicationRoot.resolve("staged"));
+            Path backupRoot = inside(publicationRoot, publicationRoot.resolve("backup"));
+            Files.createDirectories(publicationRoot);
+            deleteRecursively(stagedRoot);
+            deleteRecursively(backupRoot);
+            copyRecursively(bundleRoot, stagedRoot);
+            Map<String, String> newArtifacts = artifacts(stagedRoot);
             Set<String> previousArtifacts = previousArtifactPaths();
-            for (String previous : previousArtifacts) {
-                if (!newArtifacts.containsKey(previous)) {
-                    Files.deleteIfExists(inside(stableRoot, stableRoot.resolve(previous)));
+            boolean previousManifestExists = Files.isRegularFile(stableRoot.resolve(PUBLICATION_MANIFEST));
+            backupPublishedState(previousArtifacts, previousManifestExists, backupRoot);
+            try {
+                for (String previous : previousArtifacts.stream().sorted().toList()) {
+                    if (!newArtifacts.containsKey(previous)) {
+                        Path target = inside(stableRoot, stableRoot.resolve(previous));
+                        if (Files.deleteIfExists(target)) {
+                            publicationFailureInjector.afterDeletion(target);
+                        }
+                    }
                 }
-            }
-            for (String relative : newArtifacts.keySet()) {
-                publishFile(inside(bundleRoot, bundleRoot.resolve(relative)), inside(stableRoot, stableRoot.resolve(relative)));
-            }
+                for (String relative : newArtifacts.keySet()) {
+                    Path target = inside(stableRoot, stableRoot.resolve(relative));
+                    publishFile(inside(stagedRoot, stagedRoot.resolve(relative)), target);
+                    publicationFailureInjector.afterReplacement(target);
+                }
 
-            Map<String, Object> manifest = new LinkedHashMap<>();
-            manifest.put("schemaVersion", "workflow-publication/v1");
-            manifest.put("chainId", chainId);
-            manifest.put("executionId", executionId());
-            manifest.put("publicationGeneration", publicationGeneration);
-            manifest.put("mainArtifact", normalize(mainArtifact));
-            manifest.put("publishedAt", OffsetDateTime.now().toString());
-            manifest.put("artifacts", newArtifacts.entrySet().stream()
-                    .map(entry -> Map.of("path", entry.getKey(), "sha256", entry.getValue()))
-                    .toList());
-            atomicWriteJson(stableRoot.resolve(PUBLICATION_MANIFEST), manifest);
-            writeRunManifest("PUBLISHED", "");
+                Map<String, Object> manifest = new LinkedHashMap<>();
+                manifest.put("schemaVersion", "workflow-publication/v1");
+                manifest.put("chainId", chainId);
+                manifest.put("executionId", executionId());
+                manifest.put("publicationGeneration", publicationGeneration);
+                manifest.put("mainArtifact", normalize(mainArtifact));
+                manifest.put("publishedAt", OffsetDateTime.now().toString());
+                manifest.put("artifacts", newArtifacts.entrySet().stream()
+                        .map(entry -> Map.of("path", entry.getKey(), "sha256", entry.getValue()))
+                        .toList());
+                atomicWriteJson(stableRoot.resolve(PUBLICATION_MANIFEST), manifest);
+                writeRunManifest("PUBLISHED", "");
+            } catch (IOException | RuntimeException publicationFailure) {
+                // This restores in-process I/O failures; it is not a crash-atomic filesystem transaction.
+                try {
+                    rollbackPublishedState(
+                            newArtifacts.keySet(), previousArtifacts, previousManifestExists, backupRoot
+                    );
+                } catch (IOException rollbackFailure) {
+                    publicationFailure.addSuppressed(rollbackFailure);
+                }
+                throw publicationFailure;
+            }
             Path publishedMain = inside(stableRoot, stableRoot.resolve(mainArtifact));
             if (WorkflowRunContext.currentRunId() != null) {
                 WorkflowRunContext.setCurrentOutputPath(publishedMain.toString());
@@ -242,15 +335,93 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
-    private Map<String, String> bundleArtifacts() throws IOException {
+    private Map<String, String> artifacts(Path root) throws IOException {
         Map<String, String> artifacts = new LinkedHashMap<>();
-        try (var paths = Files.walk(bundleRoot)) {
+        try (var paths = Files.walk(root)) {
             for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
-                String relative = normalize(bundleRoot.relativize(path).toString());
+                String relative = normalize(root.relativize(path).toString());
                 artifacts.put(relative, sha256(path));
             }
         }
         return artifacts;
+    }
+
+    private void backupPublishedState(
+            Set<String> previousArtifacts,
+            boolean previousManifestExists,
+            Path backupRoot
+    ) throws IOException {
+        Files.createDirectories(backupRoot);
+        for (String relative : previousArtifacts.stream().sorted().toList()) {
+            Path source = inside(stableRoot, stableRoot.resolve(relative));
+            if (!Files.isRegularFile(source)) {
+                throw new IllegalStateException("published artifact listed in manifest is missing: " + source);
+            }
+            Path target = inside(backupRoot, backupRoot.resolve("artifacts").resolve(relative));
+            Files.createDirectories(target.getParent());
+            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+        }
+        if (previousManifestExists) {
+            Files.copy(
+                    stableRoot.resolve(PUBLICATION_MANIFEST),
+                    backupRoot.resolve(PUBLICATION_MANIFEST),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES
+            );
+        }
+    }
+
+    private void rollbackPublishedState(
+            Set<String> newArtifacts,
+            Set<String> previousArtifacts,
+            boolean previousManifestExists,
+            Path backupRoot
+    ) throws IOException {
+        IOException failure = null;
+        for (String relative : newArtifacts.stream().sorted().toList()) {
+            failure = attemptRollback(
+                    () -> Files.deleteIfExists(inside(stableRoot, stableRoot.resolve(relative))), failure
+            );
+            failure = attemptRollback(
+                    () -> Files.deleteIfExists(stableRoot.resolve(relative + ".tmp-" + executionId())), failure
+            );
+        }
+        for (String relative : previousArtifacts.stream().sorted().toList()) {
+            Path source = inside(backupRoot, backupRoot.resolve("artifacts").resolve(relative));
+            Path target = inside(stableRoot, stableRoot.resolve(relative));
+            failure = attemptRollback(() -> publishFile(source, target), failure);
+        }
+        Path manifest = stableRoot.resolve(PUBLICATION_MANIFEST);
+        failure = attemptRollback(
+                () -> Files.deleteIfExists(manifest.resolveSibling(manifest.getFileName() + ".tmp-" + executionId())),
+                failure
+        );
+        if (previousManifestExists) {
+            failure = attemptRollback(
+                    () -> publishFile(backupRoot.resolve(PUBLICATION_MANIFEST), manifest), failure
+            );
+        } else {
+            failure = attemptRollback(() -> Files.deleteIfExists(manifest), failure);
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private IOException attemptRollback(IoOperation operation, IOException previous) {
+        try {
+            operation.run();
+            return previous;
+        } catch (IOException | RuntimeException exception) {
+            IOException current = exception instanceof IOException io
+                    ? io
+                    : new IOException("workflow publication rollback failed", exception);
+            if (previous == null) {
+                return current;
+            }
+            previous.addSuppressed(current);
+            return previous;
+        }
     }
 
     private Set<String> previousArtifactPaths() throws IOException {
@@ -335,6 +506,28 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException exception) throws IOException {
+                if (exception != null) {
+                    throw exception;
+                }
+                Files.delete(directory);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
     private static long nextGeneration(Path stableRoot) throws IOException {
         Path lockPath = stableRoot.resolve(PUBLISH_LOCK);
         try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE);
@@ -403,5 +596,18 @@ public final class WorkflowArtifactWorkspace {
     }
 
     public record PublicationResult(boolean published, boolean superseded, Path mainArtifact) {
+    }
+
+    interface PublicationFailureInjector {
+        default void afterDeletion(Path path) throws IOException {
+        }
+
+        default void afterReplacement(Path path) throws IOException {
+        }
+    }
+
+    @FunctionalInterface
+    private interface IoOperation {
+        void run() throws IOException;
     }
 }
