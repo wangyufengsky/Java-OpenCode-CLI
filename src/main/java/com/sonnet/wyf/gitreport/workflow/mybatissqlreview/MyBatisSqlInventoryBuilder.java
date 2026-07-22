@@ -1,0 +1,649 @@
+package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
+
+import javax.xml.XMLConstants;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.PathMatcher;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+public final class MyBatisSqlInventoryBuilder {
+    private static final Set<String> STATEMENT_ELEMENTS = Set.of("select", "insert", "update", "delete");
+    private static final Pattern MYBATIS_DOCTYPE = Pattern.compile(
+            "(?is)<!DOCTYPE\\s+mapper\\s+PUBLIC\\s+(['\"])-//mybatis\\.org//DTD Mapper 3\\.0//EN\\1"
+                    + "\\s+(['\"])https?://mybatis\\.org/dtd/mybatis-3-mapper\\.dtd\\2\\s*>");
+    private static final Pattern PLACEHOLDER = Pattern.compile("(?:#|\\$)\\{[^}]+}");
+    private static final Comparator<ParsedMapper> MAPPER_ORDER = Comparator
+            .comparing(ParsedMapper::relativePath)
+            .thenComparing(ParsedMapper::namespace);
+    private static final Comparator<MyBatisSqlStatement> STATEMENT_ORDER = Comparator
+            .comparing(MyBatisSqlStatement::mapperRelativePath)
+            .thenComparing(MyBatisSqlStatement::namespace)
+            .thenComparing(MyBatisSqlStatement::id)
+            .thenComparingInt(MyBatisSqlStatement::selectKeyOrdinal);
+
+    public MyBatisSqlInventory build(Path repository, List<String> includes, List<String> excludes) {
+        Path root = validateRepository(repository);
+        List<PathMatcher> includeMatchers = matchers(defaultIncludes(includes));
+        List<PathMatcher> excludeMatchers = matchers(excludes == null ? List.of() : excludes);
+        List<Path> mapperPaths = discoverMappers(root, includeMatchers, excludeMatchers);
+
+        List<ParsedMapper> parsedMappers = mapperPaths.stream()
+                .map(path -> parseMapper(root, path))
+                .sorted(MAPPER_ORDER)
+                .toList();
+        Map<String, Fragment> fragments = collectFragments(parsedMappers);
+        validateFragments(fragments);
+
+        Map<String, StatementOrigin> identities = new LinkedHashMap<>();
+        List<MyBatisMapperInventory> mappers = new ArrayList<>();
+        List<MyBatisSqlStatement> allStatements = new ArrayList<>();
+        for (ParsedMapper mapper : parsedMappers) {
+            List<MyBatisSqlStatement> mapperStatements = statementsFor(mapper, fragments, identities);
+            mapperStatements.sort(STATEMENT_ORDER);
+            String mapperKey = mapperKey(mapper.relativePath(), mapper.namespace());
+            mappers.add(new MyBatisMapperInventory(
+                    mapper.relativePath(),
+                    mapper.namespace(),
+                    mapper.sourceSha256(),
+                    mapperKey,
+                    mapperStatements));
+            allStatements.addAll(mapperStatements);
+        }
+        allStatements.sort(STATEMENT_ORDER);
+        return new MyBatisSqlInventory(mappers, allStatements);
+    }
+
+    private Path validateRepository(Path repository) {
+        Objects.requireNonNull(repository, "repository");
+        Path root = repository.toAbsolutePath().normalize();
+        if (!Files.isDirectory(root) || !Files.isReadable(root)) {
+            throw new IllegalArgumentException("repository must be a readable directory: " + root);
+        }
+        return root;
+    }
+
+    private List<String> defaultIncludes(List<String> includes) {
+        return includes == null || includes.isEmpty() ? List.of("**/*.xml") : List.copyOf(includes);
+    }
+
+    private List<PathMatcher> matchers(List<String> patterns) {
+        List<PathMatcher> result = new ArrayList<>();
+        for (String pattern : patterns) {
+            if (pattern != null && !pattern.isBlank()) {
+                result.add(FileSystems.getDefault().getPathMatcher("glob:" + pattern.replace('\\', '/')));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private List<Path> discoverMappers(Path root, List<PathMatcher> includes, List<PathMatcher> excludes) {
+        try (Stream<Path> paths = Files.walk(root)) {
+            return paths
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xml"))
+                    .filter(path -> matches(root.relativize(path), includes))
+                    .filter(path -> !matches(root.relativize(path), excludes))
+                    .sorted(Comparator.comparing(path -> logicalPath(root.relativize(path))))
+                    .toList();
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("unable to discover MyBatis mapper XML files under " + root, ex);
+        }
+    }
+
+    private boolean matches(Path relativePath, List<PathMatcher> matchers) {
+        for (PathMatcher matcher : matchers) {
+            if (matcher.matches(relativePath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ParsedMapper parseMapper(Path root, Path path) {
+        String relativePath = logicalPath(root.relativize(path));
+        if (!Files.isReadable(path)) {
+            throw new IllegalArgumentException("unable to read MyBatis mapper XML: " + relativePath);
+        }
+
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(path);
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("unable to read MyBatis mapper XML: " + relativePath, ex);
+        }
+        String source = new String(bytes, StandardCharsets.UTF_8);
+        validateDoctype(source, relativePath);
+
+        XmlNode rootNode;
+        try {
+            rootNode = parseXml(source);
+        } catch (XMLStreamException | RuntimeException ex) {
+            throw new IllegalArgumentException("failed to parse MyBatis mapper XML '" + relativePath + "': "
+                    + conciseMessage(ex), ex);
+        }
+        if (rootNode == null || !"mapper".equals(rootNode.name())) {
+            throw new IllegalArgumentException(
+                    "failed to parse MyBatis mapper XML '" + relativePath + "': root element must be <mapper>");
+        }
+        String namespace = requiredAttribute(rootNode, "namespace", relativePath, "mapper");
+        return new ParsedMapper(relativePath, namespace, sha256(bytes), source, rootNode);
+    }
+
+    private void validateDoctype(String source, String relativePath) {
+        int start = indexOfIgnoreCase(source, "<!DOCTYPE");
+        if (start < 0) {
+            return;
+        }
+        int end = doctypeEnd(source, start);
+        if (end < 0) {
+            throw new IllegalArgumentException(
+                    "failed to parse MyBatis mapper XML '" + relativePath + "': unterminated DOCTYPE");
+        }
+        String declaration = source.substring(start, end + 1);
+        if (!MYBATIS_DOCTYPE.matcher(declaration).matches()) {
+            throw new IllegalArgumentException(
+                    "external entities are forbidden in MyBatis mapper XML: " + relativePath
+                            + "; only the standard MyBatis mapper DOCTYPE is allowed");
+        }
+        if (indexOfIgnoreCase(source.substring(end + 1), "<!DOCTYPE") >= 0) {
+            throw new IllegalArgumentException(
+                    "external entities are forbidden in MyBatis mapper XML: " + relativePath
+                            + "; multiple DOCTYPE declarations are not allowed");
+        }
+    }
+
+    private int doctypeEnd(String source, int start) {
+        char quote = 0;
+        int internalSubsetDepth = 0;
+        for (int i = start; i < source.length(); i++) {
+            char current = source.charAt(i);
+            if (quote != 0) {
+                if (current == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (current == '\'' || current == '"') {
+                quote = current;
+            } else if (current == '[') {
+                internalSubsetDepth++;
+            } else if (current == ']') {
+                internalSubsetDepth--;
+            } else if (current == '>' && internalSubsetDepth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private XmlNode parseXml(String source) throws XMLStreamException {
+        XMLInputFactory factory = XMLInputFactory.newFactory();
+        factory.setProperty(XMLInputFactory.SUPPORT_DTD, true);
+        factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+        factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false);
+        setPropertyIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        setPropertyIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> localMyBatisDtd(publicId, systemId));
+
+        XMLStreamReader reader = factory.createXMLStreamReader(new StringReader(source));
+        Deque<MutableXmlNode> stack = new ArrayDeque<>();
+        MutableXmlNode root = null;
+        try {
+            while (reader.hasNext()) {
+                int event = reader.next();
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    int startOffset = findStartOffset(source, reader.getLocation().getCharacterOffset());
+                    Map<String, String> attributes = new LinkedHashMap<>();
+                    for (int i = 0; i < reader.getAttributeCount(); i++) {
+                        attributes.put(reader.getAttributeLocalName(i), reader.getAttributeValue(i));
+                    }
+                    MutableXmlNode node = new MutableXmlNode(
+                            reader.getLocalName(),
+                            attributes,
+                            startOffset,
+                            reader.getLocation().getLineNumber());
+                    if (stack.isEmpty()) {
+                        if (root != null) {
+                            throw new XMLStreamException("multiple root elements");
+                        }
+                        root = node;
+                    } else {
+                        stack.peek().content().add(node);
+                    }
+                    stack.push(node);
+                } else if (event == XMLStreamConstants.END_ELEMENT) {
+                    MutableXmlNode node = stack.pop();
+                    node.finish(reader.getLocation().getCharacterOffset(), reader.getLocation().getLineNumber());
+                } else if (event == XMLStreamConstants.CHARACTERS
+                        || event == XMLStreamConstants.CDATA
+                        || event == XMLStreamConstants.SPACE) {
+                    if (!stack.isEmpty()) {
+                        stack.peek().content().add(reader.getText());
+                    }
+                } else if (event == XMLStreamConstants.ENTITY_REFERENCE) {
+                    throw new XMLStreamException("entity references other than predefined XML entities are forbidden");
+                }
+            }
+        } finally {
+            reader.close();
+        }
+        return root == null ? null : root.freeze();
+    }
+
+    private Object localMyBatisDtd(String publicId, String systemId) throws XMLStreamException {
+        boolean knownPublicId = publicId == null || "-//mybatis.org//DTD Mapper 3.0//EN".equals(publicId);
+        boolean knownSystemId = "http://mybatis.org/dtd/mybatis-3-mapper.dtd".equals(systemId)
+                || "https://mybatis.org/dtd/mybatis-3-mapper.dtd".equals(systemId);
+        if (knownPublicId && knownSystemId) {
+            return InputStream.nullInputStream();
+        }
+        throw new XMLStreamException("external entity resolution is forbidden");
+    }
+
+    private void setPropertyIfSupported(XMLInputFactory factory, String property, Object value) {
+        try {
+            factory.setProperty(property, value);
+        } catch (IllegalArgumentException ignored) {
+            // The resolver and isSupportingExternalEntities=false remain the hard no-network boundary.
+        }
+    }
+
+    private int findStartOffset(String source, int afterStartTagOffset) throws XMLStreamException {
+        int fromIndex = Math.min(afterStartTagOffset - 1, source.length() - 1);
+        int offset = source.lastIndexOf('<', fromIndex);
+        if (offset < 0) {
+            throw new XMLStreamException("cannot locate element start in source");
+        }
+        return offset;
+    }
+
+    private Map<String, Fragment> collectFragments(List<ParsedMapper> mappers) {
+        Map<String, Fragment> fragments = new LinkedHashMap<>();
+        for (ParsedMapper mapper : mappers) {
+            for (XmlNode child : childElements(mapper.root())) {
+                if (!"sql".equals(child.name())) {
+                    continue;
+                }
+                String id = requiredAttribute(child, "id", mapper.relativePath(), "sql fragment");
+                String fullId = mapper.namespace() + "." + id;
+                Fragment previous = fragments.putIfAbsent(fullId, new Fragment(mapper, child, fullId));
+                if (previous != null) {
+                    throw new IllegalArgumentException("duplicate SQL fragment identity '" + fullId + "' in "
+                            + previous.mapper().relativePath() + " and " + mapper.relativePath());
+                }
+            }
+        }
+        return Map.copyOf(fragments);
+    }
+
+    private void validateFragments(Map<String, Fragment> fragments) {
+        fragments.values().stream()
+                .sorted(Comparator.comparing(Fragment::fullId))
+                .forEach(fragment -> {
+                    Deque<String> includeStack = new ArrayDeque<>();
+                    includeStack.push(fragment.fullId());
+                    expand(
+                            fragment.node(),
+                            fragment.mapper().namespace(),
+                            fragment.mapper().relativePath(),
+                            fragment.node().attributes().get("id"),
+                            fragments,
+                            includeStack,
+                            new LinkedHashSet<>(),
+                            new ArrayList<>(),
+                            new StringBuilder(),
+                            true,
+                            false);
+                });
+    }
+
+    private List<MyBatisSqlStatement> statementsFor(
+            ParsedMapper mapper,
+            Map<String, Fragment> fragments,
+            Map<String, StatementOrigin> identities) {
+        List<MyBatisSqlStatement> statements = new ArrayList<>();
+        for (XmlNode node : childElements(mapper.root())) {
+            if (!STATEMENT_ELEMENTS.contains(node.name())) {
+                continue;
+            }
+            String id = requiredAttribute(node, "id", mapper.relativePath(), node.name() + " statement");
+            registerIdentity(identities, mapper, id, 0);
+            statements.add(toStatement(mapper, node, id, node.name().toUpperCase(Locale.ROOT), 0, fragments, true));
+
+            List<XmlNode> selectKeys = new ArrayList<>();
+            collectSelectKeys(node, selectKeys);
+            for (int i = 0; i < selectKeys.size(); i++) {
+                int ordinal = i + 1;
+                registerIdentity(identities, mapper, id, ordinal);
+                statements.add(toStatement(
+                        mapper,
+                        selectKeys.get(i),
+                        id,
+                        "SELECT_KEY",
+                        ordinal,
+                        fragments,
+                        false));
+            }
+        }
+        return statements;
+    }
+
+    private void registerIdentity(
+            Map<String, StatementOrigin> identities,
+            ParsedMapper mapper,
+            String id,
+            int selectKeyOrdinal) {
+        String identity = mapper.namespace() + "." + id + (selectKeyOrdinal == 0 ? "" : "#selectKey-" + selectKeyOrdinal);
+        StatementOrigin previous = identities.putIfAbsent(
+                identity,
+                new StatementOrigin(mapper.relativePath(), mapper.namespace(), id, selectKeyOrdinal));
+        if (previous != null) {
+            throw new IllegalArgumentException("duplicate statement identity '" + identity + "' in "
+                    + previous.relativePath() + " and " + mapper.relativePath());
+        }
+    }
+
+    private MyBatisSqlStatement toStatement(
+            ParsedMapper mapper,
+            XmlNode node,
+            String id,
+            String commandType,
+            int selectKeyOrdinal,
+            Map<String, Fragment> fragments,
+            boolean skipSelectKeys) {
+        LinkedHashSet<String> resolvedFragments = new LinkedHashSet<>();
+        List<String> dynamicNodes = new ArrayList<>();
+        StringBuilder sql = new StringBuilder();
+        expand(
+                node,
+                mapper.namespace(),
+                mapper.relativePath(),
+                id,
+                fragments,
+                new ArrayDeque<>(),
+                resolvedFragments,
+                dynamicNodes,
+                sql,
+                skipSelectKeys,
+                false);
+        String normalizedSql = normalizeSql(sql.toString());
+        List<String> placeholders = placeholders(normalizedSql);
+        String mapperKey = mapperKey(mapper.relativePath(), mapper.namespace());
+        String statementKey = statementKey(
+                mapper.relativePath(), mapper.namespace(), id, selectKeyOrdinal);
+        return new MyBatisSqlStatement(
+                mapper.relativePath(),
+                mapper.namespace(),
+                id,
+                commandType,
+                selectKeyOrdinal > 0,
+                selectKeyOrdinal,
+                node.startLine(),
+                node.endLine(),
+                rawXml(mapper.source(), node),
+                normalizedSql,
+                dynamicNodes,
+                List.copyOf(placeholders),
+                List.copyOf(resolvedFragments),
+                mapper.sourceSha256(),
+                mapperKey,
+                statementKey);
+    }
+
+    private void expand(
+            XmlNode node,
+            String namespace,
+            String mapperRelativePath,
+            String statementId,
+            Map<String, Fragment> fragments,
+            Deque<String> includeStack,
+            LinkedHashSet<String> resolvedFragments,
+            List<String> dynamicNodes,
+            StringBuilder sql,
+            boolean skipSelectKeys,
+            boolean recordNodeName) {
+        if (recordNodeName) {
+            dynamicNodes.add(node.name());
+        }
+        for (Object part : node.content()) {
+            if (part instanceof String text) {
+                sql.append(text).append(' ');
+                continue;
+            }
+            XmlNode child = (XmlNode) part;
+            if (skipSelectKeys && "selectKey".equals(child.name())) {
+                continue;
+            }
+            if ("include".equals(child.name())) {
+                String refid = requiredAttribute(child, "refid", mapperRelativePath, "include");
+                String fullId = refid.contains(".") ? refid : namespace + "." + refid;
+                Fragment fragment = fragments.get(fullId);
+                if (fragment == null) {
+                    throw new IllegalArgumentException("missing include '" + fullId + "' while expanding statement '"
+                            + namespace + "." + statementId + "' in " + mapperRelativePath);
+                }
+                if (includeStack.contains(fullId)) {
+                    List<String> cycle = new ArrayList<>(includeStack);
+                    java.util.Collections.reverse(cycle);
+                    cycle.add(fullId);
+                    throw new IllegalArgumentException("include cycle while expanding statement '"
+                            + namespace + "." + statementId + "' in " + mapperRelativePath + ": "
+                            + String.join(" -> ", cycle));
+                }
+                resolvedFragments.add(fullId);
+                includeStack.push(fullId);
+                expand(
+                        fragment.node(),
+                        fragment.mapper().namespace(),
+                        mapperRelativePath,
+                        statementId,
+                        fragments,
+                        includeStack,
+                        resolvedFragments,
+                        dynamicNodes,
+                        sql,
+                        skipSelectKeys,
+                        false);
+                includeStack.pop();
+            } else {
+                expand(
+                        child,
+                        namespace,
+                        mapperRelativePath,
+                        statementId,
+                        fragments,
+                        includeStack,
+                        resolvedFragments,
+                        dynamicNodes,
+                        sql,
+                        skipSelectKeys,
+                        true);
+            }
+        }
+    }
+
+    private void collectSelectKeys(XmlNode node, List<XmlNode> selectKeys) {
+        for (XmlNode child : childElements(node)) {
+            if ("selectKey".equals(child.name())) {
+                selectKeys.add(child);
+            } else if (!"include".equals(child.name())) {
+                collectSelectKeys(child, selectKeys);
+            }
+        }
+    }
+
+    private List<XmlNode> childElements(XmlNode node) {
+        List<XmlNode> children = new ArrayList<>();
+        for (Object part : node.content()) {
+            if (part instanceof XmlNode child) {
+                children.add(child);
+            }
+        }
+        return children;
+    }
+
+    private String requiredAttribute(XmlNode node, String name, String relativePath, String context) {
+        String value = node.attributes().getOrDefault(name, "").trim();
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException("missing required '" + name + "' on " + context + " in " + relativePath);
+        }
+        return value;
+    }
+
+    private List<String> placeholders(String sql) {
+        List<String> result = new ArrayList<>();
+        Matcher matcher = PLACEHOLDER.matcher(sql);
+        while (matcher.find()) {
+            result.add(matcher.group());
+        }
+        return result;
+    }
+
+    private String normalizeSql(String sql) {
+        return sql.replaceAll("\\s+", " ").trim();
+    }
+
+    private String rawXml(String source, XmlNode node) {
+        int start = Math.max(0, Math.min(node.startOffset(), source.length()));
+        int end = Math.max(start, Math.min(node.endOffset(), source.length()));
+        return source.substring(start, end);
+    }
+
+    private String mapperKey(String relativePath, String namespace) {
+        String fileName = Path.of(relativePath).getFileName().toString();
+        String withoutExtension = fileName.replaceFirst("(?i)\\.xml$", "");
+        return slug(withoutExtension + "-" + namespace, "mapper") + "-"
+                + shortSha256(relativePath + "\n" + namespace);
+    }
+
+    private String statementKey(String relativePath, String namespace, String id, int selectKeyOrdinal) {
+        String readable = namespace + "-" + id;
+        if (selectKeyOrdinal > 0) {
+            readable += "-select-key-" + selectKeyOrdinal;
+        }
+        return slug(readable, "statement") + "-"
+                + shortSha256(relativePath + "\n" + namespace + "\n" + id + "\n" + selectKeyOrdinal);
+    }
+
+    private String slug(String value, String fallback) {
+        String slug = value.replaceAll("([A-Z]+)([A-Z][a-z])", "$1-$2")
+                .replaceAll("([a-z0-9])([A-Z])", "$1-$2")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+|-+$", "");
+        return slug.isBlank() ? fallback : slug;
+    }
+
+    private String shortSha256(String value) {
+        return sha256(value.getBytes(StandardCharsets.UTF_8)).substring(0, 12);
+    }
+
+    private String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
+
+    private String logicalPath(Path path) {
+        return path.toString().replace(path.getFileSystem().getSeparator(), "/");
+    }
+
+    private int indexOfIgnoreCase(String value, String needle) {
+        return value.toLowerCase(Locale.ROOT).indexOf(needle.toLowerCase(Locale.ROOT));
+    }
+
+    private String conciseMessage(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
+    }
+
+    private record ParsedMapper(
+            String relativePath,
+            String namespace,
+            String sourceSha256,
+            String source,
+            XmlNode root) {
+    }
+
+    private record Fragment(ParsedMapper mapper, XmlNode node, String fullId) {
+    }
+
+    private record StatementOrigin(String relativePath, String namespace, String id, int selectKeyOrdinal) {
+    }
+
+    private record XmlNode(
+            String name,
+            Map<String, String> attributes,
+            List<Object> content,
+            int startOffset,
+            int endOffset,
+            int startLine,
+            int endLine) {
+
+        private XmlNode {
+            attributes = Map.copyOf(attributes);
+            content = List.copyOf(content);
+        }
+    }
+
+    private static final class MutableXmlNode {
+        private final String name;
+        private final Map<String, String> attributes;
+        private final List<Object> content = new ArrayList<>();
+        private final int startOffset;
+        private final int startLine;
+        private int endOffset;
+        private int endLine;
+
+        private MutableXmlNode(String name, Map<String, String> attributes, int startOffset, int startLine) {
+            this.name = name;
+            this.attributes = attributes;
+            this.startOffset = startOffset;
+            this.startLine = startLine;
+        }
+
+        private List<Object> content() {
+            return content;
+        }
+
+        private void finish(int endOffset, int endLine) {
+            this.endOffset = endOffset;
+            this.endLine = endLine;
+        }
+
+        private XmlNode freeze() {
+            List<Object> immutableContent = new ArrayList<>();
+            for (Object part : content) {
+                immutableContent.add(part instanceof MutableXmlNode child ? child.freeze() : part);
+            }
+            return new XmlNode(name, attributes, immutableContent, startOffset, endOffset, startLine, endLine);
+        }
+    }
+}
