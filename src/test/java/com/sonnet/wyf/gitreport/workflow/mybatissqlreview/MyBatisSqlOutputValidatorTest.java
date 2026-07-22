@@ -4,45 +4,192 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MyBatisSqlOutputValidatorTest {
+    private static final Instant STARTED_AT = Instant.parse("2026-07-22T09:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisSqlOutputValidator validator = new MyBatisSqlOutputValidator(objectMapper);
+    private final MyBatisDatabasePreflight.Result database = new MyBatisDatabasePreflight.Result(
+            "gauss-readonly", "orders", "audit", "GaussDB");
 
     @TempDir
     Path tempDir;
 
     @Test
-    void validatesExactlyThreeCompleteCandidateArtifactsAgainstSchemaAndEvidenceContract() throws Exception {
-        Path candidates = validCandidates();
-
-        MyBatisSqlOutputValidator.Result result = validator.validate(candidates);
+    void validatesCandidateArtifactsOnlyAgainstExpectedTaskDatabaseAndAuditedFacts() throws Exception {
+        MyBatisSqlOutputValidator.Result result = validateCandidates(validCandidates());
 
         assertThat(result.statementKey()).isEqualTo("mapper-order-find-open");
         assertThat(result.scenarioCount()).isEqualTo(1);
         assertThat(result.evidenceBytes()).isPositive().isLessThanOrEqualTo(262_144);
+        assertThat(result.auditedCallIds()).containsExactly("call-1", "call-2");
+    }
+
+    @Test
+    void exposesNoWeakPathOnlyValidationApi() {
+        assertThat(Arrays.stream(MyBatisSqlOutputValidator.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("validate"))
+                .map(Method::getParameterTypes)
+                .noneMatch(parameters -> parameters.length == 1 && parameters[0] == Path.class))
+                .isTrue();
+    }
+
+    @Test
+    void rejectsExpectedTaskAndPreflightBindingMismatches() throws Exception {
+        Path candidates = validCandidates();
+        ObjectNode summary = summary(candidates);
+        summary.put("command_type", "update");
+        writeJson(candidates.resolve("summary.json"), summary);
+        Path wrongCommandType = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongCommandType))
+                .hasMessageContaining("expected task").hasMessageContaining("command_type");
+
+        Path wrongDatabase = validCandidates();
+        ObjectNode evidence = evidence(wrongDatabase);
+        evidence.put("schema_name", "public");
+        writeJson(wrongDatabase.resolve("database-evidence.json"), evidence);
+        assertThatThrownBy(() -> validateCandidates(wrongDatabase))
+                .hasMessageContaining("preflight database binding").hasMessageContaining("schema_name");
+
+        Path wrongSelectKey = validCandidates();
+        summary = summary(wrongSelectKey);
+        summary.put("select_key", true);
+        writeJson(wrongSelectKey.resolve("summary.json"), summary);
+        assertThatThrownBy(() -> validateCandidates(wrongSelectKey))
+                .hasMessageContaining("expected task").hasMessageContaining("select_key");
+    }
+
+    @Test
+    void rejectsAuditedStatementOrDatabaseContextFromAnotherTask() throws Exception {
+        MyBatisToolCallAudit.Result wrongStatement = auditedFacts(
+                new MyBatisToolCallAudit.StatementContext("another-statement", "select", false),
+                database
+        );
+        Path wrongStatementCandidates = validCandidates();
+        assertThatThrownBy(() -> validator.validate(
+                wrongStatementCandidates, expectedTask(), database, wrongStatement))
+                .hasMessageContaining("audited statement context").hasMessageContaining("statement_key");
+
+        MyBatisDatabasePreflight.Result otherDatabase = new MyBatisDatabasePreflight.Result(
+                "other-connection", "other-db", "other-schema", "GaussDB");
+        MyBatisToolCallAudit.Result wrongDatabase = auditedFacts(
+                new MyBatisToolCallAudit.StatementContext("mapper-order-find-open", "select", false),
+                otherDatabase
+        );
+        Path wrongDatabaseCandidates = validCandidates();
+        assertThatThrownBy(() -> validator.validate(
+                wrongDatabaseCandidates, expectedTask(), database, wrongDatabase))
+                .hasMessageContaining("audited preflight binding");
+    }
+
+    @Test
+    void rejectsMismatchedQueryRowsColumnsArgumentsResultAndToolIdentity() throws Exception {
+        Path candidates = validCandidates();
+        ObjectNode evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/scenarios/0")).put("query_text", "SELECT id FROM orders LIMIT 1");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongQuery = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongQuery))
+                .hasMessageContaining("query_text").hasMessageContaining("audited call call-2");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ((ArrayNode) evidence.at("/scenarios/0/columns")).add("invented");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongColumns = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongColumns))
+                .hasMessageContaining("columns").hasMessageContaining("audited call call-2");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/metadata/0/arguments")).put("schemaName", "public");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongArguments = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongArguments))
+                .hasMessageContaining("arguments").hasMessageContaining("audited call call-1");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/metadata/0/result")).put("name", "invented");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongResult = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongResult))
+                .hasMessageContaining("result").hasMessageContaining("audited call call-1");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/scenarios/0/result/rows/0")).put("status", "INVENTED");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongScenarioResult = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongScenarioResult))
+                .hasMessageContaining("result").hasMessageContaining("audited call call-2");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/metadata/0")).put("tool_name", "preview_table_data");
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path wrongTool = candidates;
+        assertThatThrownBy(() -> validateCandidates(wrongTool))
+                .hasMessageContaining("tool_name").hasMessageContaining("audited call call-1");
+    }
+
+    @Test
+    void rejectsMissingExtraStaleOrDuplicateEvidenceForAuditedCalls() throws Exception {
+        Path candidates = validCandidates();
+        ObjectNode evidence = evidence(candidates);
+        ((ArrayNode) evidence.path("metadata")).removeAll();
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path missingEvidence = candidates;
+        assertThatThrownBy(() -> validateCandidates(missingEvidence))
+                .hasMessageContaining("missing evidence for audited call").hasMessageContaining("call-1");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ObjectNode extra = ((ObjectNode) evidence.at("/metadata/0")).deepCopy();
+        extra.put("evidence_id", "E-extra");
+        extra.put("tool_call_id", "stale-call");
+        ((ArrayNode) evidence.path("metadata")).add(extra);
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path extraEvidence = candidates;
+        assertThatThrownBy(() -> validateCandidates(extraEvidence))
+                .hasMessageContaining("stale or extra tool_call_id");
+
+        candidates = validCandidates();
+        evidence = evidence(candidates);
+        ObjectNode duplicate = ((ObjectNode) evidence.at("/metadata/0")).deepCopy();
+        duplicate.put("evidence_id", "E-duplicate");
+        ((ArrayNode) evidence.path("metadata")).add(duplicate);
+        writeJson(candidates.resolve("database-evidence.json"), evidence);
+        Path duplicateEvidence = candidates;
+        assertThatThrownBy(() -> validateCandidates(duplicateEvidence))
+                .hasMessageContaining("duplicate evidence for audited call").hasMessageContaining("call-1");
     }
 
     @Test
     void rejectsSummarySchemaViolationsMissingReportSectionsAndPlaceholders() throws Exception {
         Path candidates = validCandidates();
-        ObjectNode summary = (ObjectNode) objectMapper.readTree(candidates.resolve("summary.json").toFile());
+        ObjectNode summary = summary(candidates);
         summary.remove("risk_level");
         writeJson(candidates.resolve("summary.json"), summary);
-        Path invalidSummaryCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(invalidSummaryCandidates))
+        Path invalidSummary = candidates;
+        assertThatThrownBy(() -> validateCandidates(invalidSummary))
                 .hasMessageContaining("summary schema").hasMessageContaining("risk_level");
 
         candidates = validCandidates();
@@ -54,16 +201,14 @@ class MyBatisSqlOutputValidatorTest {
                 ## Findings
                 ## Recommendations
                 """, StandardCharsets.UTF_8);
-        Path missingSectionCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(missingSectionCandidates))
-                .hasMessageContaining("## Limitations");
+        Path missingSection = candidates;
+        assertThatThrownBy(() -> validateCandidates(missingSection)).hasMessageContaining("## Limitations");
 
         candidates = validCandidates();
         Files.writeString(candidates.resolve("report.md"),
                 Files.readString(candidates.resolve("report.md")) + "\n{{REPLACE_ME}}\n", StandardCharsets.UTF_8);
-        Path placeholderCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(placeholderCandidates))
-                .hasMessageContaining("placeholder");
+        Path placeholder = candidates;
+        assertThatThrownBy(() -> validateCandidates(placeholder)).hasMessageContaining("placeholder");
     }
 
     @Test
@@ -78,11 +223,10 @@ class MyBatisSqlOutputValidatorTest {
             copy.put("evidence_id", "E-" + (index + 1));
             copy.put("tool_call_id", "call-" + (index + 1));
             scenarios.add(copy);
-            ((ArrayNode) evidence.at("/audit/tool_call_ids")).add("call-" + (index + 1));
         }
         writeJson(candidates.resolve("database-evidence.json"), evidence);
-        Path fourScenarioCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(fourScenarioCandidates))
+        Path tooManyScenarios = candidates;
+        assertThatThrownBy(() -> validateCandidates(tooManyScenarios))
                 .hasMessageContaining("at most 3 scenarios");
 
         candidates = validCandidates();
@@ -93,84 +237,114 @@ class MyBatisSqlOutputValidatorTest {
         }
         ((ObjectNode) evidence.at("/scenarios/0")).put("row_count", rows.size());
         writeJson(candidates.resolve("database-evidence.json"), evidence);
-        Path tooManyRowsCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(tooManyRowsCandidates))
-                .hasMessageContaining("at most 20 rows");
+        Path tooManyRows = candidates;
+        assertThatThrownBy(() -> validateCandidates(tooManyRows)).hasMessageContaining("at most 20 rows");
 
         candidates = validCandidates();
         evidence = evidence(candidates);
         ((ArrayNode) evidence.path("limitations")).add("x".repeat(263_000));
         writeJson(candidates.resolve("database-evidence.json"), evidence);
-        Path oversizedCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(oversizedCandidates))
-                .hasMessageContaining("262144 bytes");
+        Path oversized = candidates;
+        assertThatThrownBy(() -> validateCandidates(oversized)).hasMessageContaining("262144 bytes");
     }
 
     @Test
-    void rejectsBrokenEvidenceReferencesCountsAndUnexpectedCandidateFiles() throws Exception {
+    void rejectsRowCountMismatchAndUnexpectedCandidateFiles() throws Exception {
         Path candidates = validCandidates();
         ObjectNode evidence = evidence(candidates);
         ((ObjectNode) evidence.at("/scenarios/0")).put("row_count", 19);
         writeJson(candidates.resolve("database-evidence.json"), evidence);
-        Path countMismatchCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(countMismatchCandidates))
-                .hasMessageContaining("row_count");
-
-        candidates = validCandidates();
-        evidence = evidence(candidates);
-        ((ObjectNode) evidence.at("/scenarios/0")).put("tool_call_id", "not-audited");
-        writeJson(candidates.resolve("database-evidence.json"), evidence);
-        Path staleEvidenceCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(staleEvidenceCandidates))
-                .hasMessageContaining("audited tool_call_id");
+        Path mismatchedRowCount = candidates;
+        assertThatThrownBy(() -> validateCandidates(mismatchedRowCount)).hasMessageContaining("row_count");
 
         candidates = validCandidates();
         Files.writeString(candidates.resolve("extra.txt"), "must not be written", StandardCharsets.UTF_8);
-        Path extraFileCandidates = candidates;
-        assertThatThrownBy(() -> validator.validate(extraFileCandidates))
+        Path extraFile = candidates;
+        assertThatThrownBy(() -> validateCandidates(extraFile))
                 .hasMessageContaining("exactly three candidate files");
     }
 
     @Test
-    void buildsCompletePostHocPromptAndShipsCompleteTemplateAndSchema() throws Exception {
-        MyBatisSqlPromptBuilder builder = new MyBatisSqlPromptBuilder(objectMapper);
-        MyBatisSqlPromptBuilder.Context context = new MyBatisSqlPromptBuilder.Context(
+    void rejectsUnknownJsonSchemaKeywordsFailClosed() throws Exception {
+        JsonNode unsupportedSchema = objectMapper.readTree("""
+                {"type":"object","patternProperties":{"^x":{"type":"string"}}}
+                """);
+
+        assertThatThrownBy(() -> new MyBatisSqlOutputValidator(objectMapper, unsupportedSchema))
+                .hasMessageContaining("unknown JSON schema keyword").hasMessageContaining("patternProperties");
+    }
+
+    private MyBatisSqlOutputValidator.Result validateCandidates(Path candidates) throws Exception {
+        return validator.validate(candidates, expectedTask(), database, auditedFacts());
+    }
+
+    private MyBatisSqlOutputValidator.ExpectedTaskContext expectedTask() {
+        return new MyBatisSqlOutputValidator.ExpectedTaskContext(
                 "mapper-order-find-open",
+                "mappers/OrderMapper.xml",
+                "com.example.OrderMapper",
+                "findOpen",
                 "select",
-                false,
-                "SELECT id FROM orders WHERE status = #{status}",
-                List.of("if", "where"),
-                List.of("#{status}"),
-                "gauss-readonly",
-                "orders",
-                "audit",
-                tempDir.resolve("candidates")
+                false
         );
+    }
 
-        String prompt = builder.build(context);
+    private MyBatisToolCallAudit.Result auditedFacts() {
+        return auditedFacts(
+                new MyBatisToolCallAudit.StatementContext("mapper-order-find-open", "select", false),
+                database
+        );
+    }
 
-        assertThat(prompt)
-                .contains("post-hoc")
-                .contains("cannot prevent an already executed SQL statement")
-                .contains("never execute the original DML or selectKey")
-                .contains("execute_sql_query")
-                .contains("at most 3")
-                .contains("LIMIT <= 20")
-                .contains("262144 bytes")
-                .contains("report.md", "summary.json", "database-evidence.json")
-                .contains("mapper-order-find-open", "gauss-readonly", "#{status}")
-                .doesNotContain("{{", "TODO", "TBD");
+    private MyBatisToolCallAudit.Result auditedFacts(
+            MyBatisToolCallAudit.StatementContext statement,
+            MyBatisDatabasePreflight.Result auditedDatabase
+    ) {
+        ObjectNode metadataResult = objectMapper.createObjectNode();
+        metadataResult.put("objectType", "TABLE");
+        metadataResult.put("name", "orders");
+        metadataResult.putArray("columns").add("id").add("status");
+        ObjectNode queryResult = objectMapper.createObjectNode();
+        queryResult.putArray("columns").add("id").add("status");
+        ArrayNode auditedRows = queryResult.putArray("rows");
+        auditedRows.addObject().put("id", 101).put("status", "OPEN");
+        auditedRows.addObject().put("id", 102).put("status", "OPEN");
+        List<AgentBridgeClient.ToolCallRecord> calls = List.of(
+                toolCall(
+                        "call-1", "get_database_object_description", databaseArguments(auditedDatabase), metadataResult,
+                        Instant.parse("2026-07-22T09:05:00Z"), 10L),
+                toolCall(
+                        "call-2", "execute_sql_query",
+                        databaseArguments(auditedDatabase).put(
+                                "queryText", "SELECT id, status FROM orders WHERE status = 'OPEN' LIMIT 20"),
+                        queryResult, Instant.parse("2026-07-22T09:05:01Z"), 42L)
+        );
+        return new MyBatisToolCallAudit(objectMapper).audit(
+                calls,
+                new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of()),
+                auditedDatabase,
+                statement
+        );
+    }
 
-        String template = resource("/mybatis-sql-review-prompt-pack/templates/sql-detail-report.md");
-        JsonNode schema = objectMapper.readTree(resource(
-                "/mybatis-sql-review-prompt-pack/schemas/sql-summary.schema.json"));
-        assertThat(template).contains(
-                "# SQL Review", "## Statement", "## Static Analysis", "## Database Evidence",
-                "## Findings", "## Recommendations", "## Limitations");
-        assertThat(template).doesNotContain("{{", "TODO", "TBD");
-        assertThat(schema.path("$schema").asText()).contains("json-schema.org");
-        assertThat(schema.path("required")).isNotEmpty();
-        assertThat(schema.path("properties").path("findings").path("items").path("required")).isNotEmpty();
+    private AgentBridgeClient.ToolCallRecord toolCall(
+            String id,
+            String toolName,
+            JsonNode arguments,
+            JsonNode result,
+            Instant timestamp,
+            Long duration
+    ) {
+        return new AgentBridgeClient.ToolCallRecord(
+                id, toolName, toolName, "mcp", "completed", timestamp,
+                arguments, result, duration, objectMapper.createObjectNode());
+    }
+
+    private ObjectNode databaseArguments(MyBatisDatabasePreflight.Result auditedDatabase) {
+        return objectMapper.createObjectNode()
+                .put("connectionId", auditedDatabase.connectionId())
+                .put("databaseName", auditedDatabase.databaseName())
+                .put("schemaName", auditedDatabase.schemaName());
     }
 
     private Path validCandidates() throws IOException {
@@ -179,6 +353,10 @@ class MyBatisSqlOutputValidatorTest {
         copyFixture("sql-summary-valid.json", candidates.resolve("summary.json"));
         copyFixture("database-evidence-valid.json", candidates.resolve("database-evidence.json"));
         return candidates;
+    }
+
+    private ObjectNode summary(Path candidates) throws IOException {
+        return (ObjectNode) objectMapper.readTree(candidates.resolve("summary.json").toFile());
     }
 
     private ObjectNode evidence(Path candidates) throws IOException {
@@ -196,14 +374,5 @@ class MyBatisSqlOutputValidatorTest {
 
     private void writeJson(Path target, JsonNode value) throws IOException {
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(target.toFile(), value);
-    }
-
-    private String resource(String path) throws IOException {
-        try (InputStream input = getClass().getResourceAsStream(path)) {
-            if (input == null) {
-                throw new IllegalStateException("missing resource " + path);
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        }
     }
 }

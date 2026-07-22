@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -61,7 +62,8 @@ class MyBatisDatabasePreflightTest {
         JsonNode baseConnections = fixture("connections-centralized.json");
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true),
+                        "Missing", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        timeoutContract()),
                 "exactly one connection");
 
         ObjectNode duplicateConnections = baseConnections.deepCopy();
@@ -70,7 +72,8 @@ class MyBatisDatabasePreflightTest {
 
         assertRejected(baseConnections, fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.TEST, true),
+                        "Gauss Review", "orders", "missing", MyBatisDatabasePreflight.Environment.TEST, true,
+                        timeoutContract()),
                 "schema");
     }
 
@@ -101,12 +104,30 @@ class MyBatisDatabasePreflightTest {
     void requiresReadReplicaOrTestAndExplicitReadOnlyCredentialContract() throws Exception {
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY, true),
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY, true,
+                        timeoutContract()),
                 "read-replica or test");
         assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
                 new MyBatisDatabasePreflight.DatabaseContract(
-                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, false),
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, false,
+                        timeoutContract()),
                 "non-owner/non-admin read-only account");
+    }
+
+    @Test
+    void requiresConfirmedDatabaseServerOrRoleStatementTimeoutAtMostThirtySeconds() throws Exception {
+        assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        new MyBatisDatabasePreflight.StatementTimeoutContract(
+                                Duration.ofSeconds(31), MyBatisDatabasePreflight.StatementTimeoutScope.ROLE, true)),
+                "30 seconds");
+        assertRejected(fixture("connections-centralized.json"), fixture("schemas-orders.json"), true,
+                new MyBatisDatabasePreflight.DatabaseContract(
+                        "Gauss Review", "orders", "audit", MyBatisDatabasePreflight.Environment.TEST, true,
+                        new MyBatisDatabasePreflight.StatementTimeoutContract(
+                                Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.DATABASE, false)),
+                "confirmed");
     }
 
     private void assertRejected(
@@ -130,6 +151,15 @@ class MyBatisDatabasePreflightTest {
                 "orders",
                 "audit",
                 MyBatisDatabasePreflight.Environment.TEST,
+                true,
+                timeoutContract()
+        );
+    }
+
+    private MyBatisDatabasePreflight.StatementTimeoutContract timeoutContract() {
+        return new MyBatisDatabasePreflight.StatementTimeoutContract(
+                Duration.ofSeconds(30),
+                MyBatisDatabasePreflight.StatementTimeoutScope.ROLE,
                 true
         );
     }

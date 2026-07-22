@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -32,6 +33,10 @@ public final class MyBatisSqlOutputValidator {
             "## Recommendations",
             "## Limitations"
     );
+    private static final Set<String> SUPPORTED_SCHEMA_KEYWORDS = Set.of(
+            "$schema", "$id", "title", "type", "additionalProperties", "required", "properties",
+            "enum", "minLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems", "items"
+    );
     private static final Pattern UNRESOLVED_PLACEHOLDER = Pattern.compile(
             "(?is)\\{\\{[^}]+}}|<<[^>]+>>|\\b(?:TODO|TBD|FIXME|PLACEHOLDER)\\b"
     );
@@ -42,12 +47,26 @@ public final class MyBatisSqlOutputValidator {
     private final JsonNode summarySchema;
 
     public MyBatisSqlOutputValidator(ObjectMapper objectMapper) {
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-        this.summarySchema = readSchema();
+        this(objectMapper, null);
     }
 
-    public Result validate(Path candidateDirectory) throws IOException {
+    MyBatisSqlOutputValidator(ObjectMapper objectMapper, JsonNode summarySchema) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+        JsonNode selectedSchema = summarySchema == null ? readSchema() : summarySchema.deepCopy();
+        requireSupportedSchema(selectedSchema, "$schema");
+        this.summarySchema = selectedSchema;
+    }
+
+    public Result validate(
+            Path candidateDirectory,
+            ExpectedTaskContext expectedTask,
+            MyBatisDatabasePreflight.Result database,
+            MyBatisToolCallAudit.Result auditedFacts
+    ) throws IOException {
         Objects.requireNonNull(candidateDirectory, "candidateDirectory");
+        Objects.requireNonNull(expectedTask, "expectedTask");
+        Objects.requireNonNull(database, "database");
+        Objects.requireNonNull(auditedFacts, "auditedFacts");
         requireExactlyThreeFiles(candidateDirectory);
 
         Path reportPath = candidateDirectory.resolve("report.md");
@@ -74,12 +93,36 @@ public final class MyBatisSqlOutputValidator {
             throw new IllegalStateException("summary schema validation failed: " + String.join("; ", schemaErrors));
         }
 
-        int scenarioCount = validateEvidence(evidence, summary);
-        String statementKey = summary.path("statement_key").asText();
-        if (!report.contains(statementKey)) {
-            throw new IllegalStateException("report.md does not identify statement_key " + statementKey);
+        requireAuditedContext(expectedTask, database, auditedFacts);
+        requireTaskBinding(summary, expectedTask, "summary expected task");
+        int scenarioCount = validateEvidence(evidence, summary, expectedTask, database, auditedFacts);
+        requireReportBinding(report, expectedTask);
+        return new Result(
+                expectedTask.statementKey(),
+                scenarioCount,
+                evidenceBytes.length,
+                auditedFacts.auditedCallIds()
+        );
+    }
+
+    private void requireAuditedContext(
+            ExpectedTaskContext expected,
+            MyBatisDatabasePreflight.Result database,
+            MyBatisToolCallAudit.Result auditedFacts
+    ) {
+        MyBatisToolCallAudit.StatementContext statement = auditedFacts.statementContext();
+        if (!expected.statementKey().equals(statement.statementKey())) {
+            throw new IllegalStateException("audited statement context statement_key does not match expected task");
         }
-        return new Result(statementKey, scenarioCount, evidenceBytes.length);
+        if (!expected.commandType().equals(statement.commandType())) {
+            throw new IllegalStateException("audited statement context command_type does not match expected task");
+        }
+        if (expected.selectKey() != statement.selectKey()) {
+            throw new IllegalStateException("audited statement context select_key does not match expected task");
+        }
+        if (!database.equals(auditedFacts.database())) {
+            throw new IllegalStateException("audited preflight binding does not match validator preflight result");
+        }
     }
 
     private void requireExactlyThreeFiles(Path directory) throws IOException {
@@ -118,6 +161,24 @@ public final class MyBatisSqlOutputValidator {
         }
     }
 
+    private void requireReportBinding(String report, ExpectedTaskContext expected) {
+        Map<String, String> expectedValues = Map.of(
+                "statement_key", expected.statementKey(),
+                "mapper_relative_path", expected.mapperRelativePath(),
+                "namespace", expected.namespace(),
+                "statement_id", expected.statementId(),
+                "command_type", expected.commandType(),
+                "select_key", Boolean.toString(expected.selectKey())
+        );
+        for (Map.Entry<String, String> entry : expectedValues.entrySet()) {
+            if (!report.contains(entry.getValue())) {
+                throw new IllegalStateException(
+                        "report.md does not identify expected task " + entry.getKey() + " " + entry.getValue()
+                );
+            }
+        }
+    }
+
     private JsonNode parseObject(String content, String name) throws IOException {
         JsonNode value = objectMapper.readTree(content);
         if (value == null || !value.isObject()) {
@@ -126,15 +187,19 @@ public final class MyBatisSqlOutputValidator {
         return value;
     }
 
-    private int validateEvidence(JsonNode evidence, JsonNode summary) {
-        requireExactText(evidence, "schema_version", "mybatis-sql-review-database-evidence/v1");
-        String statementKey = requireText(evidence, "statement_key", "database evidence");
-        if (!summary.path("statement_key").asText().equals(statementKey)) {
-            throw new IllegalStateException("summary and database evidence statement_key values differ");
-        }
-        requireText(evidence, "connection_id", "database evidence");
-        requireText(evidence, "database_name", "database evidence");
-        requireText(evidence, "schema_name", "database evidence");
+    private int validateEvidence(
+            JsonNode evidence,
+            JsonNode summary,
+            ExpectedTaskContext expectedTask,
+            MyBatisDatabasePreflight.Result database,
+            MyBatisToolCallAudit.Result auditedFacts
+    ) {
+        requireExactText(evidence, "schema_version", "mybatis-sql-review-database-evidence/v1",
+                "database evidence");
+        requireTaskBinding(evidence, expectedTask, "database evidence expected task");
+        requireExactText(evidence, "connection_id", database.connectionId(), "preflight database binding");
+        requireExactText(evidence, "database_name", database.databaseName(), "preflight database binding");
+        requireExactText(evidence, "schema_name", database.schemaName(), "preflight database binding");
 
         JsonNode audit = requireObject(evidence, "audit", "database evidence");
         if (!audit.path("post_hoc").isBoolean() || !audit.path("post_hoc").asBoolean()) {
@@ -146,10 +211,13 @@ public final class MyBatisSqlOutputValidator {
                     "database evidence audit.permission_to_execute_original_dml must be false"
             );
         }
-        Set<String> auditedCallIds = uniqueTextValues(
+        List<String> declaredCallIds = uniqueTextList(
                 requireArray(audit, "tool_call_ids", "database evidence audit"),
                 "database evidence audit.tool_call_ids"
         );
+        if (!declaredCallIds.equals(auditedFacts.auditedCallIds())) {
+            throw new IllegalStateException("database evidence audit.tool_call_ids do not exactly match audited calls");
+        }
 
         JsonNode metadata = requireArray(evidence, "metadata", "database evidence");
         JsonNode scenarios = requireArray(evidence, "scenarios", "database evidence");
@@ -159,19 +227,34 @@ public final class MyBatisSqlOutputValidator {
         if (summary.path("scenario_count").asInt(-1) != scenarios.size()) {
             throw new IllegalStateException("summary scenario_count does not match database evidence scenarios");
         }
+        if (auditedFacts.queryScenarioCount() != scenarios.size()) {
+            throw new IllegalStateException("database evidence scenarios do not match audited query scenario count");
+        }
 
+        Map<String, MyBatisToolCallAudit.AuditedCallFact> factsById = new HashMap<>();
+        for (MyBatisToolCallAudit.AuditedCallFact fact : auditedFacts.calls()) {
+            if (factsById.put(fact.id(), fact) != null) {
+                throw new IllegalStateException("audited facts contain duplicate tool-call id: " + fact.id());
+            }
+        }
+        Set<String> representedCallIds = new LinkedHashSet<>();
         Set<String> evidenceIds = new HashSet<>();
         Set<String> scenarioIds = new HashSet<>();
         for (JsonNode item : metadata) {
             requireObjectNode(item, "metadata item");
             String evidenceId = requireText(item, "evidence_id", "metadata item");
             requireUnique(evidenceIds, evidenceId, "evidence_id");
-            String toolCallId = requireText(item, "tool_call_id", "metadata item");
-            requireAuditedCall(auditedCallIds, toolCallId);
-            String toolName = requireText(item, "tool_name", "metadata item");
-            if (!MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS.contains(toolName)) {
-                throw new IllegalStateException("metadata item uses an unapproved tool_name: " + toolName);
+            String callId = requireText(item, "tool_call_id", "metadata item");
+            MyBatisToolCallAudit.AuditedCallFact fact = requireAuditedFact(factsById, callId);
+            requireUniqueCallEvidence(representedCallIds, callId);
+            if ("execute_sql_query".equals(fact.toolName())) {
+                throw new IllegalStateException("execute_sql_query audited call must be represented as a scenario: " + callId);
             }
+            requireExactText(item, "tool_name", fact.toolName(), "metadata for audited call " + callId);
+            requireExactText(item, "timestamp", fact.timestamp().toString(), "metadata for audited call " + callId);
+            requireExactLong(item, "duration_ms", fact.durationMs(), "metadata for audited call " + callId);
+            requireExactJson(item, "arguments", fact.arguments(), "metadata for audited call " + callId);
+            requireExactJson(item, "result", fact.resultData(), "metadata for audited call " + callId);
             requireText(item, "observation", "metadata item");
         }
         for (JsonNode scenario : scenarios) {
@@ -181,21 +264,44 @@ public final class MyBatisSqlOutputValidator {
             String scenarioId = requireText(scenario, "scenario_id", "scenario");
             requireUnique(scenarioIds, scenarioId, "scenario_id");
             requireText(scenario, "purpose", "scenario");
-            requireText(scenario, "query_text", "scenario");
-            String toolCallId = requireText(scenario, "tool_call_id", "scenario");
-            requireAuditedCall(auditedCallIds, toolCallId);
+            String callId = requireText(scenario, "tool_call_id", "scenario");
+            MyBatisToolCallAudit.AuditedCallFact fact = requireAuditedFact(factsById, callId);
+            requireUniqueCallEvidence(representedCallIds, callId);
+            if (!"execute_sql_query".equals(fact.toolName())) {
+                throw new IllegalStateException("scenario must bind to an audited execute_sql_query call: " + callId);
+            }
+            requireExactText(scenario, "timestamp", fact.timestamp().toString(), "scenario for audited call " + callId);
+            requireExactLong(scenario, "duration_ms", fact.durationMs(), "scenario for audited call " + callId);
+            requireExactText(scenario, "query_text", fact.queryText(), "scenario for audited call " + callId);
+            requireExactJson(scenario, "arguments", fact.arguments(), "scenario for audited call " + callId);
+            requireExactJson(scenario, "result", fact.resultData(), "scenario for audited call " + callId);
+
             JsonNode columns = requireArray(scenario, "columns", "scenario");
-            uniqueTextValues(columns, "scenario.columns");
+            List<String> actualColumns = uniqueTextList(columns, "scenario.columns");
+            if (!actualColumns.equals(fact.columns())) {
+                throw new IllegalStateException("scenario columns do not match audited call " + callId);
+            }
             JsonNode rows = requireArray(scenario, "rows", "scenario");
             if (rows.size() > MyBatisToolCallAudit.MAX_ROWS_PER_CALL) {
                 throw new IllegalStateException("database evidence scenario may retain at most 20 rows");
+            }
+            for (JsonNode row : rows) {
+                if (!row.isObject() && !row.isArray()) {
+                    throw new IllegalStateException("scenario row must be an object or array");
+                }
             }
             if (!scenario.path("row_count").isIntegralNumber()
                     || scenario.path("row_count").asInt() != rows.size()) {
                 throw new IllegalStateException("database evidence scenario row_count must equal rows.size");
             }
-            for (JsonNode row : rows) {
-                requireObjectNode(row, "scenario row");
+            if (!rows.equals(objectMapper.valueToTree(fact.rows()))) {
+                throw new IllegalStateException("scenario rows do not match audited call " + callId);
+            }
+        }
+
+        for (String callId : auditedFacts.auditedCallIds()) {
+            if (!representedCallIds.contains(callId)) {
+                throw new IllegalStateException("missing evidence for audited call " + callId);
             }
         }
 
@@ -203,8 +309,7 @@ public final class MyBatisSqlOutputValidator {
         if (limitations.isEmpty()) {
             throw new IllegalStateException("database evidence limitations must not be empty");
         }
-        uniqueTextValues(limitations, "database evidence limitations");
-
+        uniqueTextList(limitations, "database evidence limitations");
         for (JsonNode finding : summary.path("findings")) {
             for (JsonNode evidenceId : finding.path("evidence_ids")) {
                 if (!evidenceIds.contains(evidenceId.asText())) {
@@ -217,9 +322,46 @@ public final class MyBatisSqlOutputValidator {
         return scenarios.size();
     }
 
-    private void requireAuditedCall(Set<String> auditedCallIds, String toolCallId) {
-        if (!auditedCallIds.contains(toolCallId)) {
-            throw new IllegalStateException("evidence references a stale or unaudited tool_call_id: " + toolCallId);
+    private void requireTaskBinding(JsonNode source, ExpectedTaskContext expected, String label) {
+        requireExactText(source, "statement_key", expected.statementKey(), label);
+        requireExactText(source, "mapper_relative_path", expected.mapperRelativePath(), label);
+        requireExactText(source, "namespace", expected.namespace(), label);
+        requireExactText(source, "statement_id", expected.statementId(), label);
+        requireExactText(source, "command_type", expected.commandType(), label);
+        JsonNode selectKey = source.path("select_key");
+        if (!selectKey.isBoolean() || selectKey.asBoolean() != expected.selectKey()) {
+            throw new IllegalStateException(label + ".select_key does not match expected task");
+        }
+    }
+
+    private MyBatisToolCallAudit.AuditedCallFact requireAuditedFact(
+            Map<String, MyBatisToolCallAudit.AuditedCallFact> facts,
+            String callId
+    ) {
+        MyBatisToolCallAudit.AuditedCallFact fact = facts.get(callId);
+        if (fact == null) {
+            throw new IllegalStateException("stale or extra tool_call_id in evidence: " + callId);
+        }
+        return fact;
+    }
+
+    private void requireUniqueCallEvidence(Set<String> represented, String callId) {
+        if (!represented.add(callId)) {
+            throw new IllegalStateException("duplicate evidence for audited call " + callId);
+        }
+    }
+
+    private void requireExactLong(JsonNode parent, String field, long expected, String label) {
+        JsonNode value = parent.path(field);
+        if (!value.isIntegralNumber() || value.asLong() != expected) {
+            throw new IllegalStateException(label + "." + field + " does not match audited call facts");
+        }
+    }
+
+    private void requireExactJson(JsonNode parent, String field, JsonNode expected, String label) {
+        JsonNode value = parent.path(field);
+        if (value.isMissingNode() || !value.equals(expected)) {
+            throw new IllegalStateException(label + "." + field + " does not match audited call facts");
         }
     }
 
@@ -229,15 +371,17 @@ public final class MyBatisSqlOutputValidator {
         }
     }
 
-    private Set<String> uniqueTextValues(JsonNode array, String label) {
-        Set<String> values = new LinkedHashSet<>();
+    private List<String> uniqueTextList(JsonNode array, String label) {
+        List<String> values = new ArrayList<>();
+        Set<String> unique = new LinkedHashSet<>();
         for (JsonNode item : array) {
             if (!item.isTextual() || item.asText().isBlank()) {
                 throw new IllegalStateException(label + " must contain non-blank strings");
             }
-            requireUnique(values, item.asText(), label);
+            requireUnique(unique, item.asText(), label);
+            values.add(item.asText());
         }
-        return values;
+        return List.copyOf(values);
     }
 
     private JsonNode requireObject(JsonNode parent, String field, String label) {
@@ -270,10 +414,10 @@ public final class MyBatisSqlOutputValidator {
         return value;
     }
 
-    private void requireExactText(JsonNode parent, String field, String expected) {
-        String value = requireText(parent, field, "database evidence");
+    private void requireExactText(JsonNode parent, String field, String expected, String label) {
+        String value = requireText(parent, field, label);
         if (!expected.equals(value)) {
-            throw new IllegalStateException("database evidence." + field + " must equal " + expected);
+            throw new IllegalStateException(label + "." + field + " does not match expected value " + expected);
         }
     }
 
@@ -285,6 +429,29 @@ public final class MyBatisSqlOutputValidator {
             return objectMapper.readTree(input);
         } catch (IOException exception) {
             throw new IllegalStateException("failed to read SQL summary schema", exception);
+        }
+    }
+
+    private void requireSupportedSchema(JsonNode schema, String path) {
+        if (!schema.isObject()) {
+            throw new IllegalStateException("JSON schema node must be an object at " + path);
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = schema.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            if (!SUPPORTED_SCHEMA_KEYWORDS.contains(field.getKey())) {
+                throw new IllegalStateException("unknown JSON schema keyword: " + field.getKey() + " at " + path);
+            }
+            if ("properties".equals(field.getKey())) {
+                if (!field.getValue().isObject()) {
+                    throw new IllegalStateException("JSON schema properties must be an object at " + path);
+                }
+                field.getValue().fields().forEachRemaining(
+                        property -> requireSupportedSchema(property.getValue(), path + ".properties." + property.getKey())
+                );
+            } else if ("items".equals(field.getKey())) {
+                requireSupportedSchema(field.getValue(), path + ".items");
+            }
         }
     }
 
@@ -381,6 +548,37 @@ public final class MyBatisSqlOutputValidator {
         };
     }
 
-    public record Result(String statementKey, int scenarioCount, int evidenceBytes) {
+    public record ExpectedTaskContext(
+            String statementKey,
+            String mapperRelativePath,
+            String namespace,
+            String statementId,
+            String commandType,
+            boolean selectKey
+    ) {
+        public ExpectedTaskContext {
+            requireNonBlank(statementKey, "statementKey");
+            requireNonBlank(mapperRelativePath, "mapperRelativePath");
+            requireNonBlank(namespace, "namespace");
+            requireNonBlank(statementId, "statementId");
+            requireNonBlank(commandType, "commandType");
+        }
+
+        private static void requireNonBlank(String value, String name) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(name + " must be non-blank");
+            }
+        }
+    }
+
+    public record Result(
+            String statementKey,
+            int scenarioCount,
+            int evidenceBytes,
+            List<String> auditedCallIds
+    ) {
+        public Result {
+            auditedCallIds = List.copyOf(auditedCallIds);
+        }
     }
 }

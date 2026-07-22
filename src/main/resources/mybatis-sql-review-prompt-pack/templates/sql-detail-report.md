@@ -1,10 +1,10 @@
 # SQL Review
 
-This candidate report reviews exactly one inventory statement and distinguishes static observations from database evidence.
+This candidate report reviews exactly one inventory statement and distinguishes static observations from database evidence. State its exact statement key, mapper-relative path, namespace, statement id, command type, selectKey flag, and source line range.
 
 ## Statement
 
-Identify the mapper, statement key, command type, dynamic SQL branches, parameters, and normalized SQL being reviewed.
+Identify the mapper, statement key, command type, selectKey flag, source line range, dynamic SQL branches, parameters, raw mapper XML, and normalized SQL being reviewed.
 
 ## Static Analysis
 
@@ -12,7 +12,7 @@ Describe correctness, maintainability, performance, concurrency, and data-volume
 
 ## Database Evidence
 
-Describe each metadata observation and representative read-only scenario with its evidence id and audited AgentBridge tool-call id. State when no database query was needed.
+Describe each metadata observation and representative read-only scenario with its evidence id, audited AgentBridge tool-call id, tool name, timestamp, duration, arguments, and exact retained result. State when no database query was needed.
 
 ## Findings
 

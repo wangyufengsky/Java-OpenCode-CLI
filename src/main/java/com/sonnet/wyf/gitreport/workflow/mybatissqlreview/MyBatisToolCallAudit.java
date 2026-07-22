@@ -1,21 +1,22 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class MyBatisToolCallAudit {
     public static final int MAX_QUERY_SCENARIOS = 3;
     public static final int MAX_ROWS_PER_CALL = 20;
+    public static final long MAX_QUERY_DURATION_MS = 30_000L;
 
     private static final Set<String> ALLOWED_TOOLS = MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS;
     private static final Set<String> SCHEMA_BOUND_TOOLS = Set.of(
@@ -25,68 +26,129 @@ public final class MyBatisToolCallAudit {
             "get_database_object_description",
             "execute_sql_query"
     );
-    private static final Pattern DML = Pattern.compile("\\b(INSERT|UPDATE|DELETE|MERGE|UPSERT)\\b");
-    private static final Pattern DDL = Pattern.compile("\\b(CREATE|ALTER|DROP|TRUNCATE|COMMENT|GRANT|REVOKE)\\b");
-    private static final Pattern LIMIT = Pattern.compile("\\bLIMIT\\s+(\\d+)\\b");
-    private static final Pattern FOR_LOCK = Pattern.compile("\\bFOR\\s+(UPDATE|SHARE)\\b");
-    private static final Pattern SELECT_INTO = Pattern.compile("\\bSELECT\\b[\\s\\S]*\\bINTO\\b");
-    private static final Pattern SEQUENCE_MUTATION = Pattern.compile(
-            "\\b(NEXTVAL|CURRVAL|SETVAL)\\s*\\(|\\bNEXT\\s+VALUE\\s+FOR\\b"
-    );
-    private static final Pattern SIDE_EFFECT_FUNCTION = Pattern.compile(
-            "\\b(PG_TERMINATE_BACKEND|PG_CANCEL_BACKEND|PG_ADVISORY_LOCK|PG_ADVISORY_LOCK_SHARED|"
-                    + "PG_TRY_ADVISORY_LOCK|PG_TRY_ADVISORY_LOCK_SHARED|PG_ADVISORY_UNLOCK|"
-                    + "PG_ADVISORY_UNLOCK_SHARED|PG_ADVISORY_UNLOCK_ALL|PG_SLEEP|PG_SLEEP_FOR|"
-                    + "PG_SLEEP_UNTIL|DBLINK_EXEC|DBLINK_CONNECT|DBLINK_DISCONNECT|LO_CREATE|"
-                    + "LO_UNLINK|LO_IMPORT|LO_EXPORT|SET_CONFIG)\\s*\\("
-    );
+
+    private final ObjectMapper objectMapper;
+    private final ReadOnlySqlPolicy sqlPolicy = new ReadOnlySqlPolicy(MAX_ROWS_PER_CALL);
+
+    public MyBatisToolCallAudit(ObjectMapper objectMapper) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    }
 
     public Result audit(
-            List<AgentBridgeClient.ToolCallRecord> calls,
+            List<AgentBridgeClient.ToolCallRecord> history,
             Boundary boundary,
-            MyBatisDatabasePreflight.Result database
+            MyBatisDatabasePreflight.Result database,
+            StatementContext statement
     ) {
-        Objects.requireNonNull(calls, "calls");
+        Objects.requireNonNull(history, "history");
         Objects.requireNonNull(boundary, "boundary");
         Objects.requireNonNull(database, "database");
-        List<String> auditedIds = new ArrayList<>();
-        Set<String> uniqueIds = new HashSet<>();
-        int queryScenarios = 0;
+        Objects.requireNonNull(statement, "statement");
 
-        for (AgentBridgeClient.ToolCallRecord call : calls) {
-            requireFresh(call, boundary);
-            if (!uniqueIds.add(call.id())) {
+        Set<String> historyIds = new HashSet<>();
+        Set<String> observedPreexistingIds = new HashSet<>();
+        List<AgentBridgeClient.ToolCallRecord> newCalls = new ArrayList<>();
+        for (AgentBridgeClient.ToolCallRecord call : history) {
+            requireHistoryIdentity(call);
+            if (!historyIds.add(call.id())) {
                 throw violation(call, "duplicate tool-call id");
             }
+            if (boundary.preexistingCallIds().contains(call.id())) {
+                if (call.timestamp().isAfter(boundary.startedAt())) {
+                    throw violation(call, "preexisting id was reused after the task boundary");
+                }
+                observedPreexistingIds.add(call.id());
+                continue;
+            }
+            if (call.timestamp().isBefore(boundary.startedAt())) {
+                throw violation(call, "incomplete pre-task id snapshot contains an unknown old call");
+            }
+            newCalls.add(call);
+        }
+        if (!observedPreexistingIds.containsAll(boundary.preexistingCallIds())) {
+            Set<String> missing = new LinkedHashSet<>(boundary.preexistingCallIds());
+            missing.removeAll(observedPreexistingIds);
+            throw new IllegalStateException("incomplete tool-call history; missing preexisting call ids: " + missing);
+        }
+
+        List<AuditedCallFact> facts = new ArrayList<>();
+        int queryScenarios = 0;
+        for (AgentBridgeClient.ToolCallRecord call : newCalls) {
+            requireCompleteNewCall(call);
             if (!ALLOWED_TOOLS.contains(call.toolName())) {
                 throw violation(call, "unapproved tool: " + call.toolName());
             }
             requireDatabaseBinding(call, database);
+            String queryText = "";
             if ("execute_sql_query".equals(call.toolName())) {
+                if (statement.selectKey()) {
+                    throw violation(call, "selectKey tasks must not call execute_sql_query");
+                }
                 queryScenarios++;
                 if (queryScenarios > MAX_QUERY_SCENARIOS) {
                     throw violation(call, "execute_sql_query is limited to at most 3 scenarios");
                 }
-                validateQuery(call.arguments().path("queryText").asText(""), call);
+                if (call.durationMs() > MAX_QUERY_DURATION_MS) {
+                    throw violation(call, "execute_sql_query duration exceeds 30000 ms");
+                }
+                queryText = call.arguments().path("queryText").asText("");
+                sqlPolicy.validate(queryText, call.id());
             }
-            int rowCount = rowCount(call.result());
-            if (rowCount > MAX_ROWS_PER_CALL) {
-                throw violation(call, "tool result may retain at most 20 rows but found " + rowCount);
+
+            JsonNode resultData = call.result().deepCopy();
+            List<String> columns = List.of();
+            List<JsonNode> rows = List.of();
+            if ("execute_sql_query".equals(call.toolName()) || "preview_table_data".equals(call.toolName())) {
+                RowData rowData = parseRowData(call);
+                resultData = rowData.payload();
+                columns = rowData.columns();
+                rows = rowData.rows();
+                if (rows.size() > MAX_ROWS_PER_CALL) {
+                    throw violation(call, "tool result may retain at most 20 rows but found " + rows.size());
+                }
             }
-            if (!"completed".equalsIgnoreCase(call.status())) {
-                throw violation(call, "tool call did not complete successfully: " + call.status());
-            }
-            auditedIds.add(call.id());
+            facts.add(new AuditedCallFact(
+                    call.id(),
+                    call.toolName(),
+                    call.timestamp(),
+                    call.durationMs(),
+                    call.arguments().path("connectionId").asText(""),
+                    call.arguments().path("databaseName").asText(""),
+                    call.arguments().path("schemaName").asText(""),
+                    queryText,
+                    call.arguments(),
+                    resultData,
+                    columns,
+                    rows
+            ));
         }
-        return new Result(auditedIds, queryScenarios);
+        return new Result(facts, queryScenarios, statement, database);
     }
 
-    private void requireFresh(AgentBridgeClient.ToolCallRecord call, Boundary boundary) {
-        if (call == null || call.id() == null || call.id().isBlank() || call.timestamp() == null
-                || call.timestamp().isBefore(boundary.startedAt())
-                || boundary.preexistingCallIds().contains(call.id())) {
-            String id = call == null ? "<null>" : call.id();
-            throw new IllegalStateException("stale or unidentifiable tool call is outside the task boundary: " + id);
+    private void requireHistoryIdentity(AgentBridgeClient.ToolCallRecord call) {
+        if (call == null || call.id() == null || call.id().isBlank() || call.timestamp() == null) {
+            throw new IllegalStateException("tool-call history contains a call with missing id or timestamp");
+        }
+    }
+
+    private void requireCompleteNewCall(AgentBridgeClient.ToolCallRecord call) {
+        if (call.toolName() == null || call.toolName().isBlank()
+                || call.title() == null || call.title().isBlank()
+                || call.kind() == null || call.kind().isBlank()
+                || call.status() == null || call.status().isBlank()) {
+            throw violation(call, "new tool call has incomplete identity/status fields");
+        }
+        if (call.durationMs() == null || call.durationMs() < 0) {
+            throw violation(call, "new tool call requires a non-negative durationMs");
+        }
+        if (call.arguments() == null || !call.arguments().isObject()) {
+            throw violation(call, "new tool call arguments must be an object");
+        }
+        if (call.result() == null || call.result().isMissingNode() || call.result().isNull()) {
+            throw violation(call, "new tool call result is missing");
+        }
+        if (!"completed".equalsIgnoreCase(call.status())) {
+            throw violation(call, "tool call did not complete successfully: " + call.status());
         }
     }
 
@@ -119,169 +181,53 @@ public final class MyBatisToolCallAudit {
         }
     }
 
-    private void validateQuery(String sql, AgentBridgeClient.ToolCallRecord call) {
-        if (sql.isBlank()) {
-            throw violation(call, "queryText is required");
-        }
-        String lexical = lexicalSql(sql);
-        if (lexical.indexOf(';') >= 0) {
-            throw violation(call, "multiple statements and semicolons are forbidden");
-        }
-        String upper = lexical.strip().toUpperCase(Locale.ROOT);
-        if (upper.startsWith("COPY ") || upper.equals("COPY")) {
-            throw violation(call, "COPY is forbidden");
-        }
-        if (upper.startsWith("CALL ") || upper.equals("CALL")) {
-            throw violation(call, "CALL is forbidden");
-        }
-        if (DDL.matcher(upper).find()) {
-            throw violation(call, "DDL is forbidden");
-        }
-        if (upper.startsWith("WITH") && DML.matcher(upper).find()) {
-            throw violation(call, "DML CTE is forbidden");
-        }
-        if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-            throw violation(call, "query must be a read-only SELECT or WITH...SELECT");
-        }
-        if (FOR_LOCK.matcher(upper).find()) {
-            throw violation(call, "FOR UPDATE/SHARE is forbidden");
-        }
-        if (DML.matcher(upper).find()) {
-            throw violation(call, "query must be a read-only SELECT or WITH...SELECT");
-        }
-        if (SELECT_INTO.matcher(upper).find()) {
-            throw violation(call, "SELECT INTO is forbidden");
-        }
-        if (SEQUENCE_MUTATION.matcher(upper).find()) {
-            throw violation(call, "sequence mutation/selectKey execution is forbidden");
-        }
-        if (SIDE_EFFECT_FUNCTION.matcher(upper).find()) {
-            throw violation(call, "side-effect function is forbidden");
-        }
-
-        Matcher limits = LIMIT.matcher(upper);
-        boolean foundTopLevelLimit = false;
-        while (limits.find()) {
-            boolean topLevel = nestingDepth(upper, limits.start()) == 0;
-            if (topLevel) {
-                foundTopLevelLimit = true;
-                String suffix = upper.substring(limits.end()).strip();
-                if (!suffix.isEmpty() && !suffix.matches("OFFSET\\s+\\d+")) {
-                    throw violation(call, "query requires a literal top-level LIMIT <= 20");
-                }
-            }
-            int value;
-            try {
-                value = Integer.parseInt(limits.group(1));
-            } catch (NumberFormatException exception) {
-                throw violation(call, "LIMIT must be a literal integer <= 20");
-            }
-            if (value < 1 || value > MAX_ROWS_PER_CALL) {
-                throw violation(call, "every query requires LIMIT <= 20");
-            }
-        }
-        if (!foundTopLevelLimit) {
-            throw violation(call, "every query requires a literal top-level LIMIT <= 20");
-        }
-    }
-
-    private int nestingDepth(String sql, int exclusiveEnd) {
-        int depth = 0;
-        for (int index = 0; index < exclusiveEnd; index++) {
-            char current = sql.charAt(index);
-            if (current == '(') {
-                depth++;
-            } else if (current == ')') {
-                depth--;
-                if (depth < 0) {
-                    throw new IllegalStateException("unbalanced SQL parentheses");
-                }
-            }
-        }
-        return depth;
-    }
-
-    private String lexicalSql(String sql) {
-        StringBuilder output = new StringBuilder(sql.length());
-        boolean singleQuote = false;
-        boolean doubleQuote = false;
-        boolean lineComment = false;
-        boolean blockComment = false;
-        for (int index = 0; index < sql.length(); index++) {
-            char current = sql.charAt(index);
-            char next = index + 1 < sql.length() ? sql.charAt(index + 1) : '\0';
-            if (lineComment) {
-                if (current == '\n' || current == '\r') {
-                    lineComment = false;
-                    output.append(' ');
-                } else {
-                    output.append(' ');
-                }
-                continue;
-            }
-            if (blockComment) {
-                output.append(' ');
-                if (current == '*' && next == '/') {
-                    output.append(' ');
-                    index++;
-                    blockComment = false;
-                }
-                continue;
-            }
-            if (singleQuote) {
-                output.append(' ');
-                if (current == '\'' && next == '\'') {
-                    output.append(' ');
-                    index++;
-                } else if (current == '\'') {
-                    singleQuote = false;
-                }
-                continue;
-            }
-            if (doubleQuote) {
-                output.append(' ');
-                if (current == '"' && next == '"') {
-                    output.append(' ');
-                    index++;
-                } else if (current == '"') {
-                    doubleQuote = false;
-                }
-                continue;
-            }
-            if (current == '-' && next == '-') {
-                output.append("  ");
-                index++;
-                lineComment = true;
-            } else if (current == '/' && next == '*') {
-                output.append("  ");
-                index++;
-                blockComment = true;
-            } else if (current == '\'') {
-                output.append(' ');
-                singleQuote = true;
-            } else if (current == '"') {
-                output.append(' ');
-                doubleQuote = true;
+    private RowData parseRowData(AgentBridgeClient.ToolCallRecord call) {
+        JsonNode result = call.result();
+        JsonNode payload;
+        try {
+            if (result.isTextual()) {
+                payload = objectMapper.readTree(result.asText());
+            } else if (hasDirectRows(result)) {
+                payload = result;
+            } else if (result.isObject() && hasDirectRows(result.path("structuredContent"))) {
+                payload = result.path("structuredContent");
+            } else if (result.isObject() && result.path("content").isArray()
+                    && result.path("content").size() == 1
+                    && "text".equals(result.at("/content/0/type").asText())
+                    && result.at("/content/0/text").isTextual()) {
+                payload = objectMapper.readTree(result.at("/content/0/text").asText());
             } else {
-                output.append(current);
+                throw violation(call, "unsupported result wrapper for row-producing tool");
             }
+        } catch (IOException exception) {
+            throw violation(call, "unsupported result wrapper contains invalid JSON");
         }
-        if (singleQuote || doubleQuote || blockComment) {
-            throw new IllegalStateException("unterminated SQL quote or comment");
+        if (!hasDirectRows(payload)) {
+            throw violation(call, "unsupported result wrapper for row-producing tool");
         }
-        return output.toString();
+
+        List<String> columns = new ArrayList<>();
+        Set<String> uniqueColumns = new HashSet<>();
+        for (JsonNode column : payload.path("columns")) {
+            if (!column.isTextual() || column.asText().isBlank() || !uniqueColumns.add(column.asText())) {
+                throw violation(call, "result columns must be unique non-blank strings");
+            }
+            columns.add(column.asText());
+        }
+        List<JsonNode> rows = new ArrayList<>();
+        for (JsonNode row : payload.path("rows")) {
+            if (!row.isObject() && !row.isArray()) {
+                throw violation(call, "result rows must contain objects or arrays");
+            }
+            rows.add(row.deepCopy());
+        }
+        return new RowData(payload.deepCopy(), columns, rows);
     }
 
-    private int rowCount(JsonNode result) {
-        if (result == null || result.isMissingNode() || result.isNull()) {
-            return 0;
-        }
-        JsonNode rows = result.path("rows");
-        if (rows.isArray()) {
-            return rows.size();
-        }
-        JsonNode nestedRows = result.at("/result/rows");
-        return nestedRows.isArray() ? nestedRows.size() : 0;
+    private boolean hasDirectRows(JsonNode value) {
+        return value != null && value.isObject()
+                && value.path("columns").isArray()
+                && value.path("rows").isArray();
     }
 
     private IllegalStateException violation(AgentBridgeClient.ToolCallRecord call, String message) {
@@ -292,12 +238,77 @@ public final class MyBatisToolCallAudit {
         public Boundary {
             Objects.requireNonNull(startedAt, "startedAt");
             preexistingCallIds = Set.copyOf(preexistingCallIds == null ? Set.of() : preexistingCallIds);
+            if (preexistingCallIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+                throw new IllegalArgumentException("preexisting call ids must be non-blank");
+            }
         }
     }
 
-    public record Result(List<String> auditedCallIds, int queryScenarioCount) {
+    public record StatementContext(String statementKey, String commandType, boolean selectKey) {
+        public StatementContext {
+            Objects.requireNonNull(statementKey, "statementKey");
+            Objects.requireNonNull(commandType, "commandType");
+            if (statementKey.isBlank() || commandType.isBlank()) {
+                throw new IllegalArgumentException("statement context fields must be non-blank");
+            }
+        }
+    }
+
+    public record AuditedCallFact(
+            String id,
+            String toolName,
+            Instant timestamp,
+            long durationMs,
+            String connectionId,
+            String databaseName,
+            String schemaName,
+            String queryText,
+            JsonNode arguments,
+            JsonNode resultData,
+            List<String> columns,
+            List<JsonNode> rows
+    ) {
+        public AuditedCallFact {
+            Objects.requireNonNull(id, "id");
+            Objects.requireNonNull(toolName, "toolName");
+            Objects.requireNonNull(timestamp, "timestamp");
+            connectionId = connectionId == null ? "" : connectionId;
+            databaseName = databaseName == null ? "" : databaseName;
+            schemaName = schemaName == null ? "" : schemaName;
+            queryText = queryText == null ? "" : queryText;
+            arguments = Objects.requireNonNull(arguments, "arguments").deepCopy();
+            resultData = Objects.requireNonNull(resultData, "resultData").deepCopy();
+            columns = List.copyOf(columns);
+            List<JsonNode> copiedRows = new ArrayList<>();
+            for (JsonNode row : rows) {
+                copiedRows.add(row.deepCopy());
+            }
+            rows = List.copyOf(copiedRows);
+        }
+    }
+
+    public record Result(
+            List<AuditedCallFact> calls,
+            int queryScenarioCount,
+            StatementContext statementContext,
+            MyBatisDatabasePreflight.Result database
+    ) {
         public Result {
-            auditedCallIds = List.copyOf(auditedCallIds);
+            calls = List.copyOf(calls);
+            Objects.requireNonNull(statementContext, "statementContext");
+            Objects.requireNonNull(database, "database");
+        }
+
+        public List<String> auditedCallIds() {
+            return calls.stream().map(AuditedCallFact::id).toList();
+        }
+    }
+
+    private record RowData(JsonNode payload, List<String> columns, List<JsonNode> rows) {
+        private RowData {
+            payload = payload.deepCopy();
+            columns = List.copyOf(columns);
+            rows = List.copyOf(rows);
         }
     }
 }

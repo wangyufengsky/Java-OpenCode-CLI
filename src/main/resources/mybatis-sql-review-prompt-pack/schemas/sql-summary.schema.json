@@ -7,8 +7,12 @@
   "required": [
     "schema_version",
     "statement_key",
+    "mapper_relative_path",
+    "namespace",
+    "statement_id",
     "status",
     "command_type",
+    "select_key",
     "risk_level",
     "scenario_count",
     "evidence_file",
@@ -24,6 +28,18 @@
       "type": "string",
       "minLength": 1
     },
+    "mapper_relative_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "statement_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "status": {
       "type": "string",
       "enum": ["reviewed", "no-findings"]
@@ -31,6 +47,9 @@
     "command_type": {
       "type": "string",
       "enum": ["select", "insert", "update", "delete", "selectKey"]
+    },
+    "select_key": {
+      "type": "boolean"
     },
     "risk_level": {
       "type": "string",

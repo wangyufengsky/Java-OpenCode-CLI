@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -104,26 +106,44 @@ public class AgentBridgeClient {
 
     public List<ToolDefinition> listTools(URI mcpUrl) throws IOException, InterruptedException {
         McpSession session = mcpSession(mcpUrl);
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("jsonrpc", "2.0");
-        body.put("id", requestIds.incrementAndGet());
-        body.put("method", "tools/list");
-        body.set("params", objectMapper.createObjectNode());
-
-        HttpResponse<String> response = sendJson(mcpUrl, body, Duration.ofSeconds(30), session);
-        requireSuccess(response, "AgentBridge MCP tools/list failed");
-        JsonNode root = objectMapper.readTree(response.body());
-        if (root.hasNonNull("error")) {
-            throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
-        }
         List<ToolDefinition> tools = new ArrayList<>();
-        for (JsonNode tool : root.path("result").path("tools")) {
-            tools.add(new ToolDefinition(
-                    tool.path("name").asText(),
-                    tool.path("description").asText(""),
-                    tool.path("inputSchema")
-            ));
-        }
+        Set<String> observedCursors = new HashSet<>();
+        String cursor = null;
+        do {
+            ObjectNode params = objectMapper.createObjectNode();
+            if (cursor != null) {
+                params.put("cursor", cursor);
+            }
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("jsonrpc", "2.0");
+            body.put("id", requestIds.incrementAndGet());
+            body.put("method", "tools/list");
+            body.set("params", params);
+
+            HttpResponse<String> response = sendJson(mcpUrl, body, Duration.ofSeconds(30), session);
+            requireSuccess(response, "AgentBridge MCP tools/list failed");
+            JsonNode root = objectMapper.readTree(response.body());
+            if (root.hasNonNull("error")) {
+                throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
+            }
+            JsonNode result = root.path("result");
+            if (!result.path("tools").isArray()) {
+                throw new IllegalStateException("AgentBridge MCP tools/list returned no tools array");
+            }
+            for (JsonNode tool : result.path("tools")) {
+                tools.add(new ToolDefinition(
+                        tool.path("name").asText(),
+                        tool.path("description").asText(""),
+                        tool.path("inputSchema")
+                ));
+            }
+            cursor = result.path("nextCursor").asText("").strip();
+            if (cursor.isEmpty()) {
+                cursor = null;
+            } else if (!observedCursors.add(cursor)) {
+                throw new IllegalStateException("AgentBridge MCP tools/list repeated cursor: " + cursor);
+            }
+        } while (cursor != null);
         return List.copyOf(tools);
     }
 
@@ -136,9 +156,20 @@ public class AgentBridgeClient {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         requireSuccess(response, "AgentBridge GET /tool-calls failed");
         JsonNode root = objectMapper.readTree(response.body());
-        JsonNode items = root.isArray() ? root : root.path("toolCalls");
+        JsonNode items = root.isArray()
+                ? root
+                : root.path("toolCalls").isArray() ? root.path("toolCalls") : root.path("items");
         if (!items.isArray()) {
             throw new IllegalStateException("AgentBridge GET /tool-calls returned no tool-call array");
+        }
+        if (!root.isArray() && (root.path("hasMore").asBoolean(false)
+                || !root.path("nextCursor").asText("").isBlank()
+                || !root.path("nextPageToken").asText("").isBlank()
+                || (root.path("total").isIntegralNumber() && root.path("total").asLong() > items.size()))) {
+            throw new IllegalStateException(
+                    "AgentBridge GET /tool-calls returned incomplete paginated tool-call history; "
+                            + "the target Web pagination fetch contract is not verified"
+            );
         }
         List<ToolCallRecord> calls = new ArrayList<>();
         for (JsonNode item : items) {

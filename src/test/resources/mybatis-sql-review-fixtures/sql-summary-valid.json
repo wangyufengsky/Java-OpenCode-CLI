@@ -1,8 +1,12 @@
 {
   "schema_version": "mybatis-sql-review-summary/v1",
   "statement_key": "mapper-order-find-open",
+  "mapper_relative_path": "mappers/OrderMapper.xml",
+  "namespace": "com.example.OrderMapper",
+  "statement_id": "findOpen",
   "status": "reviewed",
   "command_type": "select",
+  "select_key": false,
   "risk_level": "medium",
   "scenario_count": 1,
   "evidence_file": "database-evidence.json",

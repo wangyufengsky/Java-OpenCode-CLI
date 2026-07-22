@@ -2,6 +2,8 @@
 
 This report reviews `mapper-order-find-open` without executing the original mapper statement.
 
+Source: `mappers/OrderMapper.xml`, namespace `com.example.OrderMapper`, statement `findOpen`, command `select`, selectKey `false`.
+
 ## Statement
 
 The statement is a read-only lookup of open orders.

@@ -1,0 +1,6 @@
+{
+  "structuredContent": {
+    "columns": ["id"],
+    "rows": [{"id": 1}, {"id": 2}]
+  }
+}

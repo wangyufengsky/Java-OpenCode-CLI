@@ -32,6 +32,7 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AgentBridgeClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -224,6 +225,51 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void followsMcpToolsListCursorUntilAllPagesAreCollected() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            requests.add(request);
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "paged-session", """
+                        {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{}}}
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "paged-session", "");
+                case "tools/list" -> {
+                    String cursor = request.at("/params/cursor").asText("");
+                    if (cursor.isEmpty()) {
+                        respondWithSession(exchange, 200, "paged-session", """
+                                {"jsonrpc":"2.0","id":2,"result":{
+                                  "tools":[{"name":"list_database_connections","inputSchema":{"type":"object"}}],
+                                  "nextCursor":"page-2"
+                                }}
+                                """);
+                    } else {
+                        respondWithSession(exchange, 200, "paged-session", """
+                                {"jsonrpc":"2.0","id":3,"result":{
+                                  "tools":[{"name":"execute_sql_query","inputSchema":{"type":"object"}}]
+                                }}
+                                """);
+                    }
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        List<AgentBridgeClient.ToolDefinition> tools = client.listTools(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp")
+        );
+
+        assertThat(tools).extracting(AgentBridgeClient.ToolDefinition::name)
+                .containsExactly("list_database_connections", "execute_sql_query");
+        assertThat(requests).extracting(request -> request.path("method").asText())
+                .containsExactly("initialize", "notifications/initialized", "tools/list", "tools/list");
+        assertThat(requests.get(3).at("/params/cursor").asText()).isEqualTo("page-2");
+    }
+
+    @Test
     void readsTypedWebToolCallHistory() throws Exception {
         HttpServer server = server();
         server.createContext("/tool-calls", exchange -> respond(
@@ -246,6 +292,19 @@ class AgentBridgeClientTest {
             assertThat(call.durationMs()).isEqualTo(42L);
             assertThat(call.hooks().path("post").asBoolean()).isTrue();
         });
+    }
+
+    @Test
+    void rejectsAdvertisedWebToolCallPaginationWithoutKnownFetchContract() throws Exception {
+        HttpServer server = server();
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
+                {"toolCalls":[],"nextCursor":"page-2","hasMore":true}
+                """));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
+        )).hasMessageContaining("incomplete paginated tool-call history");
     }
 
     private HttpServer server() throws IOException {

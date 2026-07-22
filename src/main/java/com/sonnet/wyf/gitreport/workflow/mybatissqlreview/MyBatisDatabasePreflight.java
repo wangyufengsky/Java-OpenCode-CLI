@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -113,6 +114,18 @@ public final class MyBatisDatabasePreflight {
                     "runtime credentials must use a non-owner/non-admin read-only account; this is an external deployment contract"
             );
         }
+        StatementTimeoutContract timeout = contract.statementTimeout();
+        if (!timeout.confirmed()) {
+            throw new IllegalStateException(
+                    "database/server/role statement_timeout <= 30 seconds must be confirmed before preflight"
+            );
+        }
+        if (timeout.maximum().isZero() || timeout.maximum().isNegative()
+                || timeout.maximum().compareTo(Duration.ofSeconds(30)) > 0) {
+            throw new IllegalStateException(
+                    "confirmed database/server/role statement_timeout must be positive and <= 30 seconds"
+            );
+        }
     }
 
     private List<JsonNode> connectionMatches(JsonNode response, String connectionName) {
@@ -165,18 +178,37 @@ public final class MyBatisDatabasePreflight {
         PRODUCTION_PRIMARY
     }
 
+    public enum StatementTimeoutScope {
+        DATABASE,
+        SERVER,
+        ROLE
+    }
+
+    public record StatementTimeoutContract(
+            Duration maximum,
+            StatementTimeoutScope scope,
+            boolean confirmed
+    ) {
+        public StatementTimeoutContract {
+            Objects.requireNonNull(maximum, "maximum");
+            Objects.requireNonNull(scope, "scope");
+        }
+    }
+
     public record DatabaseContract(
             String connectionName,
             String databaseName,
             String schemaName,
             Environment environment,
-            boolean nonOwnerNonAdminReadOnlyAccount
+            boolean nonOwnerNonAdminReadOnlyAccount,
+            StatementTimeoutContract statementTimeout
     ) {
         public DatabaseContract {
             Objects.requireNonNull(connectionName, "connectionName");
             Objects.requireNonNull(databaseName, "databaseName");
             Objects.requireNonNull(schemaName, "schemaName");
             Objects.requireNonNull(environment, "environment");
+            Objects.requireNonNull(statementTimeout, "statementTimeout");
         }
     }
 
