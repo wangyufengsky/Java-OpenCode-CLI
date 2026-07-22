@@ -1,5 +1,8 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileVisitResult;
@@ -24,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     private static final Set<String> CANDIDATE_FILES = Set.of(
@@ -36,6 +40,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     private final Map<Path, SnapshotEntry> snapshot;
     private final Map<Path, Set<PosixFilePermission>> originalPermissions;
     private final Map<Path, Set<PosixFilePermission>> guardedPermissions;
+    private final RunProtection runProtection;
     private boolean closed;
 
     private MyBatisSqlReviewFilesystemGuard(
@@ -52,6 +57,17 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         this.snapshot = Map.copyOf(snapshot);
         this.originalPermissions = Map.copyOf(originalPermissions);
         this.guardedPermissions = Map.copyOf(guardedPermissions);
+        this.runProtection = null;
+    }
+
+    private MyBatisSqlReviewFilesystemGuard(RunProtection runProtection) {
+        this.protectedRoots = List.of();
+        this.candidate = null;
+        this.backupRoot = runProtection.backupRoot;
+        this.snapshot = Map.of();
+        this.originalPermissions = Map.of();
+        this.guardedPermissions = Map.of();
+        this.runProtection = runProtection;
     }
 
     static MyBatisSqlReviewFilesystemGuard protect(
@@ -114,6 +130,49 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         );
     }
 
+    static MyBatisSqlReviewFilesystemGuard protectRun(
+            ObjectMapper objectMapper,
+            Path repository,
+            Path stableRoot,
+            Path currentRun,
+            List<Path> mapperFiles,
+            List<Path> candidates
+    ) throws IOException {
+        return protectRun(
+                objectMapper, repository, stableRoot, currentRun, mapperFiles, candidates,
+                ProtectionObserver.NOOP
+        );
+    }
+
+    static MyBatisSqlReviewFilesystemGuard protectRun(
+            ObjectMapper objectMapper,
+            Path repository,
+            Path stableRoot,
+            Path currentRun,
+            List<Path> mapperFiles,
+            List<Path> candidates,
+            ProtectionObserver observer
+    ) throws IOException {
+        RunProtection protection = RunProtection.establish(
+                objectMapper, repository, stableRoot, currentRun, mapperFiles, candidates, observer
+        );
+        return new MyBatisSqlReviewFilesystemGuard(protection);
+    }
+
+    TaskScope protectTask(Path candidate) throws IOException {
+        if (runProtection == null) {
+            throw new IllegalStateException("task scopes require run-level filesystem protection");
+        }
+        return runProtection.openTask(candidate);
+    }
+
+    <T> T withJavaWrites(List<Path> allowedRoots, CheckedOperation<T> operation) throws Exception {
+        if (runProtection == null) {
+            return operation.run();
+        }
+        return runProtection.withJavaWrites(allowedRoots, operation);
+    }
+
     static void requireSafeCandidate(Path attemptRoot, Path candidate) throws IOException {
         Path normalizedAttempt = normalizeDirectory(attemptRoot, "attempt root");
         if (Files.isSymbolicLink(candidate.toAbsolutePath().normalize())) {
@@ -159,6 +218,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             return;
         }
         closed = true;
+        if (runProtection != null) {
+            runProtection.close();
+            return;
+        }
         List<String> violations = new ArrayList<>();
         Throwable detectionFailure = null;
         try {
@@ -299,7 +362,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         return failure;
     }
 
-    private void restoreEntry(SnapshotEntry entry) throws IOException {
+    private static void restoreEntry(SnapshotEntry entry) throws IOException {
         Path path = entry.path();
         BasicFileAttributes attributes = readAttributesOrNull(path);
         if (attributes != null && !entry.kind().matches(attributes)) {
@@ -600,6 +663,718 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         return throwable.getMessage() == null || throwable.getMessage().isBlank()
                 ? throwable.getClass().getSimpleName()
                 : throwable.getMessage();
+    }
+
+    @FunctionalInterface
+    interface ProtectionObserver {
+        ProtectionObserver NOOP = new ProtectionObserver() {
+            @Override
+            public void backedUp(Path path) {
+            }
+
+            @Override
+            public void permissionProtected(Path path) {
+            }
+        };
+
+        void backedUp(Path path);
+
+        default void permissionProtected(Path path) {
+        }
+    }
+
+    @FunctionalInterface
+    interface CheckedOperation<T> {
+        T run() throws Exception;
+    }
+
+    static final class TaskScope implements AutoCloseable {
+        private final RunProtection protection;
+        private final Path candidate;
+        private boolean closed;
+
+        private TaskScope(RunProtection protection, Path candidate) {
+            this.protection = protection;
+            this.candidate = candidate;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            protection.closeTask(candidate);
+        }
+    }
+
+    private static final class RunProtection {
+        private final Path repository;
+        private final Path stableRoot;
+        private final Path currentRun;
+        private final Set<Path> candidates;
+        private final Set<Path> protectedPaths;
+        private final Path backupRoot;
+        private final ProtectionObserver observer;
+        private final AtomicInteger backupSequence = new AtomicInteger();
+        private final Map<Path, SnapshotEntry> protectedSnapshot = new LinkedHashMap<>();
+        private final Map<Path, SnapshotEntry> currentRunSnapshot = new LinkedHashMap<>();
+        private final Map<Path, Set<PosixFilePermission>> originalPermissions = new LinkedHashMap<>();
+        private final Map<Path, Set<PosixFilePermission>> guardedPermissions = new LinkedHashMap<>();
+        private Path activeCandidate;
+        private boolean closed;
+
+        private RunProtection(
+                Path repository,
+                Path stableRoot,
+                Path currentRun,
+                Set<Path> candidates,
+                Set<Path> protectedPaths,
+                Path backupRoot,
+                ProtectionObserver observer
+        ) {
+            this.repository = repository;
+            this.stableRoot = stableRoot;
+            this.currentRun = currentRun;
+            this.candidates = Set.copyOf(candidates);
+            this.protectedPaths = Set.copyOf(protectedPaths);
+            this.backupRoot = backupRoot;
+            this.observer = observer;
+        }
+
+        private static RunProtection establish(
+                ObjectMapper objectMapper,
+                Path repository,
+                Path stableRoot,
+                Path currentRun,
+                List<Path> mapperFiles,
+                List<Path> candidates,
+                ProtectionObserver observer
+        ) throws IOException {
+            Objects.requireNonNull(objectMapper, "objectMapper");
+            Objects.requireNonNull(mapperFiles, "mapperFiles");
+            Objects.requireNonNull(candidates, "candidates");
+            Path normalizedRepository = normalizeDirectory(repository, "repository");
+            Path normalizedStable = normalizeDirectory(stableRoot, "stable output");
+            Path normalizedCurrentRun = normalizeDirectory(currentRun, "current run");
+            requireNoSymlinkPath(normalizedStable, normalizedCurrentRun, "current run");
+
+            Set<Path> normalizedCandidates = new LinkedHashSet<>();
+            for (Path candidate : candidates) {
+                Path normalizedCandidate = normalizeDirectory(candidate, "candidate directory");
+                requireNoSymlinkPath(normalizedCurrentRun, normalizedCandidate, "candidate directory");
+                if (!normalizedCandidates.add(normalizedCandidate)) {
+                    throw new IllegalArgumentException("candidate directories must be unique: " + normalizedCandidate);
+                }
+            }
+
+            Set<Path> exactProtectedPaths = new LinkedHashSet<>();
+            for (Path mapperFile : mapperFiles) {
+                Path normalizedMapper = mapperFile.toAbsolutePath().normalize();
+                requireNoSymlinkPath(normalizedRepository, normalizedMapper, "mapper input");
+                if (!Files.isRegularFile(normalizedMapper, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalStateException("mapper input must be a non-symlink regular file: " + normalizedMapper);
+                }
+                exactProtectedPaths.addAll(pathChain(normalizedRepository, normalizedMapper.getParent()));
+                exactProtectedPaths.add(normalizedMapper);
+            }
+            exactProtectedPaths.add(normalizedStable);
+            Path manifest = normalizedStable.resolve(".publication.json");
+            if (Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) {
+                requireNoSymlinkPath(normalizedStable, manifest, "stable publication manifest");
+                if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalStateException(
+                            "stable publication manifest must be a non-symlink regular file: " + manifest
+                    );
+                }
+                exactProtectedPaths.add(manifest);
+                for (Path artifact : declaredStableArtifacts(objectMapper, normalizedStable, manifest)) {
+                    exactProtectedPaths.addAll(pathChain(normalizedStable, artifact.getParent()));
+                    exactProtectedPaths.add(artifact);
+                }
+            }
+
+            Path backup = Files.createTempDirectory("mybatis-sql-review-run-protected-");
+            RunProtection result = new RunProtection(
+                    normalizedRepository,
+                    normalizedStable,
+                    normalizedCurrentRun,
+                    normalizedCandidates,
+                    exactProtectedPaths,
+                    backup,
+                    observer == null ? ProtectionObserver.NOOP : observer
+            );
+            try {
+                result.capturePaths(exactProtectedPaths, result.protectedSnapshot, true);
+                result.captureTree(normalizedCurrentRun, result.currentRunSnapshot, false);
+                result.protectPermissions(exactProtectedPaths, true);
+                result.protectPermissions(result.currentRunSnapshot.keySet(), false);
+                return result;
+            } catch (Exception setupFailure) {
+                IOException restoreFailure = restorePermissionsBestEffort(result.originalPermissions);
+                cleanupBestEffort(backup);
+                IllegalStateException failure = new IllegalStateException(
+                        "failed to establish run-level POSIX filesystem protection", setupFailure
+                );
+                if (restoreFailure != null) {
+                    failure.addSuppressed(restoreFailure);
+                }
+                throw failure;
+            }
+        }
+
+        private TaskScope openTask(Path requestedCandidate) throws IOException {
+            requireOpen();
+            if (activeCandidate != null) {
+                throw new IllegalStateException("only one MyBatis SQL task may hold filesystem protection");
+            }
+            Path normalizedCandidate = requestedCandidate.toAbsolutePath().normalize();
+            if (!candidates.contains(normalizedCandidate)) {
+                throw new IllegalArgumentException("candidate is not registered for the current run: " + normalizedCandidate);
+            }
+            List<String> stale = currentRunChanges(null, true);
+            if (!stale.isEmpty()) {
+                restoreCurrentRun(null);
+                throw new IllegalStateException("protected current run content changed: " + String.join("; ", stale));
+            }
+            activeCandidate = normalizedCandidate;
+            makeOwnerWritable(normalizedCandidate);
+            return new TaskScope(this, normalizedCandidate);
+        }
+
+        private void closeTask(Path candidate) {
+            if (!Objects.equals(activeCandidate, candidate)) {
+                throw new IllegalStateException("task filesystem scope is not active: " + candidate);
+            }
+            List<String> violations = new ArrayList<>();
+            Throwable failure = null;
+            try {
+                applyGuardedPermission(candidate);
+                violations.addAll(currentRunChanges(candidate, true));
+                if (!violations.isEmpty()) {
+                    restoreCurrentRun(candidate);
+                }
+                adoptCurrentRunSubtree(candidate);
+            } catch (Throwable exception) {
+                failure = exception;
+            } finally {
+                activeCandidate = null;
+            }
+            if (!violations.isEmpty() || failure != null) {
+                String message = violations.isEmpty()
+                        ? "current run filesystem verification failed"
+                        : "protected current run content changed: " + String.join("; ", violations);
+                IllegalStateException exception = new IllegalStateException(message);
+                if (failure != null) {
+                    exception.addSuppressed(failure);
+                }
+                throw exception;
+            }
+        }
+
+        private <T> T withJavaWrites(List<Path> allowedRoots, CheckedOperation<T> operation) throws Exception {
+            requireOpen();
+            Objects.requireNonNull(allowedRoots, "allowedRoots");
+            Objects.requireNonNull(operation, "operation");
+            if (activeCandidate != null) {
+                throw new IllegalStateException("Java writes are forbidden while an Agent task is active");
+            }
+            List<Path> allowed = allowedRoots.stream()
+                    .map(path -> path.toAbsolutePath().normalize())
+                    .distinct()
+                    .toList();
+            for (Path path : allowed) {
+                if (!path.startsWith(currentRun)) {
+                    throw new IllegalArgumentException("Java write path escapes current run: " + path);
+                }
+                requireNoSymlinkPath(currentRun, nearestExisting(path), "Java write path");
+            }
+            List<String> stale = currentRunChanges(null, true);
+            if (!stale.isEmpty()) {
+                restoreCurrentRun(null);
+                throw new IllegalStateException("protected current run content changed: " + String.join("; ", stale));
+            }
+            for (Path path : currentRunSnapshot.keySet()) {
+                if (allowed.stream().anyMatch(root -> path.startsWith(root) || root.startsWith(path))) {
+                    makeOwnerWritable(path);
+                }
+            }
+            T value = null;
+            Throwable operationFailure = null;
+            try {
+                value = operation.run();
+            } catch (Throwable exception) {
+                operationFailure = exception;
+            }
+            Throwable refreshFailure = null;
+            try {
+                for (Path root : allowed) {
+                    adoptCurrentRunSubtree(root);
+                }
+                reapplyGuardedPermissions(currentRunSnapshot.keySet(), null);
+                List<String> violations = currentRunChanges(null, true);
+                if (!violations.isEmpty()) {
+                    restoreCurrentRun(null);
+                    throw new IllegalStateException(
+                            "protected current run content changed during Java writes: " + String.join("; ", violations)
+                    );
+                }
+            } catch (Throwable exception) {
+                refreshFailure = exception;
+            }
+            if (operationFailure != null) {
+                if (refreshFailure != null) {
+                    operationFailure.addSuppressed(refreshFailure);
+                }
+                if (operationFailure instanceof Exception exception) {
+                    throw exception;
+                }
+                throw (Error) operationFailure;
+            }
+            if (refreshFailure != null) {
+                if (refreshFailure instanceof Exception exception) {
+                    throw exception;
+                }
+                throw (Error) refreshFailure;
+            }
+            return value;
+        }
+
+        private void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            List<String> violations = new ArrayList<>();
+            Throwable restorationFailure = null;
+            try {
+                violations.addAll(exactChanges(protectedSnapshot, true, "protected path"));
+                violations.addAll(currentRunChanges(null, true));
+                if (!violations.isEmpty()) {
+                    restoreProtectedPaths();
+                    restoreCurrentRun(null);
+                }
+            } catch (Throwable exception) {
+                restorationFailure = exception;
+            }
+            IOException permissionFailure = restorePermissionsBestEffort(originalPermissions);
+            cleanupBestEffort(backupRoot);
+            if (!violations.isEmpty() || restorationFailure != null || permissionFailure != null) {
+                String message = violations.isEmpty()
+                        ? "run-level filesystem protection restoration failed"
+                        : "protected filesystem content changed: " + String.join("; ", violations);
+                IllegalStateException exception = new IllegalStateException(message);
+                if (restorationFailure != null) {
+                    exception.addSuppressed(restorationFailure);
+                }
+                if (permissionFailure != null) {
+                    exception.addSuppressed(permissionFailure);
+                }
+                throw exception;
+            }
+        }
+
+        private void capturePaths(
+                Iterable<Path> paths,
+                Map<Path, SnapshotEntry> destination,
+                boolean notifyObserver
+        ) throws IOException {
+            for (Path path : paths) {
+                Path normalized = path.toAbsolutePath().normalize();
+                if (destination.containsKey(normalized)) {
+                    continue;
+                }
+                SnapshotEntry entry = captureEntry(normalized);
+                destination.put(normalized, entry);
+                if (notifyObserver && entry.kind() == Kind.REGULAR_FILE) {
+                    observer.backedUp(normalized);
+                }
+            }
+        }
+
+        private void captureTree(
+                Path root,
+                Map<Path, SnapshotEntry> destination,
+                boolean notifyObserver
+        ) throws IOException {
+            try (var paths = Files.walk(root)) {
+                capturePaths(paths.sorted().toList(), destination, notifyObserver);
+            }
+        }
+
+        private SnapshotEntry captureEntry(Path path) throws IOException {
+            BasicFileAttributes attributes = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            Kind kind = Kind.of(attributes);
+            if (kind == Kind.SYMBOLIC_LINK) {
+                throw new IllegalStateException("symlinks are forbidden in protected run paths: " + path);
+            }
+            Path backupFile = null;
+            String hash = "";
+            if (kind == Kind.REGULAR_FILE) {
+                backupFile = backupRoot.resolve("files").resolve(
+                        "%08d.bin".formatted(backupSequence.getAndIncrement())
+                );
+                Files.createDirectories(backupFile.getParent());
+                try (InputStream input = Files.newInputStream(
+                        path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+                )) {
+                    Files.copy(input, backupFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+                hash = sha256(backupFile);
+            }
+            return new SnapshotEntry(
+                    path,
+                    kind,
+                    attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
+                    attributes.lastModifiedTime(),
+                    hash,
+                    "",
+                    backupFile
+            );
+        }
+
+        private void protectPermissions(Iterable<Path> paths, boolean notifyObserver) throws IOException {
+            List<Path> ordered = new ArrayList<>();
+            paths.forEach(ordered::add);
+            for (Path path : ordered.stream()
+                    .distinct()
+                    .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+                    .toList()) {
+                if (Files.isSymbolicLink(path)) {
+                    throw new IllegalStateException("symlinks are forbidden in protected run paths: " + path);
+                }
+                if (Files.getFileAttributeView(
+                        path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS
+                ) == null) {
+                    throw new IllegalStateException(
+                            "POSIX permissions are required for MyBatis SQL review filesystem protection: " + path
+                    );
+                }
+                Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(
+                        path, LinkOption.NOFOLLOW_LINKS
+                );
+                originalPermissions.putIfAbsent(path, Set.copyOf(permissions));
+                Set<PosixFilePermission> readOnly = withoutWrites(permissions);
+                Files.setPosixFilePermissions(path, readOnly);
+                guardedPermissions.put(path, Set.copyOf(readOnly));
+                if (notifyObserver) {
+                    observer.permissionProtected(path);
+                }
+            }
+        }
+
+        private void adoptCurrentRunSubtree(Path root) throws IOException {
+            Path normalized = root.toAbsolutePath().normalize();
+            currentRunSnapshot.keySet().removeIf(path -> path.startsWith(normalized));
+            if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            requireNoSymlinkPath(currentRun, normalized, "current run Java output");
+            captureTree(normalized, currentRunSnapshot, false);
+            protectPermissions(
+                    currentRunSnapshot.keySet().stream().filter(path -> path.startsWith(normalized)).toList(),
+                    false
+            );
+        }
+
+        private List<String> currentRunChanges(Path excludedRoot, boolean compareIdentity) throws IOException {
+            Map<Path, CurrentEntry> actual = currentTree(currentRun);
+            return changes(currentRunSnapshot, actual, excludedRoot, compareIdentity, "current run");
+        }
+
+        private List<String> exactChanges(
+                Map<Path, SnapshotEntry> expected,
+                boolean compareIdentity,
+                String label
+        ) throws IOException {
+            Map<Path, CurrentEntry> actual = new LinkedHashMap<>();
+            for (Path path : expected.keySet()) {
+                CurrentEntry entry = currentEntryOrNull(path);
+                if (entry != null) {
+                    actual.put(path, entry);
+                }
+            }
+            return changes(expected, actual, null, compareIdentity, label);
+        }
+
+        private List<String> changes(
+                Map<Path, SnapshotEntry> expected,
+                Map<Path, CurrentEntry> actual,
+                Path excludedRoot,
+                boolean compareIdentity,
+                String label
+        ) throws IOException {
+            List<String> changes = new ArrayList<>();
+            Set<Path> all = new LinkedHashSet<>(expected.keySet());
+            all.addAll(actual.keySet());
+            for (Path path : all.stream().sorted().toList()) {
+                if (excludedRoot != null && path.startsWith(excludedRoot)) {
+                    continue;
+                }
+                SnapshotEntry expectedEntry = expected.get(path);
+                CurrentEntry actualEntry = actual.get(path);
+                if (expectedEntry == null) {
+                    changes.add(label + " " + display(path) + " created");
+                } else if (actualEntry == null) {
+                    changes.add(label + " " + display(path) + " deleted");
+                } else if (!expectedEntry.sameContent(actualEntry, compareIdentity)) {
+                    changes.add(label + " " + display(path) + " changed");
+                }
+                if (actualEntry != null && guardedPermissions.containsKey(path)
+                        && !Files.isSymbolicLink(path)) {
+                    Set<PosixFilePermission> actualPermissions = Files.getPosixFilePermissions(
+                            path, LinkOption.NOFOLLOW_LINKS
+                    );
+                    if (!actualPermissions.equals(guardedPermissions.get(path))) {
+                        changes.add(label + " " + display(path) + " permissions changed");
+                    }
+                }
+            }
+            return changes;
+        }
+
+        private void restoreProtectedPaths() throws IOException {
+            makeRestorationWritable(protectedSnapshot.keySet());
+            restoreEntries(protectedSnapshot, null);
+            reapplyGuardedPermissions(protectedSnapshot.keySet(), null);
+        }
+
+        private void restoreCurrentRun(Path excludedRoot) throws IOException {
+            Map<Path, CurrentEntry> actual = currentTree(currentRun);
+            makeRestorationWritable(actual.keySet());
+            makeRestorationWritable(currentRunSnapshot.keySet());
+            for (Path path : actual.keySet().stream()
+                    .filter(path -> !currentRunSnapshot.containsKey(path))
+                    .filter(path -> excludedRoot == null || !path.startsWith(excludedRoot))
+                    .sorted(Comparator.reverseOrder())
+                    .toList()) {
+                deleteNoFollow(path);
+            }
+            restoreEntries(currentRunSnapshot, excludedRoot);
+            refreshRestoredIdentity(currentRunSnapshot, excludedRoot);
+            reapplyGuardedPermissions(currentRunSnapshot.keySet(), excludedRoot);
+        }
+
+        private void refreshRestoredIdentity(
+                Map<Path, SnapshotEntry> entries,
+                Path excludedRoot
+        ) throws IOException {
+            for (Map.Entry<Path, SnapshotEntry> item : new ArrayList<>(entries.entrySet())) {
+                Path path = item.getKey();
+                if (excludedRoot != null && path.startsWith(excludedRoot)) {
+                    continue;
+                }
+                BasicFileAttributes attributes = Files.readAttributes(
+                        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+                );
+                SnapshotEntry previous = item.getValue();
+                entries.put(path, new SnapshotEntry(
+                        path,
+                        previous.kind(),
+                        attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
+                        attributes.lastModifiedTime(),
+                        previous.sha256(),
+                        previous.symbolicLinkTarget(),
+                        previous.backupFile()
+                ));
+            }
+        }
+
+        private void restoreEntries(Map<Path, SnapshotEntry> entries, Path excludedRoot) throws IOException {
+            for (SnapshotEntry entry : entries.values().stream()
+                    .filter(value -> excludedRoot == null || !value.path().startsWith(excludedRoot))
+                    .sorted(Comparator.comparingInt(value -> value.path().getNameCount()))
+                    .toList()) {
+                restoreEntry(entry);
+            }
+            for (SnapshotEntry entry : entries.values().stream()
+                    .filter(value -> value.kind() == Kind.DIRECTORY)
+                    .filter(value -> excludedRoot == null || !value.path().startsWith(excludedRoot))
+                    .sorted(Comparator.comparingInt((SnapshotEntry value) -> value.path().getNameCount()).reversed())
+                    .toList()) {
+                Files.setLastModifiedTime(entry.path(), entry.lastModifiedTime());
+            }
+        }
+
+        private void makeRestorationWritable(Iterable<Path> paths) throws IOException {
+            IOException failure = null;
+            List<Path> ordered = new ArrayList<>();
+            paths.forEach(ordered::add);
+            for (Path path : ordered.stream()
+                    .distinct()
+                    .sorted(Comparator.comparingInt(Path::getNameCount))
+                    .toList()) {
+                try {
+                    if (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path)) {
+                        makeOwnerWritable(path);
+                    }
+                } catch (IOException | RuntimeException exception) {
+                    if (failure == null) {
+                        failure = exception instanceof IOException io ? io : new IOException(exception);
+                    } else {
+                        failure.addSuppressed(exception);
+                    }
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
+
+        private void reapplyGuardedPermissions(Iterable<Path> paths, Path excludedRoot) throws IOException {
+            for (Path path : guardedPermissions.keySet().stream()
+                    .filter(value -> contains(paths, value))
+                    .filter(value -> excludedRoot == null || !value.startsWith(excludedRoot))
+                    .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+                    .toList()) {
+                applyGuardedPermission(path);
+            }
+        }
+
+        private void makeOwnerWritable(Path path) throws IOException {
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
+                return;
+            }
+            Set<PosixFilePermission> permissions = EnumSet.copyOf(
+                    Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS)
+            );
+            permissions.add(PosixFilePermission.OWNER_READ);
+            permissions.add(PosixFilePermission.OWNER_WRITE);
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                permissions.add(PosixFilePermission.OWNER_EXECUTE);
+            }
+            Files.setPosixFilePermissions(path, permissions);
+        }
+
+        private void applyGuardedPermission(Path path) throws IOException {
+            Set<PosixFilePermission> permissions = guardedPermissions.get(path);
+            if (permissions != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isSymbolicLink(path)) {
+                Files.setPosixFilePermissions(path, permissions);
+            }
+        }
+
+        private void requireOpen() {
+            if (closed) {
+                throw new IllegalStateException("run-level filesystem protection is already closed");
+            }
+        }
+
+        private static boolean contains(Iterable<Path> paths, Path expected) {
+            for (Path path : paths) {
+                if (path.equals(expected)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static Map<Path, CurrentEntry> currentTree(Path root) throws IOException {
+            Map<Path, CurrentEntry> result = new LinkedHashMap<>();
+            if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+                return result;
+            }
+            try (var paths = Files.walk(root)) {
+                for (Path path : paths.sorted().toList()) {
+                    CurrentEntry entry = currentEntryOrNull(path);
+                    if (entry != null) {
+                        result.put(path.toAbsolutePath().normalize(), entry);
+                    }
+                }
+            }
+            return result;
+        }
+
+        private static CurrentEntry currentEntryOrNull(Path path) throws IOException {
+            BasicFileAttributes attributes = readAttributesOrNull(path);
+            if (attributes == null) {
+                return null;
+            }
+            Kind kind = Kind.of(attributes);
+            String hash = kind == Kind.REGULAR_FILE ? sha256(path) : "";
+            String symbolicLink = kind == Kind.SYMBOLIC_LINK
+                    ? Files.readSymbolicLink(path).toString()
+                    : "";
+            return new CurrentEntry(
+                    kind,
+                    attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
+                    attributes.lastModifiedTime(),
+                    hash,
+                    symbolicLink
+            );
+        }
+
+        private static List<Path> declaredStableArtifacts(
+                ObjectMapper objectMapper,
+                Path stableRoot,
+                Path manifest
+        ) throws IOException {
+            JsonNode root;
+            try (InputStream input = Files.newInputStream(
+                    manifest, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+            )) {
+                root = objectMapper.readTree(input);
+            }
+            JsonNode artifacts = root == null ? null : root.path("artifacts");
+            if (artifacts == null || !artifacts.isArray()) {
+                throw new IllegalStateException("stable publication manifest artifacts must be an array");
+            }
+            List<Path> result = new ArrayList<>();
+            for (JsonNode artifact : artifacts) {
+                String value = artifact.path("path").asText("").trim();
+                if (value.isEmpty() || value.contains("\\")) {
+                    throw new IllegalStateException("invalid stable publication artifact path: " + value);
+                }
+                Path relative = Path.of(value);
+                if (relative.isAbsolute() || relative.normalize().startsWith("..")) {
+                    throw new IllegalStateException("stable publication artifact escapes stable root: " + value);
+                }
+                Path resolved = stableRoot.resolve(relative).normalize();
+                requireNoSymlinkPath(stableRoot, resolved, "stable publication artifact");
+                if (!Files.isRegularFile(resolved, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalStateException(
+                            "stable publication artifact must be a non-symlink regular file: " + resolved
+                    );
+                }
+                result.add(resolved);
+            }
+            return List.copyOf(result);
+        }
+
+        private static List<Path> pathChain(Path base, Path target) {
+            if (target == null || !target.startsWith(base)) {
+                throw new IllegalStateException("protected path escapes its root: " + target);
+            }
+            List<Path> result = new ArrayList<>();
+            for (Path path = base; path != null; path = next(path, target)) {
+                result.add(path);
+                if (path.equals(target)) {
+                    break;
+                }
+            }
+            return result;
+        }
+
+        private static void requireNoSymlinkPath(Path base, Path target, String label) throws IOException {
+            if (!target.startsWith(base)) {
+                throw new IllegalStateException(label + " escapes protected root: " + target);
+            }
+            for (Path path : pathChain(base, target)) {
+                if (Files.isSymbolicLink(path)) {
+                    throw new IllegalStateException(label + " contains a symlink component: " + path);
+                }
+            }
+        }
+
+        private static Path nearestExisting(Path path) {
+            Path current = path;
+            while (current != null && !Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                current = current.getParent();
+            }
+            return current == null ? path : current;
+        }
     }
 
     private enum Kind {

@@ -28,6 +28,9 @@ import java.util.stream.Collectors;
 public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     public static final String ID = "mybatis-sql-review";
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[(?:\\\\.|[^]])*]\\(([^)]+)\\)");
+    private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
+            "(?m)^[\\t ]{0,3}\\[[^]\\r\\n]+]:[\\t ]*(?:<([^>\\r\\n]+)>|(\\S+))"
+    );
     private static final Pattern EXTERNAL_SCHEME = Pattern.compile("(?i)^[a-z][a-z0-9+.-]*:");
     private static final Pattern AUTOLINK = Pattern.compile("(?i)<(?:https?|mailto):[^>]+>");
     private static final Pattern RAW_HTML = Pattern.compile("(?i)<\\s*/?\\s*[a-z][^>]*>");
@@ -104,10 +107,31 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                         URI.create(settings.getWebBaseUrl()),
                         configuration.getDatabase().toContract()
                 );
+                List<MyBatisSqlReviewTaskRunner.PreparedTask> prepared = new ArrayList<>();
                 for (MyBatisSqlStatement statement : selected) {
-                    taskRunner.run(
-                            activeWorkspace, configuration.getProject().getRepo(), statement, database, settings
-                    );
+                    prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
+                }
+                if (!prepared.isEmpty()) {
+                    Path repository = configuration.getProject().getRepo().toAbsolutePath().normalize();
+                    List<Path> mapperFiles = inventory.mappers().stream()
+                            .map(mapper -> repository.resolve(mapper.mapperRelativePath()).normalize())
+                            .toList();
+                    List<Path> candidates = prepared.stream()
+                            .map(task -> task.layout().candidate())
+                            .toList();
+                    try (MyBatisSqlReviewFilesystemGuard guard =
+                                 MyBatisSqlReviewFilesystemGuard.protectRun(
+                                         objectMapper,
+                                         repository,
+                                         activeWorkspace.stableRoot(),
+                                         activeWorkspace.runRoot(),
+                                         mapperFiles,
+                                         candidates
+                                 )) {
+                        for (MyBatisSqlReviewTaskRunner.PreparedTask task : prepared) {
+                            taskRunner.runPrepared(activeWorkspace, task, guard);
+                        }
+                    }
                 }
                 reportRenderer.render(
                         activeWorkspace.bundleRoot(),
@@ -272,6 +296,18 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 while (html.find()) {
                     if (!AUTOLINK.matcher(html.group()).matches()) {
                         invalid.add(relative(root, markdown) + " -> raw HTML " + html.group());
+                    }
+                }
+                Matcher referenceDefinition = REFERENCE_DEFINITION.matcher(prose);
+                while (referenceDefinition.find()) {
+                    String link = referenceDefinition.group(1) == null
+                            ? referenceDefinition.group(2)
+                            : referenceDefinition.group(1);
+                    link = link.trim();
+                    if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
+                        invalid.add(
+                                relative(root, markdown) + " -> external reference definition " + link
+                        );
                     }
                 }
                 Matcher matcher = MARKDOWN_LINK.matcher(prose);

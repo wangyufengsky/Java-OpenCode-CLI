@@ -61,8 +61,27 @@ public final class MyBatisSqlReviewTaskRunner {
             MyBatisDatabasePreflight.Result database,
             AgentBridgeSettings settings
     ) throws Exception {
+        PreparedTask prepared = prepare(workspace, statement, database, settings);
+        Path mapper = repository.toAbsolutePath().normalize().resolve(statement.mapperRelativePath()).normalize();
+        try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper,
+                repository,
+                workspace.stableRoot(),
+                workspace.runRoot(),
+                List.of(mapper),
+                List.of(prepared.layout().candidate())
+        )) {
+            return runPrepared(workspace, prepared, guard);
+        }
+    }
+
+    public PreparedTask prepare(
+            WorkflowArtifactWorkspace workspace,
+            MyBatisSqlStatement statement,
+            MyBatisDatabasePreflight.Result database,
+            AgentBridgeSettings settings
+    ) throws Exception {
         Objects.requireNonNull(workspace, "workspace");
-        Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(statement, "statement");
         Objects.requireNonNull(database, "database");
         Objects.requireNonNull(settings, "settings");
@@ -88,10 +107,29 @@ public final class MyBatisSqlReviewTaskRunner {
         ));
         Files.writeString(layout.workerPrompt(), prompt, StandardCharsets.UTF_8);
         writeTaskJson(layout, statement, database);
+        writeStatus(layout, statement, "QUEUED", "created", "");
+        Path bundleDirectory = MyBatisSqlReportRenderer.statementDirectory(workspace.bundleRoot(), statement);
+        Files.createDirectories(bundleDirectory);
+        return new PreparedTask(statement, database, settings, layout, commandType, prompt,
+                "MyBatis SQL review: " + statement.statementKey(), bundleDirectory);
+    }
 
-        String title = "MyBatis SQL review: " + statement.statementKey();
+    public TaskResult runPrepared(
+            WorkflowArtifactWorkspace workspace,
+            PreparedTask prepared,
+            MyBatisSqlReviewFilesystemGuard guard
+    ) throws Exception {
+        Objects.requireNonNull(workspace, "workspace");
+        Objects.requireNonNull(prepared, "prepared");
+        Objects.requireNonNull(guard, "guard");
+        MyBatisSqlStatement statement = prepared.statement();
+        MyBatisDatabasePreflight.Result database = prepared.database();
+        AgentBridgeSettings settings = prepared.settings();
+        TaskArtifactLayout layout = prepared.layout();
+        String commandType = prepared.commandType();
+        String prompt = prepared.prompt();
+        String title = prepared.title();
         try (var ignored = WorkflowRunContext.openTask(statement.statementKey(), title)) {
-            writeStatus(layout, statement, "QUEUED", "created", "");
             eventSink.taskStatusCurrent(
                     statement.statementKey(), title, "QUEUED", "created",
                     layout.status().toString(), ""
@@ -118,19 +156,17 @@ public final class MyBatisSqlReviewTaskRunner {
                 MyBatisToolCallAudit.Boundary boundary = new MyBatisToolCallAudit.Boundary(
                         startedAt, preexistingIds
                 );
-                writeBoundary(layout, boundary);
-                writeStatus(layout, statement, "RUNNING", "submitted", "");
+                guard.withJavaWrites(List.of(layout.root()), () -> {
+                    writeBoundary(layout, boundary);
+                    writeStatus(layout, statement, "RUNNING", "submitted", "");
+                    return null;
+                });
                 eventSink.taskStatusCurrent(
                         statement.statementKey(), title, "RUNNING", "submitted",
                         layout.status().toString(), ""
                 );
-                try (MyBatisSqlReviewFilesystemGuard ignoredGuard =
-                             MyBatisSqlReviewFilesystemGuard.protect(
-                                     repository,
-                                     workspace.stableRoot(),
-                                     layout.root(),
-                                     layout.candidate()
-                             )) {
+                try (MyBatisSqlReviewFilesystemGuard.TaskScope ignoredGuard =
+                             guard.protectTask(layout.candidate())) {
                     client.postPrompt(webUri, composeMessage(settings.getTaskMessage(), prompt));
                     client.waitUntilIdle(
                             webUri,
@@ -162,9 +198,15 @@ public final class MyBatisSqlReviewTaskRunner {
                         database,
                         audit
                 );
-                writeValidation(layout, validation);
-                Path publishedDirectory = publishCandidateToBundle(workspace, layout, statement);
-                writeStatus(layout, statement, "SUCCEEDED", "completed_by_output", "");
+                Path publishedDirectory = guard.withJavaWrites(
+                        List.of(layout.root(), prepared.bundleDirectory()),
+                        () -> {
+                            writeValidation(layout, validation);
+                            Path published = publishCandidateToBundle(workspace, layout, statement);
+                            writeStatus(layout, statement, "SUCCEEDED", "completed_by_output", "");
+                            return published;
+                        }
+                );
                 eventSink.taskStatusCurrent(
                         statement.statementKey(), title, "SUCCEEDED", "completed_by_output",
                         layout.status().toString(), ""
@@ -175,7 +217,14 @@ public final class MyBatisSqlReviewTaskRunner {
                 );
             } catch (Exception exception) {
                 String error = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-                writeStatus(layout, statement, "FAILED", "validation_failed_final", error);
+                try {
+                    guard.withJavaWrites(List.of(layout.root()), () -> {
+                        writeStatus(layout, statement, "FAILED", "validation_failed_final", error);
+                        return null;
+                    });
+                } catch (Exception statusFailure) {
+                    exception.addSuppressed(statusFailure);
+                }
                 eventSink.taskStatusCurrent(
                         statement.statementKey(), title, "FAILED", "validation_failed_final",
                         layout.status().toString(), error
@@ -183,6 +232,18 @@ public final class MyBatisSqlReviewTaskRunner {
                 throw exception;
             }
         }
+    }
+
+    public record PreparedTask(
+            MyBatisSqlStatement statement,
+            MyBatisDatabasePreflight.Result database,
+            AgentBridgeSettings settings,
+            TaskArtifactLayout layout,
+            String commandType,
+            String prompt,
+            String title,
+            Path bundleDirectory
+    ) {
     }
 
     private void writeTaskJson(
@@ -266,12 +327,16 @@ public final class MyBatisSqlReviewTaskRunner {
         Path target = MyBatisSqlReportRenderer.statementDirectory(workspace.bundleRoot(), statement);
         if (Files.exists(target)) {
             try (var paths = Files.walk(target)) {
-                for (Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
+                for (Path path : paths
+                        .filter(path -> !path.equals(target))
+                        .sorted((left, right) -> right.compareTo(left))
+                        .toList()) {
                     Files.delete(path);
                 }
             }
+        } else {
+            Files.createDirectories(target);
         }
-        Files.createDirectories(target);
         for (String artifact : CANDIDATE_ARTIFACTS) {
             Path source = layout.candidate().resolve(artifact);
             try (var input = Files.newInputStream(

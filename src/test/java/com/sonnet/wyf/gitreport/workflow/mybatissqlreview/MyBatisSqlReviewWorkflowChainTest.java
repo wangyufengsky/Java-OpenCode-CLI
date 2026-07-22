@@ -91,6 +91,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                 inventory.path("statements").findValuesAsText("statement_key")
         );
         assertThat(client.maximumActiveTasks).isEqualTo(1);
+        assertThat(client.candidateDirectoryCountsAtPost).containsExactly(3, 3, 3);
         assertThat(client.events).containsSubsequence(
                 "clear", "wait-for-clear", "history", "post", "wait-for-task", "history"
         );
@@ -246,11 +247,15 @@ class MyBatisSqlReviewWorkflowChainTest {
                 # Safe
 
                 [local](local.md)
+                [reference][local-reference]
+
+                [local-reference]: local.md
 
                 ```sql
                 SELECT '[not-a-link](https://sql.example)' AS value;
                 SELECT '<https://sql.example>' AS value;
                 SELECT '<table>' AS value;
+                [external-reference]: https://sql.example
                 ```
                 """);
         assertThatCode(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
@@ -259,6 +264,10 @@ class MyBatisSqlReviewWorkflowChainTest {
         Files.writeString(root.resolve("report.md"), "[external](https://evil.example)\n");
         assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
                 .hasMessageContaining("external");
+
+        Files.writeString(root.resolve("report.md"), "[external][remote]\n\n[remote]: https://evil.example\n");
+        assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
+                .hasMessageContaining("external reference definition");
 
         Files.writeString(root.resolve("report.md"), "<https://evil.example>\n");
         assertThatThrownBy(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))
@@ -343,6 +352,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         private final ObjectMapper objectMapper;
         private final List<String> events = new ArrayList<>();
         private final List<String> postedStatementKeys = new ArrayList<>();
+        private final List<Integer> candidateDirectoryCountsAtPost = new ArrayList<>();
         private final List<ToolCallRecord> history = new ArrayList<>();
         private int activeTasks;
         private int maximumActiveTasks;
@@ -369,6 +379,13 @@ class MyBatisSqlReviewWorkflowChainTest {
             try {
                 JsonNode runtime = runtimeContext(prompt);
                 postedStatementKeys.add(runtime.path("statement_key").asText());
+                Path candidate = Path.of(runtime.path("candidate_directory").asText());
+                Path tasksRoot = candidate.getParent().getParent().getParent().getParent();
+                try (var paths = Files.walk(tasksRoot)) {
+                    candidateDirectoryCountsAtPost.add((int) paths
+                            .filter(path -> path.getFileName().toString().equals("candidate"))
+                            .count());
+                }
                 writeCandidate(runtime);
             } catch (Exception exception) {
                 throw new IllegalStateException(exception);
