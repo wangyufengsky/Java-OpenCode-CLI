@@ -122,7 +122,7 @@ public final class MyBatisToolCallAudit {
                     rows
             ));
         }
-        return new Result(facts, queryScenarios, statement, database);
+        return new Result(facts, statement, database);
     }
 
     private void requireHistoryIdentity(AgentBridgeClient.ToolCallRecord call) {
@@ -254,49 +254,136 @@ public final class MyBatisToolCallAudit {
         }
     }
 
-    public record AuditedCallFact(
-            String id,
-            String toolName,
-            Instant timestamp,
-            long durationMs,
-            String connectionId,
-            String databaseName,
-            String schemaName,
-            String queryText,
-            JsonNode arguments,
-            JsonNode resultData,
-            List<String> columns,
-            List<JsonNode> rows
-    ) {
-        public AuditedCallFact {
-            Objects.requireNonNull(id, "id");
-            Objects.requireNonNull(toolName, "toolName");
-            Objects.requireNonNull(timestamp, "timestamp");
-            connectionId = connectionId == null ? "" : connectionId;
-            databaseName = databaseName == null ? "" : databaseName;
-            schemaName = schemaName == null ? "" : schemaName;
-            queryText = queryText == null ? "" : queryText;
-            arguments = Objects.requireNonNull(arguments, "arguments").deepCopy();
-            resultData = Objects.requireNonNull(resultData, "resultData").deepCopy();
-            columns = List.copyOf(columns);
-            List<JsonNode> copiedRows = new ArrayList<>();
-            for (JsonNode row : rows) {
-                copiedRows.add(row.deepCopy());
+    public static final class AuditedCallFact {
+        private final String id;
+        private final String toolName;
+        private final Instant timestamp;
+        private final long durationMs;
+        private final String connectionId;
+        private final String databaseName;
+        private final String schemaName;
+        private final String queryText;
+        private final JsonNode arguments;
+        private final JsonNode resultData;
+        private final List<String> columns;
+        private final List<JsonNode> rows;
+
+        private AuditedCallFact(
+                String id,
+                String toolName,
+                Instant timestamp,
+                long durationMs,
+                String connectionId,
+                String databaseName,
+                String schemaName,
+                String queryText,
+                JsonNode arguments,
+                JsonNode resultData,
+                List<String> columns,
+                List<JsonNode> rows
+        ) {
+            this.id = Objects.requireNonNull(id, "id");
+            this.toolName = Objects.requireNonNull(toolName, "toolName");
+            this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
+            this.durationMs = durationMs;
+            this.connectionId = connectionId == null ? "" : connectionId;
+            this.databaseName = databaseName == null ? "" : databaseName;
+            this.schemaName = schemaName == null ? "" : schemaName;
+            this.queryText = queryText == null ? "" : queryText;
+            this.arguments = Objects.requireNonNull(arguments, "arguments").deepCopy();
+            this.resultData = Objects.requireNonNull(resultData, "resultData").deepCopy();
+            this.columns = List.copyOf(columns);
+            this.rows = copyRows(rows);
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public String toolName() {
+            return toolName;
+        }
+
+        public Instant timestamp() {
+            return timestamp;
+        }
+
+        public long durationMs() {
+            return durationMs;
+        }
+
+        public String connectionId() {
+            return connectionId;
+        }
+
+        public String databaseName() {
+            return databaseName;
+        }
+
+        public String schemaName() {
+            return schemaName;
+        }
+
+        public String queryText() {
+            return queryText;
+        }
+
+        public JsonNode arguments() {
+            return arguments.deepCopy();
+        }
+
+        public JsonNode resultData() {
+            return resultData.deepCopy();
+        }
+
+        public List<String> columns() {
+            return columns;
+        }
+
+        public List<JsonNode> rows() {
+            return copyRows(rows);
+        }
+
+        private static List<JsonNode> copyRows(List<JsonNode> source) {
+            List<JsonNode> copies = new ArrayList<>();
+            for (JsonNode row : Objects.requireNonNull(source, "rows")) {
+                copies.add(Objects.requireNonNull(row, "row").deepCopy());
             }
-            rows = List.copyOf(copiedRows);
+            return List.copyOf(copies);
         }
     }
 
-    public record Result(
-            List<AuditedCallFact> calls,
-            int queryScenarioCount,
-            StatementContext statementContext,
-            MyBatisDatabasePreflight.Result database
-    ) {
-        public Result {
-            calls = List.copyOf(calls);
-            Objects.requireNonNull(statementContext, "statementContext");
-            Objects.requireNonNull(database, "database");
+    public static final class Result {
+        private final List<AuditedCallFact> calls;
+        private final StatementContext statementContext;
+        private final MyBatisDatabasePreflight.Result database;
+
+        private Result(
+                List<AuditedCallFact> calls,
+                StatementContext statementContext,
+                MyBatisDatabasePreflight.Result database
+        ) {
+            this.calls = List.copyOf(calls);
+            this.statementContext = Objects.requireNonNull(statementContext, "statementContext");
+            this.database = Objects.requireNonNull(database, "database");
+        }
+
+        public List<AuditedCallFact> calls() {
+            return calls;
+        }
+
+        public int queryScenarioCount() {
+            return Math.toIntExact(calls.stream()
+                    .filter(call -> "execute_sql_query".equals(call.toolName()))
+                    .count());
+        }
+
+        public StatementContext statementContext() {
+            return statementContext;
+        }
+
+        public MyBatisDatabasePreflight.Result database() {
+            return database;
         }
 
         public List<String> auditedCallIds() {

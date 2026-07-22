@@ -40,6 +40,11 @@ public final class MyBatisSqlOutputValidator {
     private static final Pattern UNRESOLVED_PLACEHOLDER = Pattern.compile(
             "(?is)\\{\\{[^}]+}}|<<[^>]+>>|\\b(?:TODO|TBD|FIXME|PLACEHOLDER)\\b"
     );
+    private static final Pattern DATABASE_EVIDENCE_SECTION = Pattern.compile(
+            "(?ms)^## Database Evidence[ \\t]*\\R(.*?)(?=^##[ \\t]+|\\z)"
+    );
+    private static final String DATABASE_EVIDENCE_LINK =
+            "[database-evidence.json](database-evidence.json)";
     private static final String SUMMARY_SCHEMA_RESOURCE =
             "/mybatis-sql-review-prompt-pack/schemas/sql-summary.schema.json";
 
@@ -84,6 +89,7 @@ public final class MyBatisSqlOutputValidator {
         requireNoPlaceholders("summary.json", summaryText);
         requireNoPlaceholders("database-evidence.json", evidenceText);
         requireReportSections(report);
+        requireDeterministicDatabaseEvidenceSection(report);
 
         JsonNode summary = parseObject(summaryText, "summary.json");
         JsonNode evidence = parseObject(evidenceText, "database-evidence.json");
@@ -158,6 +164,19 @@ public final class MyBatisSqlOutputValidator {
             if (!heading.matcher(report).find()) {
                 throw new IllegalStateException("report.md is missing required section: " + section);
             }
+        }
+    }
+
+    private void requireDeterministicDatabaseEvidenceSection(String report) {
+        var matcher = DATABASE_EVIDENCE_SECTION.matcher(report);
+        if (!matcher.find() || !DATABASE_EVIDENCE_LINK.equals(matcher.group(1).strip())) {
+            throw new IllegalStateException(
+                    "report.md Database Evidence section must contain only the exact relative link "
+                            + DATABASE_EVIDENCE_LINK
+            );
+        }
+        if (matcher.find()) {
+            throw new IllegalStateException("report.md must contain exactly one Database Evidence section");
         }
     }
 

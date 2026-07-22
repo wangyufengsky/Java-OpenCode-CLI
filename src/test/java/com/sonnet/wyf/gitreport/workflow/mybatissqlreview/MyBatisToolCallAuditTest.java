@@ -12,8 +12,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -34,7 +36,7 @@ class MyBatisToolCallAuditTest {
                 "old-call", "list_database_connections", objectMapper.createObjectNode(),
                 objectMapper.createObjectNode().put("count", 1), STARTED_AT.minusSeconds(5), 5L);
         AgentBridgeClient.ToolCallRecord newCall = sqlCall(
-                "new-call", "SELECT COALESCE(id, 0) FROM orders LIMIT 2", 2);
+                "new-call", "SELECT id FROM orders LIMIT 2", 2);
 
         MyBatisToolCallAudit.Result result = audit.audit(
                 List.of(oldCall, newCall),
@@ -48,10 +50,54 @@ class MyBatisToolCallAuditTest {
         assertThat(result.calls()).singleElement().satisfies(fact -> {
             assertThat(fact.toolName()).isEqualTo("execute_sql_query");
             assertThat(fact.connectionId()).isEqualTo("gauss-readonly");
-            assertThat(fact.queryText()).isEqualTo("SELECT COALESCE(id, 0) FROM orders LIMIT 2");
+            assertThat(fact.queryText()).isEqualTo("SELECT id FROM orders LIMIT 2");
             assertThat(fact.columns()).containsExactly("id");
             assertThat(fact.rows()).hasSize(2);
         });
+    }
+
+    @Test
+    void hidesFactAndResultConstructionAndDerivesScenarioCountFromCalls() {
+        assertThat(MyBatisToolCallAudit.AuditedCallFact.class.getDeclaredConstructors())
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
+        assertThat(MyBatisToolCallAudit.Result.class.getDeclaredConstructors())
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()))
+                .allMatch(constructor -> Arrays.stream(constructor.getParameterTypes())
+                        .noneMatch(type -> type == int.class || type == Integer.class));
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(
+                        call("metadata", "list_schema_objects", databaseArguments(),
+                                objectMapper.createObjectNode()),
+                        sqlCall("query", "SELECT id FROM orders LIMIT 1", 1)
+                ),
+                boundary(), database, selectStatement()
+        );
+
+        assertThat(result.queryScenarioCount()).isEqualTo(1);
+    }
+
+    @Test
+    void returnsDefensiveCopiesOfEveryMutableAuditNodeAndRow() {
+        ObjectNode arguments = databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1");
+        ObjectNode toolResult = rows(1);
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("immutable", "execute_sql_query", arguments, toolResult)),
+                boundary(), database, selectStatement()
+        );
+        MyBatisToolCallAudit.AuditedCallFact fact = result.calls().getFirst();
+
+        arguments.put("schemaName", "mutated-original");
+        ((ObjectNode) toolResult.at("/rows/0")).put("id", 700);
+        ((ObjectNode) fact.arguments()).put("schemaName", "mutated-accessor");
+        ((ObjectNode) fact.resultData()).put("invented", true);
+        ((ObjectNode) fact.rows().getFirst()).put("id", 900);
+
+        assertThat(fact.arguments().path("schemaName").asText()).isEqualTo("audit");
+        assertThat(fact.resultData().has("invented")).isFalse();
+        assertThat(fact.resultData().at("/rows/0/id").asInt()).isEqualTo(1);
+        assertThat(fact.rows().getFirst().path("id").asInt()).isEqualTo(1);
+        assertThatThrownBy(() -> result.calls().add(fact)).isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
@@ -82,9 +128,9 @@ class MyBatisToolCallAuditTest {
         List<AgentBridgeClient.ToolCallRecord> calls = List.of(
                 call("call-1", "list_schema_objects", databaseArguments(), objectMapper.createObjectNode()),
                 call("call-2", "preview_table_data", databaseArguments(), rows(2)),
-                sqlCall("call-3", "WITH recent AS (SELECT id FROM orders) SELECT id FROM recent LIMIT 20", 20),
-                sqlCall("call-4", "SELECT id FROM orders WHERE status = 'OPEN' LIMIT 10", 10),
-                sqlCall("call-5", "SELECT COUNT(*) FROM orders LIMIT 1", 1)
+                sqlCall("call-3", "SELECT id FROM orders LIMIT 20", 20),
+                sqlCall("call-4", "SELECT id, status FROM orders LIMIT 10", 10),
+                sqlCall("call-5", "SELECT * FROM audit.orders AS orders LIMIT 1", 1)
         );
 
         MyBatisToolCallAudit.Result result = audit.audit(calls, boundary(), database, selectStatement());
@@ -98,7 +144,7 @@ class MyBatisToolCallAuditTest {
     void rejectsUnsafeOrAmbiguousPostgresqlGaussSql(String label, String sql) {
         assertThatThrownBy(() -> audit.audit(
                 List.of(sqlCall("call-unsafe", sql, 1)), boundary(), database, selectStatement()))
-                .hasMessageContaining(label);
+                .hasMessageContaining("rejected");
     }
 
     private static Stream<Arguments> forbiddenSql() {
@@ -134,11 +180,32 @@ class MyBatisToolCallAuditTest {
         );
     }
 
+    @ParameterizedTest(name = "rejects catalog-resolved expression: {0}")
+    @MethodSource("catalogResolvedExpressions")
+    void rejectsCastsOperatorsFunctionsAndWhereInsteadOfPreservingConvenience(String label, String sql) {
+        assertThatThrownBy(() -> audit.audit(
+                List.of(sqlCall("catalog-expression", sql, 1)), boundary(), database, selectStatement()))
+                .hasMessageContaining("simple-read grammar").hasMessageContaining(label);
+    }
+
+    private static Stream<Arguments> catalogResolvedExpressions() {
+        return Stream.of(
+                Arguments.of("CAST", "SELECT CAST('x' AS public.evil_type) FROM orders LIMIT 1"),
+                Arguments.of("cast", "SELECT payload::public.evil_type FROM orders LIMIT 1"),
+                Arguments.of("operator", "SELECT 1 !! 2 FROM orders LIMIT 1"),
+                Arguments.of("operator", "SELECT left_value + right_value FROM custom_values LIMIT 1"),
+                Arguments.of("operator", "SELECT left_value = right_value FROM custom_values LIMIT 1"),
+                Arguments.of("operator", "SELECT left_value || right_value FROM custom_values LIMIT 1"),
+                Arguments.of("function", "SELECT COUNT(*) FROM orders LIMIT 1"),
+                Arguments.of("WHERE", "SELECT id FROM orders WHERE id = 1 LIMIT 1")
+        );
+    }
+
     @Test
-    void allowsOnlyExplicitReadOnlyFunctionsAndIgnoresQuotedTextAndComments() {
-        AgentBridgeClient.ToolCallRecord safe = sqlCall("call-functions", """
-                SELECT COUNT(*), COALESCE(MAX(id), 0), LOWER('UPDATE; CALL unsafe()')
-                FROM orders
+    void allowsOnlyPlainColumnsFromAndLiteralLimitWhileIgnoringComments() {
+        AgentBridgeClient.ToolCallRecord safe = sqlCall("call-simple-read", """
+                SELECT orders.id, orders.status
+                FROM audit.orders AS orders
                 /* DELETE FROM orders; SELECT nextval('unsafe') */
                 -- CALL unsafe();
                 LIMIT 1
@@ -161,11 +228,11 @@ class MyBatisToolCallAuditTest {
                         WITH recent AS (SELECT id FROM orders LIMIT 20)
                         SELECT id FROM recent
                         """, 1)), boundary(), database, selectStatement()))
-                .hasMessageContaining("top-level LIMIT");
+                .hasMessageContaining("simple-read grammar");
 
         List<AgentBridgeClient.ToolCallRecord> fourScenarios = new ArrayList<>();
         for (int index = 1; index <= 4; index++) {
-            fourScenarios.add(sqlCall("call-" + index, "SELECT " + index + " LIMIT 1", 1));
+            fourScenarios.add(sqlCall("call-" + index, "SELECT id FROM orders LIMIT 1", 1));
         }
         assertThatThrownBy(() -> audit.audit(fourScenarios, boundary(), database, selectStatement()))
                 .hasMessageContaining("at most 3");

@@ -12,7 +12,7 @@ Describe correctness, maintainability, performance, concurrency, and data-volume
 
 ## Database Evidence
 
-Describe each metadata observation and representative read-only scenario with its evidence id, audited AgentBridge tool-call id, tool name, timestamp, duration, arguments, and exact retained result. State when no database query was needed.
+[database-evidence.json](database-evidence.json)
 
 ## Findings
 

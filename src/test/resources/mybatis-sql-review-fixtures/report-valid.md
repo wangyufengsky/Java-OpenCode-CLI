@@ -14,7 +14,7 @@ The status predicate can become expensive when its selectivity is low.
 
 ## Database Evidence
 
-Evidence `E-1` confirms the target column and scenario `S-1` retained two representative rows.
+[database-evidence.json](database-evidence.json)
 
 ## Findings
 

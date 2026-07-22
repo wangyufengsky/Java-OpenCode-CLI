@@ -76,8 +76,10 @@ class MyBatisSqlPromptBuilderTest {
                 .contains("30 seconds")
                 .contains("native filesystem writes")
                 .contains("exact absolute paths")
-                .contains("unknown, quoted, or schema-qualified function")
-                .contains("COUNT", "COALESCE", "LOWER");
+                .contains("simple-read grammar")
+                .contains("WHERE, functions, casts, and operators are forbidden")
+                .contains("Database Evidence section must contain exactly")
+                .contains("[database-evidence.json](database-evidence.json)");
     }
 
     private MyBatisSqlPromptBuilder.Context context() {

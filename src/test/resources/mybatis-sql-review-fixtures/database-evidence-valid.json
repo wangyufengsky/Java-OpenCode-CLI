@@ -39,7 +39,7 @@
       "evidence_id": "E-2",
       "scenario_id": "S-1",
       "purpose": "Representative open-order lookup",
-      "query_text": "SELECT id, status FROM orders WHERE status = 'OPEN' LIMIT 20",
+      "query_text": "SELECT id, status FROM orders LIMIT 20",
       "tool_call_id": "call-2",
       "timestamp": "2026-07-22T09:05:01Z",
       "duration_ms": 42,
@@ -47,7 +47,7 @@
         "connectionId": "gauss-readonly",
         "databaseName": "orders",
         "schemaName": "audit",
-        "queryText": "SELECT id, status FROM orders WHERE status = 'OPEN' LIMIT 20"
+        "queryText": "SELECT id, status FROM orders LIMIT 20"
       },
       "row_count": 2,
       "columns": ["id", "status"],

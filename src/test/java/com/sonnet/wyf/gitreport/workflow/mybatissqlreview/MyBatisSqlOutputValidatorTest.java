@@ -100,6 +100,22 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void mutationAttemptsOnAuditAccessorsCannotChangeValidatorInputs() throws Exception {
+        MyBatisToolCallAudit.Result facts = auditedFacts();
+        MyBatisToolCallAudit.AuditedCallFact metadata = facts.calls().get(0);
+        MyBatisToolCallAudit.AuditedCallFact scenario = facts.calls().get(1);
+
+        ((ObjectNode) metadata.arguments()).put("schemaName", "mutated");
+        ((ObjectNode) metadata.resultData()).put("name", "mutated");
+        ((ObjectNode) scenario.rows().getFirst()).put("status", "MUTATED");
+        ((ObjectNode) scenario.resultData().at("/rows/0")).put("status", "MUTATED");
+
+        MyBatisSqlOutputValidator.Result validated = validator.validate(
+                validCandidates(), expectedTask(), database, facts);
+        assertThat(validated.auditedCallIds()).containsExactly("call-1", "call-2");
+    }
+
+    @Test
     void rejectsMismatchedQueryRowsColumnsArgumentsResultAndToolIdentity() throws Exception {
         Path candidates = validCandidates();
         ObjectNode evidence = evidence(candidates);
@@ -212,6 +228,45 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void requiresDatabaseEvidenceSectionToBeOnlyTheExactRelativeJsonLink() throws Exception {
+        Path extraClaim = validCandidates();
+        String report = Files.readString(extraClaim.resolve("report.md"));
+        Files.writeString(
+                extraClaim.resolve("report.md"),
+                report.replace(
+                        "[database-evidence.json](database-evidence.json)",
+                        "[database-evidence.json](database-evidence.json)\n\nThe sample confirms the index is safe."),
+                StandardCharsets.UTF_8
+        );
+        assertThatThrownBy(() -> validateCandidates(extraClaim))
+                .hasMessageContaining("Database Evidence section")
+                .hasMessageContaining("exact relative link");
+
+        Path absoluteLink = validCandidates();
+        report = Files.readString(absoluteLink.resolve("report.md"));
+        Files.writeString(
+                absoluteLink.resolve("report.md"),
+                report.replace(
+                        "[database-evidence.json](database-evidence.json)",
+                        "[database-evidence.json](/tmp/database-evidence.json)"),
+                StandardCharsets.UTF_8
+        );
+        assertThatThrownBy(() -> validateCandidates(absoluteLink))
+                .hasMessageContaining("Database Evidence section")
+                .hasMessageContaining("exact relative link");
+
+        Path duplicateSection = validCandidates();
+        Files.writeString(
+                duplicateSection.resolve("report.md"),
+                Files.readString(duplicateSection.resolve("report.md"))
+                        + "\n## Database Evidence\n\nA second section invents a claim.\n",
+                StandardCharsets.UTF_8
+        );
+        assertThatThrownBy(() -> validateCandidates(duplicateSection))
+                .hasMessageContaining("exactly one Database Evidence section");
+    }
+
+    @Test
     void rejectsMoreThanThreeScenariosMoreThanTwentyRowsAndOversizedEvidence() throws Exception {
         Path candidates = validCandidates();
         ObjectNode evidence = evidence(candidates);
@@ -316,7 +371,7 @@ class MyBatisSqlOutputValidatorTest {
                 toolCall(
                         "call-2", "execute_sql_query",
                         databaseArguments(auditedDatabase).put(
-                                "queryText", "SELECT id, status FROM orders WHERE status = 'OPEN' LIMIT 20"),
+                                "queryText", "SELECT id, status FROM orders LIMIT 20"),
                         queryResult, Instant.parse("2026-07-22T09:05:01Z"), 42L)
         );
         return new MyBatisToolCallAudit(objectMapper).audit(
