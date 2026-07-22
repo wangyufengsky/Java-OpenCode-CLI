@@ -1,0 +1,4 @@
+{
+  "databaseName": "orders",
+  "schemas": ["audit", "public"]
+}

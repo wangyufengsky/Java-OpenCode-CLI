@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/mybatis-sql-review/sql-summary.schema.json",
+  "title": "MyBatis SQL review summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "statement_key",
+    "status",
+    "command_type",
+    "risk_level",
+    "scenario_count",
+    "evidence_file",
+    "report_file",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["mybatis-sql-review-summary/v1"]
+    },
+    "statement_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["reviewed", "no-findings"]
+    },
+    "command_type": {
+      "type": "string",
+      "enum": ["select", "insert", "update", "delete", "selectKey"]
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["none", "low", "medium", "high", "critical"]
+    },
+    "scenario_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "evidence_file": {
+      "type": "string",
+      "enum": ["database-evidence.json"]
+    },
+    "report_file": {
+      "type": "string",
+      "enum": ["report.md"]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "severity",
+          "category",
+          "title",
+          "description",
+          "evidence_ids",
+          "recommendation"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "severity": {
+            "type": "string",
+            "enum": ["info", "low", "medium", "high", "critical"]
+          },
+          "category": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "recommendation": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "connections": [
+    {
+      "id": "gauss-readonly",
+      "name": "Gauss Review",
+      "databaseSystem": "GaussDB",
+      "deployment": "centralized",
+      "databases": ["orders"]
+    }
+  ]
+}

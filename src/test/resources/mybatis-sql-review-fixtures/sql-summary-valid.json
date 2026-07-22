@@ -1,0 +1,21 @@
+{
+  "schema_version": "mybatis-sql-review-summary/v1",
+  "statement_key": "mapper-order-find-open",
+  "status": "reviewed",
+  "command_type": "select",
+  "risk_level": "medium",
+  "scenario_count": 1,
+  "evidence_file": "database-evidence.json",
+  "report_file": "report.md",
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "medium",
+      "category": "performance",
+      "title": "Filter column requires index verification",
+      "description": "The representative query filters on status.",
+      "evidence_ids": ["E-1"],
+      "recommendation": "Confirm a selective index exists for the production data distribution."
+    }
+  ]
+}

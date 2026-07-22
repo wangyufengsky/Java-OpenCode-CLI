@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Authenticator;
 import java.net.CookieHandler;
 import java.net.InetSocketAddress;
@@ -18,6 +19,7 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -180,10 +182,85 @@ class AgentBridgeClientTest {
         assertThat(httpClient.lastRequest.timeout()).contains(Duration.ofSeconds(2430));
     }
 
+    @Test
+    void listsTypedMcpToolsAfterSessionNegotiation() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            requests.add(request);
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "tool-list-session", """
+                        {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{}}}
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "tool-list-session", "");
+                case "tools/list" -> respondWithSession(exchange, 200, "tool-list-session", """
+                        {
+                          "jsonrpc":"2.0",
+                          "id":2,
+                          "result":{"tools":[{
+                            "name":"execute_sql_query",
+                            "description":"Execute a database query",
+                            "inputSchema":{"type":"object","required":["connectionId","queryText"]}
+                          }]}
+                        }
+                        """);
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        List<AgentBridgeClient.ToolDefinition> tools = client.listTools(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp")
+        );
+
+        assertThat(requests).extracting(request -> request.path("method").asText())
+                .containsExactly("initialize", "notifications/initialized", "tools/list");
+        assertThat(tools).singleElement().satisfies(tool -> {
+            assertThat(tool.name()).isEqualTo("execute_sql_query");
+            assertThat(tool.description()).contains("database query");
+            assertThat(tool.inputSchema().path("required")).hasSize(2);
+        });
+    }
+
+    @Test
+    void readsTypedWebToolCallHistory() throws Exception {
+        HttpServer server = server();
+        server.createContext("/tool-calls", exchange -> respond(
+                exchange,
+                200,
+                resource("/mybatis-sql-review-fixtures/tool-calls.json")
+        ));
+        server.start();
+
+        List<AgentBridgeClient.ToolCallRecord> calls = client.getToolCalls(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
+        );
+
+        assertThat(calls).singleElement().satisfies(call -> {
+            assertThat(call.id()).isEqualTo("call-17");
+            assertThat(call.toolName()).isEqualTo("execute_sql_query");
+            assertThat(call.timestamp()).isEqualTo(Instant.parse("2026-07-22T09:15:30Z"));
+            assertThat(call.arguments().path("connectionId").asText()).isEqualTo("gauss-readonly");
+            assertThat(call.result().path("rows")).hasSize(1);
+            assertThat(call.durationMs()).isEqualTo(42L);
+            assertThat(call.hooks().path("post").asBoolean()).isTrue();
+        });
+    }
+
     private HttpServer server() throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         servers.add(server);
         return server;
+    }
+
+    private String resource(String path) throws IOException {
+        try (InputStream input = getClass().getResourceAsStream(path)) {
+            if (input == null) {
+                throw new IllegalStateException("missing test resource " + path);
+            }
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private String body(HttpExchange exchange) throws IOException {

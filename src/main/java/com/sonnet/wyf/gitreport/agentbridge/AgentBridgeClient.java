@@ -12,7 +12,10 @@ import java.net.http.HttpResponse;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
@@ -97,6 +100,62 @@ public class AgentBridgeClient {
         JsonNode result = root.path("result");
         String text = contentText(result);
         return new ToolResponse(result, text, structured(text, result));
+    }
+
+    public List<ToolDefinition> listTools(URI mcpUrl) throws IOException, InterruptedException {
+        McpSession session = mcpSession(mcpUrl);
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("jsonrpc", "2.0");
+        body.put("id", requestIds.incrementAndGet());
+        body.put("method", "tools/list");
+        body.set("params", objectMapper.createObjectNode());
+
+        HttpResponse<String> response = sendJson(mcpUrl, body, Duration.ofSeconds(30), session);
+        requireSuccess(response, "AgentBridge MCP tools/list failed");
+        JsonNode root = objectMapper.readTree(response.body());
+        if (root.hasNonNull("error")) {
+            throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
+        }
+        List<ToolDefinition> tools = new ArrayList<>();
+        for (JsonNode tool : root.path("result").path("tools")) {
+            tools.add(new ToolDefinition(
+                    tool.path("name").asText(),
+                    tool.path("description").asText(""),
+                    tool.path("inputSchema")
+            ));
+        }
+        return List.copyOf(tools);
+    }
+
+    public List<ToolCallRecord> getToolCalls(URI webBaseUrl) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/tool-calls"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        requireSuccess(response, "AgentBridge GET /tool-calls failed");
+        JsonNode root = objectMapper.readTree(response.body());
+        JsonNode items = root.isArray() ? root : root.path("toolCalls");
+        if (!items.isArray()) {
+            throw new IllegalStateException("AgentBridge GET /tool-calls returned no tool-call array");
+        }
+        List<ToolCallRecord> calls = new ArrayList<>();
+        for (JsonNode item : items) {
+            calls.add(new ToolCallRecord(
+                    item.path("id").asText(),
+                    item.path("title").asText(""),
+                    item.path("toolName").asText(),
+                    item.path("kind").asText(""),
+                    item.path("status").asText(""),
+                    Instant.parse(item.path("timestamp").asText()),
+                    item.path("arguments"),
+                    item.path("result"),
+                    item.hasNonNull("durationMs") ? item.path("durationMs").longValue() : null,
+                    item.path("hooks")
+            ));
+        }
+        return List.copyOf(calls);
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body) throws IOException, InterruptedException {
@@ -215,6 +274,22 @@ public class AgentBridgeClient {
     }
 
     public record ToolResponse(JsonNode rawResult, String text, JsonNode structured) {
+    }
+
+    public record ToolDefinition(String name, String description, JsonNode inputSchema) {
+    }
+
+    public record ToolCallRecord(
+            String id,
+            String title,
+            String toolName,
+            String kind,
+            String status,
+            Instant timestamp,
+            JsonNode arguments,
+            JsonNode result,
+            Long durationMs,
+            JsonNode hooks) {
     }
 
     private record McpSession(String id, String protocolVersion) {
