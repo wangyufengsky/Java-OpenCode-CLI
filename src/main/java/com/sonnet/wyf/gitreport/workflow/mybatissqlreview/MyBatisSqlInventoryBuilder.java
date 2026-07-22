@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,6 +39,8 @@ public final class MyBatisSqlInventoryBuilder {
                     + "\\s+(['\"])https?://mybatis\\.org/dtd/mybatis-3-mapper\\.dtd\\2\\s*>");
     private static final Pattern PLACEHOLDER = Pattern.compile("(?:#|\\$)\\{[^}]+}");
     private static final Pattern PROPERTY_PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)}");
+    private static final Pattern MAPPER_ELEMENT_HINT = Pattern.compile(
+            "(?is)<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?mapper(?:\\s|>)");
     private static final Comparator<ParsedMapper> MAPPER_ORDER = Comparator
             .comparing(ParsedMapper::relativePath)
             .thenComparing(ParsedMapper::namespace);
@@ -57,9 +60,13 @@ public final class MyBatisSqlInventoryBuilder {
         }
 
         List<ParsedMapper> parsedMappers = mapperPaths.stream()
-                .map(path -> parseMapper(root, path))
+                .map(path -> parseMapperCandidate(root, path))
+                .flatMap(Optional::stream)
                 .sorted(MAPPER_ORDER)
                 .toList();
+        if (parsedMappers.isEmpty()) {
+            throw new IllegalArgumentException("no MyBatis mapper XML files matched under " + root);
+        }
         Map<String, Fragment> fragments = collectFragments(parsedMappers);
         validateFragments(fragments);
 
@@ -150,7 +157,7 @@ public final class MyBatisSqlInventoryBuilder {
         return false;
     }
 
-    private ParsedMapper parseMapper(Path root, Path path) {
+    private Optional<ParsedMapper> parseMapperCandidate(Path root, Path path) {
         String relativePath = logicalPath(root.relativize(path));
         if (!Files.isReadable(path)) {
             throw new IllegalArgumentException("unable to read MyBatis mapper XML: " + relativePath);
@@ -169,15 +176,17 @@ public final class MyBatisSqlInventoryBuilder {
         try {
             rootNode = parseXml(source);
         } catch (XMLStreamException | RuntimeException ex) {
+            if (!MAPPER_ELEMENT_HINT.matcher(source).find()) {
+                return Optional.empty();
+            }
             throw new IllegalArgumentException("failed to parse MyBatis mapper XML '" + relativePath + "': "
                     + conciseMessage(ex), ex);
         }
         if (rootNode == null || !"mapper".equals(rootNode.name())) {
-            throw new IllegalArgumentException(
-                    "failed to parse MyBatis mapper XML '" + relativePath + "': root element must be <mapper>");
+            return Optional.empty();
         }
         String namespace = requiredAttribute(rootNode, "namespace", relativePath, "mapper");
-        return new ParsedMapper(relativePath, namespace, sha256(bytes), source, rootNode);
+        return Optional.of(new ParsedMapper(relativePath, namespace, sha256(bytes), source, rootNode));
     }
 
     private void validateDoctype(String source, String relativePath) {

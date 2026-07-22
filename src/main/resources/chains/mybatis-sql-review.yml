@@ -12,7 +12,7 @@ paths:
 
 source:
   include:
-    - "**/*Mapper.xml"
+    - "**/*.xml"
   exclude:
     - "target/**"
     - "build/**"

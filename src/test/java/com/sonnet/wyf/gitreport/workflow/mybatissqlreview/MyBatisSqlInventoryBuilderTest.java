@@ -27,6 +27,76 @@ class MyBatisSqlInventoryBuilderTest {
     private final MyBatisSqlInventoryBuilder builder = new MyBatisSqlInventoryBuilder();
 
     @Test
+    void defaultDiscoveryInventoriesMapperRootsRegardlessOfFilenameAndSkipsKnownNonMapperXml() throws Exception {
+        write("pom.xml", """
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                </project>
+                """);
+        write("src/main/resources/applicationContext.xml", """
+                <beans xmlns="http://www.springframework.org/schema/beans">
+                  <bean id="example" class="java.lang.Object"/>
+                </beans>
+                """);
+        write("src/main/resources/PretendMapper.xml", """
+                <beans xmlns="http://www.springframework.org/schema/beans">
+                  <bean id="notAMapper" class="java.lang.Object"/>
+                </beans>
+                """);
+        write("src/main/resources/sql/queries.xml", """
+                <mapper namespace="demo.Queries">
+                  <select id="query">SELECT 1</select>
+                </mapper>
+                """);
+        write("src/main/resources/sql/UserStatements.xml", """
+                <mapper namespace="demo.UserStatements">
+                  <select id="find">SELECT 2</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(repository, List.of(), List.of());
+
+        assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly(
+                        "src/main/resources/sql/UserStatements.xml",
+                        "src/main/resources/sql/queries.xml");
+        assertThat(inventory.statements()).extracting(MyBatisSqlStatement::id)
+                .containsExactly("find", "query");
+    }
+
+    @Test
+    void malformedMapperRootRemainsFatalEvenWithoutMapperFilename() throws Exception {
+        write("src/main/resources/sql/queries.xml", """
+                <mapper namespace="demo.Queries">
+                  <select id="broken">SELECT 1
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("failed to parse MyBatis mapper XML")
+                .hasMessageContaining("src/main/resources/sql/queries.xml");
+    }
+
+    @Test
+    void rejectsExternalEntitiesEvenWhenXmlPretendsToBeANonMapperDocument() throws Exception {
+        write("pom.xml", """
+                <!DOCTYPE project [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+                <project><name>&xxe;</name></project>
+                """);
+        write("queries.xml", """
+                <mapper namespace="demo.Queries">
+                  <select id="query">SELECT 1</select>
+                </mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("external entities are forbidden")
+                .hasMessageContaining("pom.xml");
+    }
+
+    @Test
     void doubleStarSlashMatchesRootAndNestedMapperXml() throws Exception {
         write("RootMapper.xml", """
                 <mapper namespace="demo.RootMapper">

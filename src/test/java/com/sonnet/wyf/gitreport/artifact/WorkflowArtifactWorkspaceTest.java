@@ -98,6 +98,73 @@ class WorkflowArtifactWorkspaceTest {
     }
 
     @Test
+    void crashAfterGenerationPrepareLeavesOnlyTheOldGenerationVisible() throws Exception {
+        publishInitialArtifactSet();
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-crash-after-prepare",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterGenerationPrepared(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("simulated crash after generation prepare");
+                    }
+                }
+        );
+        writeReplacementBundle(workspace);
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("simulated crash after generation prepare");
+
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("old report");
+        assertThat(tempDir.resolve("replace.txt")).hasContent("old replacement");
+        assertThat(tempDir.resolve("old-only.txt")).hasContent("old only");
+        assertThat(tempDir.resolve("new-only.txt")).doesNotExist();
+    }
+
+    @Test
+    void crashAfterPointerSwitchLeavesOnlyTheNewGenerationVisible() throws Exception {
+        publishInitialArtifactSet();
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-crash-after-switch",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterPointerSwitch(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("simulated crash after pointer switch");
+                    }
+                }
+        );
+        writeReplacementBundle(workspace);
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("simulated crash after pointer switch");
+
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("new report");
+        assertThat(tempDir.resolve("replace.txt")).hasContent("new replacement");
+        assertThat(tempDir.resolve("new-only.txt")).hasContent("new only");
+        assertThat(tempDir.resolve("old-only.txt")).doesNotExist();
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST))
+                .content().contains("\"executionId\" : \"run-crash-after-switch\"");
+    }
+
+    @Test
+    void nextStartupRemovesAnOrphanGenerationWithoutTouchingTheCurrentGeneration() throws Exception {
+        publishInitialArtifactSet();
+        Path orphan = tempDir.resolve(".published/generations/orphan-from-crashed-prepare");
+        Files.createDirectories(orphan);
+        Files.writeString(orphan.resolve("partial.txt"), "partial");
+
+        workspace("run-after-orphan", false);
+
+        assertThat(orphan).doesNotExist();
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("old report");
+        assertThat(tempDir.resolve("replace.txt")).hasContent("old replacement");
+        assertThat(tempDir.resolve("old-only.txt")).hasContent("old only");
+    }
+
+    @Test
     void rollsBackEveryPublishedByteWhenApplyFailsAfterADeletion() throws Exception {
         Map<String, byte[]> previous = publishInitialArtifactSet();
         WorkflowArtifactWorkspace workspace = workspace(
