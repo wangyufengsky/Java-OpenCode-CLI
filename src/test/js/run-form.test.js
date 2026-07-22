@@ -155,19 +155,20 @@ function add(document, parent, tagName, id, value = '') {
 }
 
 function createHarness(fetchImplementation, options = {}) {
+  const selectedChain = options.selectedChain || 'alpha';
   const document = new FakeDocument();
   const form = add(document, document, 'form', 'run-form');
-  form.dataset.selectedChain = 'alpha';
-  form.dataset.selectedMode = 'full';
+  form.dataset.selectedChain = selectedChain;
+  form.dataset.selectedMode = options.selectedMode || 'full';
   form.dataset.selectedRunDate = '';
-  form.dataset.selectedRerunType = '';
-  form.dataset.selectedRerunId = '';
+  form.dataset.selectedRerunType = options.selectedRerunType || '';
+  form.dataset.selectedRerunId = options.selectedRerunId || '';
   form.dataset.copyFrom = '';
 
   const nodes = {
     form,
-    chain: add(document, form, 'select', 'chainId', 'alpha'),
-    mode: add(document, form, 'select', 'mode', 'full'),
+    chain: add(document, form, 'select', 'chainId', selectedChain),
+    mode: add(document, form, 'select', 'mode', options.selectedMode || 'full'),
     rerunType: add(document, form, 'select', 'rerunType'),
     rerunId: add(document, form, 'input', 'rerunId'),
     runDate: add(document, form, 'input', 'runDate'),
@@ -226,6 +227,12 @@ function createHarness(fetchImplementation, options = {}) {
     setTimeout,
     clearTimeout
   });
+  if (options.loadConsoleCommon) {
+    const commonScript = fs.readFileSync(
+      path.join(__dirname, '../../main/resources/static/js/console-common.js'), 'utf8'
+    );
+    vm.runInContext(commonScript, context, { filename: 'console-common.js' });
+  }
   const script = fs.readFileSync(path.join(__dirname, '../../main/resources/static/js/run-form.js'), 'utf8');
   vm.runInContext(script, context, { filename: 'run-form.js' });
   return { nodes, location };
@@ -325,6 +332,83 @@ test('run summary renders the six Figma summary fields independently', async () 
   assert.equal(harness.nodes.summaryAgentBridge.textContent, '最多 3 轮 · 30 分钟超时');
   assert.equal(harness.nodes.summaryOutput.textContent, 'src/test/java');
   assert.equal(harness.nodes.summaryReady.textContent, '已就绪');
+});
+
+test('MyBatis metadata renders every field, all summaries, and the three rerun modes', async () => {
+  const timers = createFakeTimers();
+  const defaults = {
+    'project.id': 'demo',
+    'project.name': 'Demo',
+    'project.repo': '/workspace/demo',
+    'paths.out': '/reports/mybatis',
+    'source.include': ['**/*Mapper.xml'],
+    'database.connection-name': 'Gauss Review',
+    'database.database-name': 'orders',
+    'database.schema-name': 'audit',
+    'database.environment': 'test',
+    'database.non-owner-non-admin-read-only-account': true,
+    'database.row-level-security-disabled-for-safe-base-tables': true,
+    'database.user-defined-and-security-definer-function-execution-revoked-including-public': true,
+    'database.statement-timeout-seconds': 30,
+    'database.statement-timeout-scope': 'role',
+    'database.max-rows': 20,
+    'database.max-scenarios-per-sql': 3,
+    'database.max-evidence-bytes': 262144,
+    'database.retain-raw-rows': true,
+    'database.allow-agent-select': true,
+    'agentbridge.web-base-url': 'http://agentbridge.test',
+    'agentbridge.mcp-url': 'http://agentbridge.test/mcp',
+    'agentbridge.concurrency': 1,
+    'agentbridge.max-concurrency': 1,
+    'agentbridge.timeout-minutes': 2,
+    'agentbridge.poll-millis': 1000,
+    'agentbridge.validation-settle-seconds': 0,
+    'agentbridge.validation-max-corrections': 0,
+    'agentbridge.task-message': 'Review SQL'
+  };
+  const harness = createHarness(
+    (url) => {
+      if (url.includes('/api/chains/mybatis-sql-review/defaults')) {
+        return Promise.resolve(response({ defaults }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      loadConsoleCommon: true,
+      selectedChain: 'mybatis-sql-review',
+      selectedMode: 'rerun',
+      selectedRerunType: 'sql',
+      selectedRerunId: 'statement-key',
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
+    }
+  );
+  await initialize(harness);
+
+  assert.equal(harness.nodes.form.querySelectorAll('[data-config-key]').length, 29);
+  assert.ok(harness.nodes.form.querySelector('#config-database-connection-name'));
+  assert.ok(harness.nodes.form.querySelector('#config-agentbridge-validation-max-corrections'));
+  assert.equal(harness.nodes.summaryChain.textContent, 'MyBatis SQL 审查');
+  assert.equal(harness.nodes.summaryProject.textContent, '/workspace/demo');
+  assert.equal(harness.nodes.summaryScope.textContent, '**/*Mapper.xml');
+  assert.equal(harness.nodes.summaryValidation.textContent, '失败即停止');
+  assert.equal(harness.nodes.summaryAgentBridge.textContent, '自动重连 · 2 分钟超时');
+  assert.equal(harness.nodes.summaryOutput.textContent, '/reports/mybatis');
+  assert.deepEqual(harness.nodes.rerunType.children.map((option) => option.value), ['sql', 'xml', 'index']);
+  assert.equal(harness.nodes.rerunId.disabled, false);
+  assert.equal(harness.nodes.rerunId.required, true);
+  assert.equal(harness.nodes.rerunId.value, 'statement-key');
+
+  harness.nodes.rerunType.value = 'xml';
+  harness.nodes.rerunType.dispatch('change');
+  assert.equal(harness.nodes.rerunId.disabled, false);
+  assert.equal(harness.nodes.rerunId.required, true);
+
+  harness.nodes.rerunType.value = 'index';
+  harness.nodes.rerunType.dispatch('change');
+  assert.equal(harness.nodes.rerunId.disabled, true);
+  assert.equal(harness.nodes.rerunId.required, false);
+  assert.equal(harness.nodes.rerunId.value, '');
 });
 
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {

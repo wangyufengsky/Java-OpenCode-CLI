@@ -198,6 +198,10 @@ public class ConsoleApiController {
                     && (submission.rerunId() == null || submission.rerunId().isBlank())) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
+            if (WorkflowRerunContract.forbidsRerunId(chainId, rerunType)
+                    && submission.rerunId() != null && !submission.rerunId().isBlank()) {
+                throw new IllegalArgumentException("该重跑类型不能填写重跑 ID");
+            }
         }
     }
 

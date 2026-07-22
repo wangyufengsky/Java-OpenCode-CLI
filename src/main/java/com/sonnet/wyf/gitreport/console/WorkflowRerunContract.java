@@ -102,6 +102,14 @@ final class WorkflowRerunContract {
             "mybatis-sql-review", Set.of("sql", "xml")
     );
 
+    private static final Map<String, Set<String>> TYPES_FORBIDDING_ID = Map.of(
+            "mybatis-sql-review", Set.of("index")
+    );
+
+    private static final Map<String, Map<String, String>> FAILED_TASK_PHASE_TYPES = Map.of(
+            "mybatis-sql-review", Map.of("validation_failed_final", "sql")
+    );
+
     private WorkflowRerunContract() {
     }
 
@@ -122,7 +130,16 @@ final class WorkflowRerunContract {
         return TYPES_REQUIRING_ID.getOrDefault(chainId, Set.of()).contains(rerunType);
     }
 
+    static boolean forbidsRerunId(String chainId, String rerunType) {
+        return TYPES_FORBIDDING_ID.getOrDefault(chainId, Set.of()).contains(rerunType);
+    }
+
     static Optional<String> failedTaskRerunType(String chainId, String taskPhase) {
+        String normalizedPhase = taskPhase == null ? "" : taskPhase.trim().toLowerCase(Locale.ROOT);
+        String phaseType = FAILED_TASK_PHASE_TYPES.getOrDefault(chainId, Map.of()).get(normalizedPhase);
+        if (phaseType != null) {
+            return Optional.of(phaseType);
+        }
         String normalizedType = normalizeType(chainId, taskPhase);
         if (isKnownType(chainId, normalizedType)) {
             return requiresRerunId(chainId, normalizedType)

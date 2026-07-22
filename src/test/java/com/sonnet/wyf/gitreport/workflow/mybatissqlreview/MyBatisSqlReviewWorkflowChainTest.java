@@ -223,6 +223,35 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
+    void executionYamlAgentBridgeFieldsOverrideGlobalSettingsWhileMissingFieldsFallBack() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config) + """
+
+                agentbridge:
+                  web-base-url: http://yaml-agentbridge.test
+                  timeout-minutes: 2
+                  task-message: YAML TASK MESSAGE
+                """);
+        AgentBridgeSettings global = settings();
+        global.setWebBaseUrl("http://global-agentbridge.test");
+        global.setMcpUrl("http://global-agentbridge.test/mcp");
+        global.setTimeoutMinutes(9);
+        global.setPollMillis(170);
+        global.setTaskMessage("GLOBAL TASK MESSAGE");
+
+        chain.run(request("full", "", "", "run-yaml-agentbridge", global));
+
+        assertThat(client.listToolsUris).containsOnly(URI.create("http://global-agentbridge.test/mcp"));
+        assertThat(client.postedPromptUris).containsOnly(URI.create("http://yaml-agentbridge.test"));
+        assertThat(client.waitTimeouts).containsOnly(Duration.ofMinutes(2));
+        assertThat(client.waitPollIntervals).containsOnly(Duration.ofMillis(170));
+        assertThat(client.postedPrompts)
+                .allSatisfy(prompt -> assertThat(prompt)
+                        .contains("YAML TASK MESSAGE")
+                        .doesNotContain("GLOBAL TASK MESSAGE"));
+    }
+
+    @Test
     void recordsFailedRunManifestWhenConfigurationValidationFailsBeforeWorkspaceStart() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config)
@@ -363,6 +392,11 @@ class MyBatisSqlReviewWorkflowChainTest {
         private final List<String> postedStatementKeys = new ArrayList<>();
         private final List<Integer> candidateDirectoryCountsAtPost = new ArrayList<>();
         private final List<ToolCallRecord> history = new ArrayList<>();
+        private final List<URI> listToolsUris = new ArrayList<>();
+        private final List<URI> postedPromptUris = new ArrayList<>();
+        private final List<Duration> waitTimeouts = new ArrayList<>();
+        private final List<Duration> waitPollIntervals = new ArrayList<>();
+        private final List<String> postedPrompts = new ArrayList<>();
         private int activeTasks;
         private int maximumActiveTasks;
         private boolean clearPending;
@@ -381,8 +415,10 @@ class MyBatisSqlReviewWorkflowChainTest {
         }
 
         @Override
-        public void postPrompt(URI ignored, String prompt) {
+        public void postPrompt(URI uri, String prompt) {
             events.add("post");
+            postedPromptUris.add(uri);
+            postedPrompts.add(prompt);
             activeTasks++;
             maximumActiveTasks = Math.max(maximumActiveTasks, activeTasks);
             try {
@@ -403,6 +439,8 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         @Override
         public void waitUntilIdle(URI ignored, Duration timeout, Duration pollInterval) {
+            waitTimeouts.add(timeout);
+            waitPollIntervals.add(pollInterval);
             if (clearPending) {
                 events.add("wait-for-clear");
                 clearPending = false;
@@ -419,7 +457,8 @@ class MyBatisSqlReviewWorkflowChainTest {
         }
 
         @Override
-        public List<ToolDefinition> listTools(URI ignored) {
+        public List<ToolDefinition> listTools(URI uri) {
+            listToolsUris.add(uri);
             LinkedHashSet<String> names = new LinkedHashSet<>(MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS);
             if (missingRequiredTool) {
                 names.remove("execute_sql_query");

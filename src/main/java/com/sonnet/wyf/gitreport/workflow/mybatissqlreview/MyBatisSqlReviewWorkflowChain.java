@@ -79,9 +79,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 failureManifestRoot = configuration.getPaths().getOut();
             }
             configuration.validate();
-            AgentBridgeSettings settings = request.agentBridge() == null
-                    ? configuration.getAgentbridge()
-                    : request.agentBridge();
+            AgentBridgeSettings settings = configuration.getAgentbridge().resolve(
+                    request.agentBridge() == null ? runnerProperties.getAgentbridge() : request.agentBridge()
+            );
             requireSerialSettings(settings);
             String mode = normalizeMode(request.mode());
             boolean rerun = "rerun".equals(mode);
@@ -396,7 +396,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         private Paths paths = new Paths();
         private Source source = new Source();
         private Database database = new Database();
-        private AgentBridgeSettings agentbridge = new AgentBridgeSettings();
+        private AgentBridgeOverrides agentbridge = new AgentBridgeOverrides();
 
         public Project getProject() {
             return project;
@@ -430,11 +430,11 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             this.database = database;
         }
 
-        public AgentBridgeSettings getAgentbridge() {
+        public AgentBridgeOverrides getAgentbridge() {
             return agentbridge;
         }
 
-        public void setAgentbridge(AgentBridgeSettings agentbridge) {
+        public void setAgentbridge(AgentBridgeOverrides agentbridge) {
             this.agentbridge = agentbridge;
         }
 
@@ -444,6 +444,133 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             Objects.requireNonNull(source, "source").validate();
             Objects.requireNonNull(database, "database").validate();
             Objects.requireNonNull(agentbridge, "agentbridge");
+        }
+    }
+
+    public static final class AgentBridgeOverrides {
+        private String webBaseUrl;
+        private String mcpUrl;
+        private Integer concurrency;
+        private Integer maxConcurrency;
+        private Integer timeoutMinutes;
+        private Integer pollMillis;
+        private Integer validationSettleSeconds;
+        private Integer validationMaxCorrections;
+        private String taskMessage;
+
+        AgentBridgeSettings resolve(AgentBridgeSettings fallback) {
+            AgentBridgeSettings source = Objects.requireNonNull(fallback, "global AgentBridge settings");
+            AgentBridgeSettings resolved = new AgentBridgeSettings();
+            resolved.setWebBaseUrl(source.getWebBaseUrl());
+            resolved.setMcpUrl(source.getMcpUrl());
+            resolved.setConcurrency(source.getConcurrency());
+            resolved.setMaxConcurrency(source.getMaxConcurrency());
+            resolved.setTimeoutMinutes(source.getTimeoutMinutes());
+            resolved.setPollMillis(source.getPollMillis());
+            resolved.setValidationSettleSeconds(source.getValidationSettleSeconds());
+            resolved.setValidationMaxCorrections(source.getValidationMaxCorrections());
+            resolved.setTaskMessage(source.getTaskMessage());
+            resolved.setSynthesisTaskMessage(source.getSynthesisTaskMessage());
+            if (webBaseUrl != null) {
+                resolved.setWebBaseUrl(webBaseUrl);
+            }
+            if (mcpUrl != null) {
+                resolved.setMcpUrl(mcpUrl);
+            }
+            if (concurrency != null) {
+                resolved.setConcurrency(concurrency);
+            }
+            if (maxConcurrency != null) {
+                resolved.setMaxConcurrency(maxConcurrency);
+            }
+            if (timeoutMinutes != null) {
+                resolved.setTimeoutMinutes(timeoutMinutes);
+            }
+            if (pollMillis != null) {
+                resolved.setPollMillis(pollMillis);
+            }
+            if (validationSettleSeconds != null) {
+                resolved.setValidationSettleSeconds(validationSettleSeconds);
+            }
+            if (validationMaxCorrections != null) {
+                resolved.setValidationMaxCorrections(validationMaxCorrections);
+            }
+            if (taskMessage != null) {
+                resolved.setTaskMessage(taskMessage);
+            }
+            return resolved;
+        }
+
+        public String getWebBaseUrl() {
+            return webBaseUrl;
+        }
+
+        public void setWebBaseUrl(String webBaseUrl) {
+            this.webBaseUrl = webBaseUrl;
+        }
+
+        public String getMcpUrl() {
+            return mcpUrl;
+        }
+
+        public void setMcpUrl(String mcpUrl) {
+            this.mcpUrl = mcpUrl;
+        }
+
+        public Integer getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(Integer concurrency) {
+            this.concurrency = concurrency;
+        }
+
+        public Integer getMaxConcurrency() {
+            return maxConcurrency;
+        }
+
+        public void setMaxConcurrency(Integer maxConcurrency) {
+            this.maxConcurrency = maxConcurrency;
+        }
+
+        public Integer getTimeoutMinutes() {
+            return timeoutMinutes;
+        }
+
+        public void setTimeoutMinutes(Integer timeoutMinutes) {
+            this.timeoutMinutes = timeoutMinutes;
+        }
+
+        public Integer getPollMillis() {
+            return pollMillis;
+        }
+
+        public void setPollMillis(Integer pollMillis) {
+            this.pollMillis = pollMillis;
+        }
+
+        public Integer getValidationSettleSeconds() {
+            return validationSettleSeconds;
+        }
+
+        public void setValidationSettleSeconds(Integer validationSettleSeconds) {
+            this.validationSettleSeconds = validationSettleSeconds;
+        }
+
+        public Integer getValidationMaxCorrections() {
+            return validationMaxCorrections;
+        }
+
+        public void setValidationMaxCorrections(Integer validationMaxCorrections) {
+            this.validationMaxCorrections = validationMaxCorrections;
+        }
+
+        public String getTaskMessage() {
+            return taskMessage;
+        }
+
+        public void setTaskMessage(String taskMessage) {
+            this.taskMessage = taskMessage;
         }
     }
 

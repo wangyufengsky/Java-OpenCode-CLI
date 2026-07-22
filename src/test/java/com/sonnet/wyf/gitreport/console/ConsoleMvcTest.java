@@ -563,6 +563,39 @@ class ConsoleMvcTest {
     }
 
     @Test
+    void myBatisFinalValidationFailureMapsSpecificallyToSqlRerun() throws Exception {
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "mybatis-sql-review", "full", null, null, null, Map.of(), null
+        ), "mybatis-failed-sql.yml");
+        repository.markRunning(runId);
+        repository.markFailed(runId, "SQL candidate validation failed");
+        repository.upsertTaskStatus(new WorkflowTaskStatus(
+                runId,
+                "mapper-order-find",
+                "OrderMapper.find",
+                "FAILED",
+                "validation_failed_final",
+                null,
+                "failed",
+                Instant.now()
+        ));
+
+        assertThat(WorkflowRerunContract.failedTaskRerunType(
+                "mybatis-sql-review", "validation_failed_final"
+        )).contains("sql");
+        assertThat(WorkflowRerunContract.failedTaskRerunType(
+                "smartesb-rewrite-code-review", "validation_failed_final"
+        )).isEmpty();
+        mockMvc.perform(get("/api/runs/" + runId + "/snapshot"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rerunAction.visible").value(true))
+                .andExpect(jsonPath("$.rerunAction.available").value(true))
+                .andExpect(jsonPath("$.rerunAction.rerunType").value("sql"))
+                .andExpect(jsonPath("$.rerunAction.rerunId").value("mapper-order-find"))
+                .andExpect(jsonPath("$.rerunAction.reason").isEmpty());
+    }
+
+    @Test
     void runDetailScriptOwnsReconnectPollingDeduplicationAndClientFilters() throws Exception {
         long runId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report", "full", null, null, null, Map.of(), null
@@ -1155,6 +1188,31 @@ class ConsoleMvcTest {
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").isNumber());
+    }
+
+    @Test
+    void runApiRejectsMyBatisIndexRerunWithAnId() throws Exception {
+        mockMvc.perform(post("/api/runs")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"mybatis-sql-review","mode":"rerun",
+                                 "rerunType":"index","rerunId":"stale-statement-key","config":{}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("该重跑类型不能填写重跑 ID"));
+    }
+
+    @Test
+    void scheduleApiRejectsMyBatisIndexRerunWithAnId() throws Exception {
+        mockMvc.perform(post("/api/schedules")
+                        .contentType("application/json")
+                        .content("""
+                                {"chainId":"mybatis-sql-review","mode":"rerun",
+                                 "rerunType":"index","rerunId":"stale-statement-key","config":{},
+                                 "frequency":"daily","runTime":"06:00","enabled":true}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("该重跑类型不能填写重跑 ID"));
     }
 
     @Test

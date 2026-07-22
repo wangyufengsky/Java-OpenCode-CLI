@@ -126,6 +126,10 @@ public class WorkflowScheduleService implements AutoCloseable {
             if (WorkflowRerunContract.requiresRerunId(chainId, rerunType) && (rerunId == null || rerunId.isBlank())) {
                 throw new IllegalArgumentException("重跑模式必须填写重跑 ID");
             }
+            if (WorkflowRerunContract.forbidsRerunId(chainId, rerunType)
+                    && rerunId != null && !rerunId.isBlank()) {
+                throw new IllegalArgumentException("该重跑类型不能填写重跑 ID");
+            }
         }
         ScheduleFrequency frequency = ScheduleFrequency.parse(request.frequency());
         validateScheduleFields(request, frequency);
