@@ -474,7 +474,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 .toList();
         validateMarkdownLinks(root, publishedMarkdown);
         for (MyBatisSqlStatement statement : inventory.statements()) {
-            validatePublishedDatabaseEvidence(root, statement);
+            taskRunner.validatePublishedOffline(root, statement);
         }
     }
 

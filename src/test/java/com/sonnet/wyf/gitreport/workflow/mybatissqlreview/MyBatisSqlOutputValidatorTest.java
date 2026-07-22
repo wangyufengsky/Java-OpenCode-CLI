@@ -335,6 +335,28 @@ class MyBatisSqlOutputValidatorTest {
                 .hasMessageContaining("unknown JSON schema keyword").hasMessageContaining("patternProperties");
     }
 
+    @Test
+    void offlineValidationRejectsReportSummaryAndEvidenceSemanticDamage() throws Exception {
+        Path missingSection = validCandidates();
+        Files.writeString(missingSection.resolve("report.md"), "# SQL Review\n");
+        assertThatThrownBy(() -> validator.validatePublishedOffline(missingSection, expectedTask()))
+                .hasMessageContaining("required section");
+
+        Path invalidSummary = validCandidates();
+        ObjectNode summary = summary(invalidSummary);
+        summary.remove("risk_level");
+        writeJson(invalidSummary.resolve("summary.json"), summary);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(invalidSummary, expectedTask()))
+                .hasMessageContaining("summary schema");
+
+        Path mismatchedEvidence = validCandidates();
+        ObjectNode evidence = evidence(mismatchedEvidence);
+        ((ObjectNode) evidence.at("/scenarios/0")).put("row_count", 99);
+        writeJson(mismatchedEvidence.resolve("database-evidence.json"), evidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(mismatchedEvidence, expectedTask()))
+                .hasMessageContaining("row_count");
+    }
+
     private MyBatisSqlOutputValidator.Result validateCandidates(Path candidates) throws Exception {
         return validator.validate(candidates, expectedTask(), database, auditedFacts());
     }
@@ -398,7 +420,14 @@ class MyBatisSqlOutputValidatorTest {
     ) {
         return new AgentBridgeClient.ToolCallRecord(
                 id, toolName, toolName, "mcp", "completed", timestamp,
-                arguments, result, duration, objectMapper.createObjectNode());
+                arguments, result, duration, objectMapper.createObjectNode(),
+                VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceId(),
+                VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.projectId(),
+                VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceNonce(),
+                VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT,
+                VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.hostFingerprint(),
+                VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.instanceFingerprint(),
+                VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.topologyFingerprint());
     }
 
     private ObjectNode databaseArguments(MyBatisDatabasePreflight.Result auditedDatabase) {

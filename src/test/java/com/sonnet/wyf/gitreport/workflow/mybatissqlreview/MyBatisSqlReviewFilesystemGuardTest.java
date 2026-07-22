@@ -356,6 +356,119 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThat(Files.getPosixFilePermissions(externalFile)).isEqualTo(externalFilePermissions);
     }
 
+    @Test
+    void restoresAfterAProtectedDirectoryIsChangedToMode000() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        Path javaDirectory = layout.javaSource().getParent();
+        Set<PosixFilePermission> original = Files.getPosixFilePermissions(javaDirectory);
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        );
+        Files.setPosixFilePermissions(javaDirectory, permissions("---------"));
+
+        assertThatThrownBy(guard::close)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("filesystem detection failed");
+        assertThat(Files.getPosixFilePermissions(javaDirectory)).isEqualTo(original);
+        assertThat(layout.javaSource()).isRegularFile();
+    }
+
+    @Test
+    void javaWriteViolationRetainsTheReportedRecoveryBackup() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        );
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> guard.withJavaWrites(
+                List.of(layout.diagnosticOne()),
+                () -> {
+                    Files.writeString(layout.diagnosticOne(), "java output");
+                    makeWritable(layout.pom());
+                    Files.writeString(layout.pom(), "tampered");
+                    return null;
+                }
+        ));
+
+        assertThat(thrown).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("recovery backup retained at");
+        Path backup = Path.of(thrown.getMessage().substring(
+                thrown.getMessage().lastIndexOf("recovery backup retained at")
+                        + "recovery backup retained at".length()).trim());
+        guard.close();
+        assertThat(backup).isDirectory();
+    }
+
+    @Test
+    void rejectsJavaOutputChangedAfterItWasSealedButBeforeAdoption() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        RecordingProtectionObserver observer = new RecordingProtectionObserver();
+        observer.onJavaWritesSealed = () -> {
+            try {
+                makeWritable(layout.diagnosticOne());
+                Files.writeString(layout.diagnosticOne(), "changed in validation-to-adoption window");
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        };
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo()), observer
+        );
+
+        assertThatThrownBy(() -> guard.withJavaWrites(
+                List.of(layout.diagnosticOne()),
+                () -> {
+                    Files.writeString(layout.diagnosticOne(), "validated Java output");
+                    return null;
+                }
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("between sealing and adoption")
+                .hasMessageContaining("recovery backup retained at");
+        assertThatCode(guard::close).doesNotThrowAnyException();
+    }
+
+    @Test
+    void preservesOnlyABoundedPrefixForALargeUnexpectedConflict() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        );
+        Path unexpected = layout.repository().resolve("unexpected-large.bin");
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> {
+            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
+                makeWritable(layout.repository());
+                Files.write(unexpected, new byte[128 * 1024]);
+            }
+        });
+        assertThat(thrown).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("recovery backup retained at");
+        Path backup = Path.of(thrown.getMessage().substring(
+                thrown.getMessage().lastIndexOf("recovery backup retained at")
+                        + "recovery backup retained at".length()).trim());
+        guard.close();
+
+        assertThat(unexpected).doesNotExist();
+        assertThat(Files.readString(backup.resolve("conflicts/README.txt")))
+                .contains("TRUNCATED prefix");
+        try (var copies = Files.list(backup.resolve("conflicts"))) {
+            Path preserved = copies.filter(path -> path.getFileName().toString().endsWith(".bin"))
+                    .findFirst().orElseThrow();
+            assertThat(Files.size(preserved)).isEqualTo(64L * 1024);
+        }
+    }
+
     private Layout layout(boolean outputInsideRepository) throws Exception {
         Path repository = Files.createDirectories(tempDir.resolve(
                 outputInsideRepository ? "repo-overlap" : "repo"
@@ -472,6 +585,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
             implements MyBatisSqlReviewFilesystemGuard.ProtectionObserver {
         private final Map<Path, Integer> backups = new LinkedHashMap<>();
         private final Map<Path, Integer> permissionChanges = new LinkedHashMap<>();
+        private Runnable onJavaWritesSealed;
 
         @Override
         public void backedUp(Path path) {
@@ -481,6 +595,13 @@ class MyBatisSqlReviewFilesystemGuardTest {
         @Override
         public void permissionProtected(Path path) {
             permissionChanges.merge(path, 1, Integer::sum);
+        }
+
+        @Override
+        public void javaWritesSealed(List<Path> paths) {
+            if (onJavaWritesSealed != null) {
+                onJavaWritesSealed.run();
+            }
         }
 
         Map<Path, Integer> backups() {

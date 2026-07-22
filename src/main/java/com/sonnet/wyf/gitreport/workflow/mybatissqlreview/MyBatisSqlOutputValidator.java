@@ -111,6 +111,153 @@ public final class MyBatisSqlOutputValidator {
         );
     }
 
+    public Result validatePublishedOffline(
+            Path publishedDirectory,
+            ExpectedTaskContext expectedTask
+    ) throws IOException {
+        Objects.requireNonNull(publishedDirectory, "publishedDirectory");
+        Objects.requireNonNull(expectedTask, "expectedTask");
+        requireExactlyThreeFiles(publishedDirectory);
+        Path evidencePath = publishedDirectory.resolve("database-evidence.json");
+        byte[] evidenceBytes = Files.readAllBytes(evidencePath);
+        if (evidenceBytes.length > MAX_EVIDENCE_BYTES) {
+            throw new IllegalStateException("database evidence exceeds 262144 bytes: " + evidenceBytes.length);
+        }
+        String report = Files.readString(publishedDirectory.resolve("report.md"), StandardCharsets.UTF_8);
+        String summaryText = Files.readString(publishedDirectory.resolve("summary.json"), StandardCharsets.UTF_8);
+        String evidenceText = new String(evidenceBytes, StandardCharsets.UTF_8);
+        requireNoPlaceholders("report.md", report);
+        requireNoPlaceholders("summary.json", summaryText);
+        requireNoPlaceholders("database-evidence.json", evidenceText);
+        requireReportSections(report);
+        requireDeterministicDatabaseEvidenceSection(report);
+        JsonNode summary = parseObject(summaryText, "summary.json");
+        JsonNode evidence = parseObject(evidenceText, "database-evidence.json");
+        List<String> schemaErrors = new ArrayList<>();
+        validateSchema(summary, summarySchema, "$", schemaErrors);
+        if (!schemaErrors.isEmpty()) {
+            throw new IllegalStateException("summary schema validation failed: " + String.join("; ", schemaErrors));
+        }
+        requireTaskBinding(summary, expectedTask, "summary expected task");
+        int scenarioCount = validateEvidenceOffline(evidence, summary, expectedTask);
+        requireReportBinding(report, expectedTask);
+        return new Result(expectedTask.statementKey(), scenarioCount, evidenceBytes.length, List.of());
+    }
+
+    private int validateEvidenceOffline(
+            JsonNode evidence,
+            JsonNode summary,
+            ExpectedTaskContext expectedTask
+    ) {
+        requireExactText(evidence, "schema_version", "mybatis-sql-review-database-evidence/v1",
+                "database evidence");
+        requireTaskBinding(evidence, expectedTask, "database evidence expected task");
+        for (String field : List.of("connection_id", "database_name", "schema_name")) {
+            requireText(evidence, field, "database evidence");
+        }
+        JsonNode audit = requireObject(evidence, "audit", "database evidence");
+        if (!audit.path("post_hoc").isBoolean() || !audit.path("post_hoc").booleanValue()
+                || !audit.path("permission_to_execute_original_dml").isBoolean()
+                || audit.path("permission_to_execute_original_dml").booleanValue()) {
+            throw new IllegalStateException("database evidence audit safety binding is invalid");
+        }
+        List<String> declaredCallIds = uniqueTextList(
+                requireArray(audit, "tool_call_ids", "database evidence audit"),
+                "database evidence audit.tool_call_ids"
+        );
+        Set<String> representedCallIds = new LinkedHashSet<>();
+        Set<String> evidenceIds = new HashSet<>();
+        JsonNode metadata = requireArray(evidence, "metadata", "database evidence");
+        for (JsonNode item : metadata) {
+            requireObjectNode(item, "metadata item");
+            requireUnique(evidenceIds, requireText(item, "evidence_id", "metadata item"), "evidence_id");
+            String callId = requireText(item, "tool_call_id", "metadata item");
+            requireUniqueCallEvidence(representedCallIds, callId);
+            requireText(item, "tool_name", "metadata item");
+            requireText(item, "timestamp", "metadata item");
+            requireNonNegativeLong(item, "duration_ms", "metadata item");
+            JsonNode arguments = requireObject(item, "arguments", "metadata item");
+            requireOfflineDatabaseArguments(arguments, evidence, "metadata item");
+            if (item.path("result").isMissingNode() || item.path("result").isNull()) {
+                throw new IllegalStateException("metadata item.result is required");
+            }
+            requireText(item, "observation", "metadata item");
+        }
+        JsonNode scenarios = requireArray(evidence, "scenarios", "database evidence");
+        if (scenarios.size() > MyBatisToolCallAudit.MAX_QUERY_SCENARIOS) {
+            throw new IllegalStateException("database evidence may contain at most 3 scenarios");
+        }
+        if (summary.path("scenario_count").asInt(-1) != scenarios.size()) {
+            throw new IllegalStateException("summary scenario_count does not match database evidence scenarios");
+        }
+        Set<String> scenarioIds = new HashSet<>();
+        for (JsonNode scenario : scenarios) {
+            requireObjectNode(scenario, "scenario");
+            requireUnique(evidenceIds, requireText(scenario, "evidence_id", "scenario"), "evidence_id");
+            requireUnique(scenarioIds, requireText(scenario, "scenario_id", "scenario"), "scenario_id");
+            requireText(scenario, "purpose", "scenario");
+            String callId = requireText(scenario, "tool_call_id", "scenario");
+            requireUniqueCallEvidence(representedCallIds, callId);
+            requireText(scenario, "timestamp", "scenario");
+            requireNonNegativeLong(scenario, "duration_ms", "scenario");
+            requireText(scenario, "query_text", "scenario");
+            JsonNode arguments = requireObject(scenario, "arguments", "scenario");
+            requireOfflineDatabaseArguments(arguments, evidence, "scenario");
+            requireExactText(arguments, "queryText", scenario.path("query_text").asText(),
+                    "scenario arguments");
+            JsonNode result = requireObject(scenario, "result", "scenario");
+            JsonNode columns = requireArray(scenario, "columns", "scenario");
+            uniqueTextList(columns, "scenario.columns");
+            JsonNode rows = requireArray(scenario, "rows", "scenario");
+            if (rows.size() > MyBatisToolCallAudit.MAX_ROWS_PER_CALL) {
+                throw new IllegalStateException("database evidence scenario may retain at most 20 rows");
+            }
+            for (JsonNode row : rows) {
+                if (!row.isObject() && !row.isArray()) {
+                    throw new IllegalStateException("scenario row must be an object or array");
+                }
+            }
+            if (!scenario.path("row_count").isIntegralNumber()
+                    || scenario.path("row_count").asInt() != rows.size()) {
+                throw new IllegalStateException("database evidence scenario row_count must equal rows.size");
+            }
+            if (!columns.equals(result.path("columns")) || !rows.equals(result.path("rows"))) {
+                throw new IllegalStateException("database evidence scenario result must match columns and rows");
+            }
+        }
+        if (!declaredCallIds.equals(List.copyOf(representedCallIds))) {
+            throw new IllegalStateException("database evidence items do not exactly bind audit.tool_call_ids");
+        }
+        JsonNode limitations = requireArray(evidence, "limitations", "database evidence");
+        if (limitations.isEmpty()) {
+            throw new IllegalStateException("database evidence limitations must not be empty");
+        }
+        uniqueTextList(limitations, "database evidence limitations");
+        for (JsonNode finding : summary.path("findings")) {
+            for (JsonNode evidenceId : finding.path("evidence_ids")) {
+                if (!evidenceIds.contains(evidenceId.asText())) {
+                    throw new IllegalStateException(
+                            "summary finding references unknown evidence_id: " + evidenceId.asText()
+                    );
+                }
+            }
+        }
+        return scenarios.size();
+    }
+
+    private void requireOfflineDatabaseArguments(JsonNode arguments, JsonNode evidence, String label) {
+        requireExactText(arguments, "connectionId", evidence.path("connection_id").asText(), label);
+        requireExactText(arguments, "databaseName", evidence.path("database_name").asText(), label);
+        requireExactText(arguments, "schemaName", evidence.path("schema_name").asText(), label);
+    }
+
+    private void requireNonNegativeLong(JsonNode parent, String field, String label) {
+        JsonNode value = parent.path(field);
+        if (!value.isIntegralNumber() || value.longValue() < 0) {
+            throw new IllegalStateException(label + "." + field + " must be a non-negative integer");
+        }
+    }
+
     private void requireAuditedContext(
             ExpectedTaskContext expected,
             MyBatisDatabasePreflight.Result database,

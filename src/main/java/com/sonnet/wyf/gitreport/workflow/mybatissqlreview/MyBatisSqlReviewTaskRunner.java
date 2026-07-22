@@ -147,6 +147,11 @@ public final class MyBatisSqlReviewTaskRunner {
             );
             try {
                 URI webUri = URI.create(settings.getWebBaseUrl());
+                new MyBatisDatabasePreflight(client).recheck(
+                        URI.create(settings.getMcpUrl()),
+                        webUri,
+                        database
+                );
                 client.clearSession(webUri);
                 client.waitUntilIdle(
                         webUri,
@@ -224,29 +229,28 @@ public final class MyBatisSqlReviewTaskRunner {
                             Path published = publishCandidateToBundle(
                                     workspace, layout, statement, candidateSnapshot
                             );
-                            MyBatisSqlOutputValidator.Result copiedValidation = outputValidator.validate(
-                                    published,
-                                    new MyBatisSqlOutputValidator.ExpectedTaskContext(
-                                            statement.statementKey(),
-                                            statement.mapperRelativePath(),
-                                            statement.namespace(),
-                                            statement.id(),
-                                            commandType,
-                                            statement.selectKey()
-                                    ),
-                                    database,
-                                    audit
-                            );
-                            if (!validation.equals(copiedValidation)) {
-                                throw new IllegalStateException(
-                                        "bundle validation changed after candidate copy: "
-                                                + statement.statementKey()
-                                );
-                            }
                             writeStatus(layout, statement, "SUCCEEDED", "completed_by_output", "");
                             return published;
                         }
                 );
+                MyBatisSqlOutputValidator.Result copiedValidation = outputValidator.validate(
+                        publishedDirectory,
+                        new MyBatisSqlOutputValidator.ExpectedTaskContext(
+                                statement.statementKey(),
+                                statement.mapperRelativePath(),
+                                statement.namespace(),
+                                statement.id(),
+                                commandType,
+                                statement.selectKey()
+                        ),
+                        database,
+                        audit
+                );
+                if (!validation.equals(copiedValidation)) {
+                    throw new IllegalStateException(
+                            "bundle validation changed after candidate copy: " + statement.statementKey()
+                    );
+                }
                 eventSink.taskStatusCurrent(
                         statement.statementKey(), title, "SUCCEEDED", "completed_by_output",
                         layout.status().toString(), ""
@@ -284,6 +288,20 @@ public final class MyBatisSqlReviewTaskRunner {
             String title,
             Path bundleDirectory
     ) {
+    }
+
+    void validatePublishedOffline(Path bundleRoot, MyBatisSqlStatement statement) throws IOException {
+        outputValidator.validatePublishedOffline(
+                MyBatisSqlReportRenderer.statementDirectory(bundleRoot, statement),
+                new MyBatisSqlOutputValidator.ExpectedTaskContext(
+                        statement.statementKey(),
+                        statement.mapperRelativePath(),
+                        statement.namespace(),
+                        statement.id(),
+                        commandType(statement),
+                        statement.selectKey()
+                )
+        );
     }
 
     private void writeTaskJson(

@@ -399,6 +399,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     ) throws IOException {
         Map<Path, SnapshotEntry> result = new LinkedHashMap<>();
         int[] index = {0};
+        long totalBytes = 0;
         for (Path path : protectedPaths(roots, candidate)) {
             if (result.containsKey(path)) {
                 continue;
@@ -411,14 +412,21 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             String sha256 = "";
             String symbolicLink = "";
             if (kind == Kind.REGULAR_FILE) {
+                if (attributes.size() > RunProtection.MAX_SNAPSHOT_FILE_BYTES) {
+                    throw new IllegalStateException(
+                            "protected snapshot file exceeds configured limit: " + path
+                    );
+                }
+                totalBytes += attributes.size();
+                if (totalBytes > RunProtection.MAX_SNAPSHOT_TOTAL_BYTES) {
+                    throw new IllegalStateException("protected snapshot exceeds configured total limit at " + path);
+                }
                 backupFile = backupRoot.resolve("files").resolve("%08d.bin".formatted(index[0]++));
                 Files.createDirectories(backupFile.getParent());
-                try (InputStream input = Files.newInputStream(
-                        path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
-                )) {
-                    Files.copy(input, backupFile, StandardCopyOption.REPLACE_EXISTING);
-                }
-                sha256 = sha256(backupFile);
+                RunProtection.StableCopy copy = RunProtection.copyRegularStable(
+                        path, backupFile, RunProtection.MAX_SNAPSHOT_FILE_BYTES, false
+                );
+                sha256 = copy.sha256();
             } else if (kind == Kind.SYMBOLIC_LINK) {
                 symbolicLink = Files.readSymbolicLink(path).toString();
             }
@@ -427,6 +435,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     kind,
                     attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                     attributes.lastModifiedTime(),
+                    attributes.size(),
                     sha256,
                     symbolicLink,
                     backupFile
@@ -448,7 +457,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
             );
             Kind kind = Kind.of(attributes);
-            String sha256 = kind == Kind.REGULAR_FILE ? sha256(path) : "";
+            String sha256 = kind == Kind.REGULAR_FILE
+                    && attributes.size() <= RunProtection.MAX_SNAPSHOT_FILE_BYTES
+                    ? sha256(path) : "";
             String symbolicLink = kind == Kind.SYMBOLIC_LINK
                     ? Files.readSymbolicLink(path).toString()
                     : "";
@@ -456,6 +467,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     kind,
                     attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                     attributes.lastModifiedTime(),
+                    attributes.size(),
                     sha256,
                     symbolicLink
             ));
@@ -567,10 +579,35 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     private static IOException restorePermissionsBestEffort(
             Map<Path, Set<PosixFilePermission>> permissions
     ) {
+        List<Map.Entry<Path, Set<PosixFilePermission>>> ordered = permissions.entrySet().stream()
+                .sorted(Comparator.comparingInt(entry -> entry.getKey().getNameCount()))
+                .toList();
+        List<Map.Entry<Path, Set<PosixFilePermission>>> failed = new ArrayList<>();
+        IOException failure = restorePermissionEntries(ordered, failed);
+        if (!failed.isEmpty()) {
+            IOException traversalFailure = restoreTraversalPermissions(permissions);
+            List<Map.Entry<Path, Set<PosixFilePermission>>> retryFailed = new ArrayList<>();
+            IOException retryFailure = restorePermissionEntries(failed, retryFailed);
+            IOException finalDirectoryFailure = restorePermissionEntries(
+                    ordered.stream().filter(entry -> Files.isDirectory(
+                            entry.getKey(), LinkOption.NOFOLLOW_LINKS
+                    )).sorted(Comparator.comparingInt(
+                            (Map.Entry<Path, Set<PosixFilePermission>> entry) -> entry.getKey().getNameCount()
+                    ).reversed()).toList(),
+                    new ArrayList<>()
+            );
+            failure = combine(traversalFailure, retryFailure);
+            failure = combine(failure, finalDirectoryFailure);
+        }
+        return failure;
+    }
+
+    private static IOException restorePermissionEntries(
+            List<Map.Entry<Path, Set<PosixFilePermission>>> entries,
+            List<Map.Entry<Path, Set<PosixFilePermission>>> failed
+    ) {
         IOException failure = null;
-        for (Map.Entry<Path, Set<PosixFilePermission>> entry : permissions.entrySet().stream()
-                .sorted(Map.Entry.<Path, Set<PosixFilePermission>>comparingByKey().reversed())
-                .toList()) {
+        for (Map.Entry<Path, Set<PosixFilePermission>> entry : entries) {
             try {
                 if (Files.exists(entry.getKey(), LinkOption.NOFOLLOW_LINKS)
                         && !Files.isSymbolicLink(entry.getKey())) {
@@ -585,9 +622,55 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 } else {
                     failure.addSuppressed(current);
                 }
+                failed.add(entry);
             }
         }
         return failure;
+    }
+
+    private static IOException restoreTraversalPermissions(
+            Map<Path, Set<PosixFilePermission>> permissions
+    ) {
+        return restoreTraversalPermissions(permissions, permissions.keySet());
+    }
+
+    private static IOException restoreTraversalPermissions(
+            Map<Path, Set<PosixFilePermission>> permissions,
+            Iterable<Path> scope
+    ) {
+        Set<Path> selected = new LinkedHashSet<>();
+        scope.forEach(selected::add);
+        IOException failure = null;
+        for (Map.Entry<Path, Set<PosixFilePermission>> entry : permissions.entrySet().stream()
+                .filter(value -> selected.contains(value.getKey()))
+                .sorted(Comparator.comparingInt(value -> value.getKey().getNameCount()))
+                .toList()) {
+            Path path = entry.getKey();
+            try {
+                if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                        || Files.isSymbolicLink(path)) {
+                    continue;
+                }
+                Set<PosixFilePermission> traversal = EnumSet.copyOf(entry.getValue());
+                traversal.add(PosixFilePermission.OWNER_READ);
+                traversal.add(PosixFilePermission.OWNER_EXECUTE);
+                Files.setPosixFilePermissions(path, traversal);
+            } catch (IOException | RuntimeException exception) {
+                failure = combine(failure, exception instanceof IOException io
+                        ? io : new IOException("failed to restore traversal permission: " + path, exception));
+            }
+        }
+        return failure;
+    }
+
+    private static IOException combine(IOException first, IOException second) {
+        if (first == null) {
+            return second;
+        }
+        if (second != null) {
+            first.addSuppressed(second);
+        }
+        return first;
     }
 
     private static void deleteNoFollow(Path path) throws IOException {
@@ -681,6 +764,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
 
         default void permissionProtected(Path path) {
         }
+
+        default void javaWritesSealed(List<Path> paths) {
+        }
     }
 
     @FunctionalInterface
@@ -715,6 +801,12 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         private static final long MAX_SNAPSHOT_TOTAL_BYTES = positiveLimit(
                 "mybatis.sql.review.guard.max-total-bytes", 512L * 1024 * 1024
         );
+        private static final long MAX_CONFLICT_PREFIX_BYTES = positiveLimit(
+                "mybatis.sql.review.guard.max-conflict-prefix-bytes", 64L * 1024
+        );
+        private static final long MAX_CONFLICT_TOTAL_BYTES = positiveLimit(
+                "mybatis.sql.review.guard.max-conflict-total-bytes", 16L * 1024 * 1024
+        );
         private final Path repository;
         private final Path stableRoot;
         private final Path currentRun;
@@ -724,6 +816,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         private final ProtectionObserver observer;
         private final AtomicInteger backupSequence = new AtomicInteger();
         private final AtomicLong snapshotBytes = new AtomicLong();
+        private final AtomicLong conflictBytes = new AtomicLong();
         private final Map<Path, SnapshotEntry> protectedSnapshot = new LinkedHashMap<>();
         private final Map<Path, SnapshotEntry> currentRunSnapshot = new LinkedHashMap<>();
         private final Map<Path, Set<PosixFilePermission>> originalPermissions = new LinkedHashMap<>();
@@ -967,11 +1060,24 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Throwable refreshFailure = null;
             try {
                 for (Path path : allowed) {
-                    adoptCurrentRunSubtree(path);
+                    applyGuardedPermission(path);
+                }
+                Map<Path, CurrentEntry> sealed = new LinkedHashMap<>();
+                for (Path path : allowed) {
+                    CurrentEntry entry = currentEntryOrNull(path, true);
+                    if (entry == null || entry.kind() != Kind.REGULAR_FILE) {
+                        throw new IllegalStateException("Java output disappeared before sealing: " + path);
+                    }
+                    sealed.put(path, entry);
+                }
+                observer.javaWritesSealed(allowed);
+                for (Path path : allowed) {
+                    adoptCurrentRunFile(path, sealed.get(path));
                 }
                 reapplyGuardedPermissions(currentRunSnapshot.keySet(), null);
                 List<String> protectedViolations = protectedChanges(true);
                 if (!protectedViolations.isEmpty()) {
+                    conflictDetected = true;
                     restoreProtectedPaths();
                     throw new IllegalStateException(
                             "protected repository/stable content changed during Java writes: "
@@ -981,6 +1087,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
                 List<String> violations = currentRunChanges(null, true);
                 if (!violations.isEmpty()) {
+                    conflictDetected = true;
                     restoreCurrentRun(null);
                     throw new IllegalStateException(
                             "protected current run content changed during Java writes: " + String.join("; ", violations)
@@ -988,7 +1095,18 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     );
                 }
             } catch (Throwable exception) {
-                refreshFailure = exception;
+                conflictDetected = true;
+                try {
+                    restoreProtectedPaths();
+                    restoreCurrentRun(null);
+                } catch (Throwable restoreFailure) {
+                    exception.addSuppressed(restoreFailure);
+                }
+                refreshFailure = new IllegalStateException(
+                        "Java write sealing/adoption failed: " + concise(exception)
+                                + "; recovery backup retained at " + backupRoot,
+                        exception
+                );
             }
             if (operationFailure != null) {
                 if (refreshFailure != null) {
@@ -1105,8 +1223,8 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                                     + MAX_SNAPSHOT_FILE_BYTES + ": " + path
                     );
                 }
-                long totalBytes = snapshotBytes.addAndGet(fileBytes);
-                if (totalBytes > MAX_SNAPSHOT_TOTAL_BYTES) {
+                long remaining = MAX_SNAPSHOT_TOTAL_BYTES - snapshotBytes.get();
+                if (fileBytes > remaining) {
                     throw new IllegalStateException(
                             "protected snapshot exceeds configured total limit "
                                     + MAX_SNAPSHOT_TOTAL_BYTES + " at " + path
@@ -1116,12 +1234,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                         "%08d.bin".formatted(backupSequence.getAndIncrement())
                 );
                 Files.createDirectories(backupFile.getParent());
-                try (InputStream input = Files.newInputStream(
-                        path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
-                )) {
-                    Files.copy(input, backupFile, StandardCopyOption.REPLACE_EXISTING);
+                StableCopy copy = copyRegularStable(path, backupFile, Math.min(
+                        MAX_SNAPSHOT_FILE_BYTES, remaining
+                ), false);
+                if (copy.truncated()) {
+                    throw new IllegalStateException("protected snapshot changed or exceeded limit: " + path);
                 }
-                hash = sha256(backupFile);
+                snapshotBytes.addAndGet(copy.bytes());
+                hash = copy.sha256();
             } else if (kind == Kind.SYMBOLIC_LINK) {
                 symbolicLink = Files.readSymbolicLink(path).toString();
             }
@@ -1130,6 +1250,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     kind,
                     attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                     attributes.lastModifiedTime(),
+                    attributes.size(),
                     hash,
                     symbolicLink,
                     backupFile
@@ -1180,6 +1301,21 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     currentRunSnapshot.keySet().stream().filter(path -> path.startsWith(normalized)).toList(),
                     false
             );
+        }
+
+        private void adoptCurrentRunFile(Path path, CurrentEntry sealed) throws IOException {
+            Path normalized = path.toAbsolutePath().normalize();
+            requireNoSymlinkPath(currentRun, normalized, "current run Java output");
+            SnapshotEntry captured = captureEntry(normalized);
+            if (!captured.sameContent(sealed, true)) {
+                throw new IllegalStateException("Java output changed between sealing and adoption: " + normalized);
+            }
+            currentRunSnapshot.put(normalized, captured);
+            protectPermissions(List.of(normalized), false);
+            CurrentEntry after = currentEntryOrNull(normalized, true);
+            if (after == null || !captured.sameContent(after, true)) {
+                throw new IllegalStateException("Java output changed after adoption: " + normalized);
+            }
         }
 
         private List<String> currentRunChanges(Path excludedRoot, boolean compareIdentity) throws IOException {
@@ -1234,6 +1370,12 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         }
 
         private void restoreProtectedPaths() throws IOException {
+            IOException traversalFailure = restoreTraversalPermissions(
+                    originalPermissions, protectedSnapshot.keySet()
+            );
+            if (traversalFailure != null) {
+                throw traversalFailure;
+            }
             Map<Path, CurrentEntry> actual = currentProtectedTree();
             preserveConflictingRegularFiles(protectedSnapshot, actual, "protected");
             sanitizeSnapshotAncestors(protectedSnapshot);
@@ -1265,6 +1407,12 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         }
 
         private void restoreCurrentRun(Path excludedRoot) throws IOException {
+            IOException traversalFailure = restoreTraversalPermissions(
+                    originalPermissions, currentRunSnapshot.keySet()
+            );
+            if (traversalFailure != null) {
+                throw traversalFailure;
+            }
             Map<Path, CurrentEntry> actual = currentTree(currentRun, currentRunSnapshot);
             preserveConflictingRegularFiles(currentRunSnapshot, actual, "current-run");
             sanitizeSnapshotAncestors(currentRunSnapshot);
@@ -1300,18 +1448,100 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 Path copy = conflictDirectory.resolve(
                         "%08d.bin".formatted(backupSequence.getAndIncrement())
                 );
-                try (InputStream input = Files.newInputStream(
-                        path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
-                )) {
-                    Files.copy(input, copy, StandardCopyOption.REPLACE_EXISTING);
+                long remaining = Math.max(0, MAX_CONFLICT_TOTAL_BYTES - conflictBytes.get());
+                long limit = Math.min(MAX_CONFLICT_PREFIX_BYTES, remaining);
+                StableCopy preserved = null;
+                String warning = "";
+                if (limit > 0) {
+                    try {
+                        preserved = copyRegularStable(path, copy, limit, true);
+                        conflictBytes.addAndGet(preserved.bytes());
+                        if (preserved.truncated()) {
+                            warning = " [TRUNCATED prefix; original_size=" + current.size() + "]";
+                        }
+                    } catch (IOException | RuntimeException exception) {
+                        warning = " [COPY_UNSTABLE: " + concise(exception) + "]";
+                        Files.deleteIfExists(copy);
+                    }
+                } else {
+                    warning = " [METADATA_ONLY conflict budget exhausted; original_size="
+                            + current.size() + "]";
                 }
                 Files.writeString(
                         readme,
-                        label + " " + path + " -> " + copy.getFileName() + System.lineSeparator(),
+                        label + " " + path + " size=" + current.size()
+                                + (preserved == null ? "" : " -> " + copy.getFileName())
+                                + warning + System.lineSeparator(),
                         StandardOpenOption.CREATE,
                         StandardOpenOption.APPEND
                 );
             }
+        }
+
+        private static StableCopy copyRegularStable(
+                Path source,
+                Path destination,
+                long maxBytes,
+                boolean allowPrefix
+        ) throws IOException {
+            BasicFileAttributes before = Files.readAttributes(
+                    source, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            if (!before.isRegularFile() || before.isSymbolicLink()) {
+                throw new IOException("bounded copy source is not a regular file: " + source);
+            }
+            MessageDigest digest;
+            try {
+                digest = MessageDigest.getInstance("SHA-256");
+            } catch (java.security.NoSuchAlgorithmException exception) {
+                throw new IllegalStateException("SHA-256 unavailable", exception);
+            }
+            long copied = 0;
+            boolean truncated = false;
+            try (InputStream input = Files.newInputStream(
+                    source, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS
+            ); var output = Files.newOutputStream(
+                    destination,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE,
+                    LinkOption.NOFOLLOW_LINKS
+            )) {
+                byte[] buffer = new byte[8192];
+                while (true) {
+                    int requested = (int) Math.min(buffer.length, Math.max(1, maxBytes - copied + 1));
+                    int read = input.read(buffer, 0, requested);
+                    if (read < 0) {
+                        break;
+                    }
+                    if (copied + read > maxBytes) {
+                        int accepted = (int) (maxBytes - copied);
+                        if (accepted > 0) {
+                            output.write(buffer, 0, accepted);
+                            digest.update(buffer, 0, accepted);
+                            copied += accepted;
+                        }
+                        truncated = true;
+                        break;
+                    }
+                    output.write(buffer, 0, read);
+                    digest.update(buffer, 0, read);
+                    copied += read;
+                }
+            }
+            BasicFileAttributes after = Files.readAttributes(
+                    source, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS
+            );
+            if (!after.isRegularFile()
+                    || !Objects.equals(before.fileKey(), after.fileKey())
+                    || !before.lastModifiedTime().equals(after.lastModifiedTime())
+                    || before.size() != after.size()) {
+                throw new IOException("bounded copy source changed while reading: " + source);
+            }
+            if (!allowPrefix && (truncated || copied != before.size())) {
+                throw new IOException("bounded copy exceeded limit " + maxBytes + ": " + source);
+            }
+            return new StableCopy(copied, HexFormat.of().formatHex(digest.digest()), truncated);
         }
 
         private void sanitizeSnapshotAncestors(Map<Path, SnapshotEntry> entries) throws IOException {
@@ -1356,6 +1586,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                         previous.kind(),
                         attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                         attributes.lastModifiedTime(),
+                        attributes.size(),
                         previous.sha256(),
                         previous.symbolicLinkTarget(),
                         previous.backupFile()
@@ -1565,7 +1796,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 return null;
             }
             Kind kind = Kind.of(attributes);
-            String hash = kind == Kind.REGULAR_FILE && hashContent ? sha256(path) : "";
+            String hash = kind == Kind.REGULAR_FILE && hashContent
+                    && attributes.size() <= MAX_SNAPSHOT_FILE_BYTES
+                    ? sha256(path) : "";
             String symbolicLink = kind == Kind.SYMBOLIC_LINK
                     ? Files.readSymbolicLink(path).toString()
                     : "";
@@ -1573,6 +1806,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     kind,
                     attributes.fileKey() == null ? "" : attributes.fileKey().toString(),
                     attributes.lastModifiedTime(),
+                    attributes.size(),
                     hash,
                     symbolicLink
             );
@@ -1609,6 +1843,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 current = current.getParent();
             }
             return current == null ? path : current;
+        }
+
+        private record StableCopy(long bytes, String sha256, boolean truncated) {
         }
 
         private record TreeScope(
@@ -1658,6 +1895,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Kind kind,
             String fileKey,
             FileTime lastModifiedTime,
+            long size,
             String sha256,
             String symbolicLinkTarget,
             Path backupFile
@@ -1666,6 +1904,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             return kind == actual.kind()
                     && (!compareIdentity || (fileKey.equals(actual.fileKey())
                     && lastModifiedTime.equals(actual.lastModifiedTime())))
+                    && size == actual.size()
                     && sha256.equals(actual.sha256())
                     && symbolicLinkTarget.equals(actual.symbolicLinkTarget());
         }
@@ -1675,6 +1914,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Kind kind,
             String fileKey,
             FileTime lastModifiedTime,
+            long size,
             String sha256,
             String symbolicLinkTarget
     ) {

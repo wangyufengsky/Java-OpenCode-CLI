@@ -549,6 +549,14 @@ class MyBatisSqlReviewWorkflowChainTest {
         }
 
         @Override
+        public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI ignoredWeb, URI ignoredMcp) {
+            return new MyBatisAuditBinding(
+                    VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY,
+                    VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT
+            );
+        }
+
+        @Override
         public void clearSession(URI ignored) {
             events.add("clear");
             clearPending = true;
@@ -639,6 +647,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("topologyRole", "physical-standby")
                     .put("topologySource", "server-observed")
                     .put("readOnly", true);
+            addDatabaseBinding(connection);
             connection.putArray("databases").add("orders");
             return response;
         }
@@ -648,6 +657,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                 return objectMapper.createObjectNode().put("type", "object");
             }
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
+            schema.put("x-agentbridge-policyFingerprint",
+                    VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT);
             ObjectNode properties = schema.putObject("properties");
             for (String field : List.of("connectionId", "databaseName", "schemaName")) {
                 properties.putObject(field).put("type", "string");
@@ -669,7 +680,7 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         private ObjectNode safetyProbe() {
             ObjectNode row = objectMapper.createObjectNode()
-                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v1")
+                    .put("probeContractVersion", "mybatis-sql-review-db-safety-v2")
                     .put("currentDatabase", "orders")
                     .put("currentSchema", "audit")
                     .put("currentUser", "sql_auditor")
@@ -680,10 +691,12 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("roleMembershipCount", 0)
                     .put("databaseOwner", false)
                     .put("schemaOwner", false)
+                    .put("ownedNonSystemSchemaCount", 0)
                     .put("ownedBaseTableCount", 0)
                     .put("databaseCreate", false)
                     .put("databaseTemporary", false)
                     .put("schemaCreate", false)
+                    .put("unsafeNonSystemSchemaCreateCount", 0)
                     .put("dangerousAnyPrivilege", false)
                     .put("sessionReadOnly", true)
                     .put("transactionReadOnly", true)
@@ -694,14 +707,34 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("forceRlsEnabledBaseTableCount", 0)
                     .put("executableFunctionCount", 0)
                     .put("executablePackageCount", 0)
+                    .put("unsafeForeignServerPrivilegeCount", 0)
+                    .put("unsafeDirectoryPrivilegeCount", 0)
+                    .put("unsafeForeignServerPrivilegeCount", 0)
+                    .put("unsafeDirectoryPrivilegeCount", 0)
                     .put("statementTimeoutMs", 12_000)
                     .put("baseTableNames", "orders")
                     .put("baseTableCount", 1)
                     .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
+            addDatabaseBinding(result);
             row.fieldNames().forEachRemaining(result.putArray("columns")::add);
             result.putArray("rows").add(row);
             return result;
+        }
+
+        private void addDatabaseBinding(ObjectNode node) {
+            node.putObject("identity")
+                    .put("instanceId", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceId())
+                    .put("projectId", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.projectId())
+                    .put("instanceNonce", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceNonce());
+            node.put("policyFingerprint", VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT)
+                    .put("fingerprintSource", "server-generated")
+                    .put("databaseHostFingerprint",
+                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.hostFingerprint())
+                    .put("databaseInstanceFingerprint",
+                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.instanceFingerprint())
+                    .put("topologyFingerprint",
+                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.topologyFingerprint());
         }
 
         private ObjectNode tableObjects() {
