@@ -151,6 +151,8 @@ public final class MyBatisDatabasePreflight {
                 contract.databaseName(),
                 contract.schemaName(),
                 databaseSystem,
+                contract.environment(),
+                contract.statementTimeout(),
                 safeBaseRelations
         );
     }
@@ -345,18 +347,30 @@ public final class MyBatisDatabasePreflight {
         }
     }
 
-    public record Result(
-            String connectionId,
-            String databaseName,
-            String schemaName,
-            String databaseSystem,
-            Set<String> safeBaseRelations
-    ) {
-        public Result {
-            Objects.requireNonNull(connectionId, "connectionId");
-            Objects.requireNonNull(databaseName, "databaseName");
-            Objects.requireNonNull(schemaName, "schemaName");
-            Objects.requireNonNull(databaseSystem, "databaseSystem");
+    public static final class Result {
+        private final String connectionId;
+        private final String databaseName;
+        private final String schemaName;
+        private final String databaseSystem;
+        private final Environment environment;
+        private final StatementTimeoutContract statementTimeout;
+        private final Set<String> safeBaseRelations;
+
+        private Result(
+                String connectionId,
+                String databaseName,
+                String schemaName,
+                String databaseSystem,
+                Environment environment,
+                StatementTimeoutContract statementTimeout,
+                Set<String> safeBaseRelations
+        ) {
+            this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
+            this.databaseName = Objects.requireNonNull(databaseName, "databaseName");
+            this.schemaName = Objects.requireNonNull(schemaName, "schemaName");
+            this.databaseSystem = Objects.requireNonNull(databaseSystem, "databaseSystem");
+            this.environment = Objects.requireNonNull(environment, "environment");
+            this.statementTimeout = Objects.requireNonNull(statementTimeout, "statementTimeout");
             Objects.requireNonNull(safeBaseRelations, "safeBaseRelations");
             Set<String> normalizedRelations = new LinkedHashSet<>();
             for (String relation : safeBaseRelations) {
@@ -374,7 +388,35 @@ public final class MyBatisDatabasePreflight {
                 }
                 normalizedRelations.add(canonicalRelation(parts[0], parts[1]));
             }
-            safeBaseRelations = Set.copyOf(normalizedRelations);
+            this.safeBaseRelations = Set.copyOf(normalizedRelations);
+        }
+
+        public String connectionId() {
+            return connectionId;
+        }
+
+        public String databaseName() {
+            return databaseName;
+        }
+
+        public String schemaName() {
+            return schemaName;
+        }
+
+        public String databaseSystem() {
+            return databaseSystem;
+        }
+
+        public Environment environment() {
+            return environment;
+        }
+
+        public StatementTimeoutContract statementTimeout() {
+            return statementTimeout;
+        }
+
+        public Set<String> safeBaseRelations() {
+            return safeBaseRelations;
         }
     }
 }

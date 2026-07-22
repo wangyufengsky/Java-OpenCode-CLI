@@ -12,11 +12,13 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -51,6 +53,8 @@ class MyBatisDatabasePreflightTest {
         assertThat(result.databaseName()).isEqualTo("orders");
         assertThat(result.schemaName()).isEqualTo("audit");
         assertThat(result.databaseSystem()).isEqualTo("GaussDB");
+        assertThat(result.environment()).isEqualTo(MyBatisDatabasePreflight.Environment.TEST);
+        assertThat(result.statementTimeout()).isEqualTo(timeoutContract());
         assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder("audit.orders", "audit.line_items");
         assertThatThrownBy(() -> result.safeBaseRelations().add("audit.injected"))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -66,6 +70,22 @@ class MyBatisDatabasePreflightTest {
         assertThat(bridge.argumentsFor("list_schema_objects"))
                 .isEqualTo(databaseArguments().put("kind", "TABLE"));
         assertThat(bridge.toolCallHistoryRequested).isTrue();
+    }
+
+    @Test
+    void exposesOnlyAValidateMintedFinalCapabilityWithoutPublicConstructionOrRawSafeSetAuditInput() {
+        assertThat(MyBatisDatabasePreflight.Result.class.isRecord()).isFalse();
+        assertThat(Modifier.isFinal(MyBatisDatabasePreflight.Result.class.getModifiers())).isTrue();
+        assertThat(MyBatisDatabasePreflight.Result.class.getConstructors()).isEmpty();
+        assertThat(MyBatisDatabasePreflight.Result.class.getDeclaredConstructors())
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
+        List<Class<?>> auditParameterTypes = Arrays.stream(MyBatisToolCallAudit.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("audit"))
+                .flatMap(method -> Arrays.stream(method.getParameterTypes()))
+                .toList();
+        assertThat(auditParameterTypes)
+                .contains(MyBatisDatabasePreflight.Result.class)
+                .doesNotContain(Set.class);
     }
 
     @Test

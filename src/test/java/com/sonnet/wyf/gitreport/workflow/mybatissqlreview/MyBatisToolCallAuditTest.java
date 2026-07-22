@@ -27,8 +27,8 @@ class MyBatisToolCallAuditTest {
     private static final Instant STARTED_AT = Instant.parse("2026-07-22T09:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisToolCallAudit audit = new MyBatisToolCallAudit(objectMapper);
-    private final MyBatisDatabasePreflight.Result database = new MyBatisDatabasePreflight.Result(
-            "gauss-readonly", "orders", "audit", "GaussDB", Set.of("audit.orders", "audit.line_items"));
+    private final MyBatisDatabasePreflight.Result database =
+            VerifiedMyBatisDatabaseFixture.verified(objectMapper);
 
     @Test
     void auditsOnlyCompletePostTaskHistoryDifferenceAndReturnsImmutableFacts() {

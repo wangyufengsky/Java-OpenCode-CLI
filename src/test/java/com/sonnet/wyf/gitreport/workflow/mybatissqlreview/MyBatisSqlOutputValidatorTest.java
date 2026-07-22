@@ -26,8 +26,8 @@ class MyBatisSqlOutputValidatorTest {
     private static final Instant STARTED_AT = Instant.parse("2026-07-22T09:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisSqlOutputValidator validator = new MyBatisSqlOutputValidator(objectMapper);
-    private final MyBatisDatabasePreflight.Result database = new MyBatisDatabasePreflight.Result(
-            "gauss-readonly", "orders", "audit", "GaussDB", Set.of("audit.orders", "audit.line_items"));
+    private final MyBatisDatabasePreflight.Result database =
+            VerifiedMyBatisDatabaseFixture.verified(objectMapper);
 
     @TempDir
     Path tempDir;
@@ -87,8 +87,14 @@ class MyBatisSqlOutputValidatorTest {
                 wrongStatementCandidates, expectedTask(), database, wrongStatement))
                 .hasMessageContaining("audited statement context").hasMessageContaining("statement_key");
 
-        MyBatisDatabasePreflight.Result otherDatabase = new MyBatisDatabasePreflight.Result(
-                "other-connection", "other-db", "other_schema", "GaussDB", Set.of("other_schema.orders"));
+        MyBatisDatabasePreflight.Result otherDatabase = VerifiedMyBatisDatabaseFixture.verified(
+                objectMapper,
+                "other-connection",
+                "Other Review",
+                "other-db",
+                "other_schema",
+                Set.of("orders")
+        );
         MyBatisToolCallAudit.Result wrongDatabase = auditedFacts(
                 new MyBatisToolCallAudit.StatementContext("mapper-order-find-open", "select", false),
                 otherDatabase
