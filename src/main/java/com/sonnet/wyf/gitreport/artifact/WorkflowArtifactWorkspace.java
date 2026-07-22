@@ -19,6 +19,9 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.DosFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
@@ -31,6 +34,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.READ;
@@ -43,9 +47,12 @@ public final class WorkflowArtifactWorkspace {
     private static final String PUBLICATION_STORE = ".published";
     private static final String GENERATIONS_DIRECTORY = "generations";
     private static final String CURRENT_POINTER = "current";
+    private static final String LEGACY_MIGRATION = "legacy-migration";
+    private static final String MYBATIS_SQL_REVIEW_CHAIN = "mybatis-sql-review";
     private static final Set<String> RESERVED_ROOT_NAMES = Set.of(
             "runs", PUBLICATION_MANIFEST, GENERATION_FILE, PUBLISH_LOCK, PUBLICATION_STORE
     );
+    private static final Map<Path, ReentrantLock> JVM_PUBLICATION_LOCKS = new ConcurrentHashMap<>();
 
     private final ObjectMapper objectMapper;
     private final String chainId;
@@ -59,6 +66,7 @@ public final class WorkflowArtifactWorkspace {
     private final Map<String, AtomicInteger> attempts = new ConcurrentHashMap<>();
     private final AtomicInteger publicationAttempts = new AtomicInteger();
     private final Map<String, String> pathMappings = new LinkedHashMap<>();
+    private boolean symbolicLinksSupported;
 
     private WorkflowArtifactWorkspace(
             ObjectMapper objectMapper,
@@ -130,6 +138,7 @@ public final class WorkflowArtifactWorkspace {
             ownsRunRoot = true;
             Files.createDirectories(workspace.preparationRoot);
             Files.createDirectories(workspace.bundleRoot);
+            workspace.symbolicLinksSupported = workspace.detectSymbolicLinkSupport();
             if (seedFromStable) {
                 workspace.copyStableToBundle();
                 workspace.rebaseBundlePaths(workspace.stableRoot.toString(), workspace.bundleRoot.toString());
@@ -239,6 +248,8 @@ public final class WorkflowArtifactWorkspace {
         }
         Path lockPath = requireNoSymlinkComponents(
                 stableRoot, stableRoot.resolve(PUBLISH_LOCK), "publication lock");
+        ReentrantLock jvmLock = publicationJvmLock(stableRoot);
+        jvmLock.lock();
         try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE, LinkOption.NOFOLLOW_LINKS);
              FileLock ignored = channel.lock()) {
             long latestGeneration = readGeneration(stableRoot);
@@ -246,52 +257,290 @@ public final class WorkflowArtifactWorkspace {
                 writeRunManifest("SUPERSEDED", "latest publication generation is " + latestGeneration);
                 return new PublicationResult(false, true, stableRoot.resolve(mainArtifact));
             }
-            migrateLegacyPublicationIfNecessary();
-            Set<String> previousArtifacts = previousArtifactPaths();
-            Map<String, String> newArtifacts = artifacts(bundleRoot);
-            validateGenerationArtifactPaths(newArtifacts.keySet());
-
-            Path generationRoot = newGenerationRoot();
-            boolean pointerSwitched = false;
-            try {
-                prepareGeneration(generationRoot, newArtifacts, mainArtifact);
-                for (String previous : previousArtifacts.stream().sorted().toList()) {
-                    if (!newArtifacts.containsKey(previous)) {
-                        publicationFailureInjector.afterDeletion(stableRoot.resolve(previous));
-                    }
+            if (!symbolicLinksSupported) {
+                if (MYBATIS_SQL_REVIEW_CHAIN.equals(chainId)) {
+                    throw new IllegalStateException(
+                            "mybatis-sql-review requires crash-atomic generation publication, but symbolic links "
+                                    + "are unavailable on this filesystem");
                 }
-                publicationFailureInjector.afterGenerationPrepared(generationRoot);
-
-                Set<String> forwardedRoots = new LinkedHashSet<>();
-                forwardedRoots.addAll(topLevelArtifactNames(previousArtifacts));
-                forwardedRoots.addAll(topLevelArtifactNames(newArtifacts.keySet()));
-                forwardedRoots.add(PUBLICATION_MANIFEST);
-                for (String rootName : forwardedRoots.stream().sorted().toList()) {
-                    ensureManagedForwarder(rootName);
-                }
-
-                switchCurrentGeneration(generationRoot);
-                pointerSwitched = true;
-                cleanupStaleForwarders(topLevelArtifactNames(newArtifacts.keySet()));
-                publicationFailureInjector.afterPointerSwitch(generationRoot);
-                writeRunManifest("PUBLISHED", "");
-                cleanupOrphanGenerations(stableRoot);
-
-                Path publishedMain = stableArtifactPath(mainArtifact);
-                if (WorkflowRunContext.currentRunId() != null) {
-                    WorkflowRunContext.setCurrentOutputPath(publishedMain.toString());
-                }
-                return new PublicationResult(true, false, publishedMain);
-            } catch (IOException | RuntimeException publicationFailure) {
-                if (!pointerSwitched) {
-                    try {
-                        deleteGenerationWithoutFollowingLinks(generationRoot);
-                    } catch (IOException cleanupFailure) {
-                        publicationFailure.addSuppressed(cleanupFailure);
-                    }
-                }
-                throw publicationFailure;
+                return publishLegacyLocked(mainArtifact);
             }
+            return publishGenerationLocked(mainArtifact);
+        } finally {
+            jvmLock.unlock();
+        }
+    }
+
+    private PublicationResult publishGenerationLocked(String mainArtifact) throws IOException {
+        reconcileUncommittedForwarders();
+        migrateLegacyPublicationIfNecessary();
+        Set<String> previousArtifacts = previousArtifactPaths();
+        Map<String, String> newArtifacts = artifacts(bundleRoot);
+        validateGenerationArtifactPaths(newArtifacts.keySet());
+
+        Path generationRoot = newGenerationRoot();
+        Set<String> createdForwarders = new LinkedHashSet<>();
+        try {
+            prepareGeneration(generationRoot, newArtifacts, mainArtifact);
+            for (String previous : previousArtifacts.stream().sorted().toList()) {
+                if (!newArtifacts.containsKey(previous)) {
+                    publicationFailureInjector.afterDeletion(stableRoot.resolve(previous));
+                }
+            }
+            publicationFailureInjector.afterGenerationPrepared(generationRoot);
+
+            Set<String> forwardedRoots = new LinkedHashSet<>();
+            forwardedRoots.addAll(topLevelArtifactNames(previousArtifacts));
+            forwardedRoots.addAll(topLevelArtifactNames(newArtifacts.keySet()));
+            forwardedRoots.add(PUBLICATION_MANIFEST);
+            for (String rootName : forwardedRoots.stream().sorted().toList()) {
+                if (ensureManagedForwarder(rootName)) {
+                    createdForwarders.add(rootName);
+                }
+            }
+            publicationFailureInjector.beforePointerSwitch(generationRoot);
+            switchCurrentGeneration(generationRoot);
+        } catch (IOException | RuntimeException publicationFailure) {
+            rollbackUncommittedForwarders(createdForwarders, publicationFailure);
+            try {
+                deleteGenerationWithoutFollowingLinks(generationRoot);
+            } catch (IOException cleanupFailure) {
+                publicationFailure.addSuppressed(cleanupFailure);
+            }
+            throw publicationFailure;
+        }
+
+        Path publishedMain = inside(stableRoot, stableRoot.resolve(requireCanonicalRelativeArtifactPath(
+                normalize(mainArtifact))));
+        runBestEffort(() -> publicationFailureInjector.afterPointerSwitch(generationRoot));
+        runBestEffort(() -> cleanupStaleForwarders(topLevelArtifactNames(newArtifacts.keySet())));
+        runBestEffort(() -> writeRunManifest("PUBLISHED", ""));
+        runBestEffort(() -> cleanupOrphanGenerations(stableRoot));
+        runBestEffort(() -> forceDirectory(stableRoot));
+        runBestEffort(() -> {
+            if (WorkflowRunContext.currentRunId() != null) {
+                WorkflowRunContext.setCurrentOutputPath(publishedMain.toString());
+            }
+        });
+        return new PublicationResult(true, false, publishedMain);
+    }
+
+    private PublicationResult publishLegacyLocked(String mainArtifact) throws IOException {
+        Path publicationRoot = inside(runRoot, runRoot.resolve("publication"));
+        Path stagedRoot = inside(publicationRoot, publicationRoot.resolve("staged"));
+        Path backupRoot = inside(publicationRoot, publicationRoot.resolve("backup"));
+        createDirectoriesSecure(runRoot, publicationRoot);
+        deleteGenerationWithoutFollowingLinks(stagedRoot);
+        deleteGenerationWithoutFollowingLinks(backupRoot);
+        copyRecursivelySecure(bundleRoot, bundleRoot, runRoot, stagedRoot);
+        Map<String, String> newArtifacts = artifacts(stagedRoot);
+        Set<String> previousArtifacts = previousArtifactPaths();
+        validateDirectPublicationPaths(newArtifacts.keySet(), previousArtifacts);
+        boolean previousManifestExists = Files.isRegularFile(
+                stableRoot.resolve(PUBLICATION_MANIFEST), LinkOption.NOFOLLOW_LINKS);
+        backupDirectPublication(previousArtifacts, previousManifestExists, backupRoot);
+        boolean manifestCommitted = false;
+        try {
+            for (String previous : previousArtifacts.stream().sorted().toList()) {
+                if (!newArtifacts.containsKey(previous)) {
+                    Path target = secureStableArtifact(previous, "legacy publication deletion target");
+                    if (Files.deleteIfExists(target)) {
+                        publicationFailureInjector.afterDeletion(target);
+                    }
+                }
+            }
+            for (String relative : newArtifacts.keySet()) {
+                Path target = secureStableArtifact(relative, "legacy publication replacement target");
+                publishFile(stagedRoot, stagedRoot.resolve(relative), stableRoot, target);
+                publicationFailureInjector.afterReplacement(target);
+            }
+            atomicWriteJson(stableRoot.resolve(PUBLICATION_MANIFEST), publicationManifest(mainArtifact, newArtifacts));
+            manifestCommitted = true;
+        } catch (IOException | RuntimeException failure) {
+            if (!manifestCommitted) {
+                try {
+                    rollbackDirectPublication(
+                            newArtifacts.keySet(), previousArtifacts, previousManifestExists, backupRoot);
+                } catch (IOException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+            }
+            throw failure;
+        } finally {
+            deleteGenerationWithoutFollowingLinks(stagedRoot);
+            deleteGenerationWithoutFollowingLinks(backupRoot);
+        }
+
+        Path publishedMain = secureStableArtifact(mainArtifact, "legacy published main artifact");
+        runBestEffort(() -> writeRunManifest("PUBLISHED", ""));
+        runBestEffort(() -> {
+            if (WorkflowRunContext.currentRunId() != null) {
+                WorkflowRunContext.setCurrentOutputPath(publishedMain.toString());
+            }
+        });
+        return new PublicationResult(true, false, publishedMain);
+    }
+
+    private Map<String, Object> publicationManifest(String mainArtifact, Map<String, String> artifactHashes) {
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("schemaVersion", "workflow-publication/v1");
+        manifest.put("chainId", chainId);
+        manifest.put("executionId", executionId());
+        manifest.put("publicationGeneration", publicationGeneration);
+        manifest.put("mainArtifact", normalize(mainArtifact));
+        manifest.put("publishedAt", OffsetDateTime.now().toString());
+        manifest.put("artifacts", artifactHashes.entrySet().stream()
+                .map(entry -> Map.of("path", entry.getKey(), "sha256", entry.getValue()))
+                .toList());
+        return manifest;
+    }
+
+    private void validateDirectPublicationPaths(Set<String> newArtifacts, Set<String> previousArtifacts)
+            throws IOException {
+        for (String relative : previousArtifacts) {
+            secureStableArtifact(relative, "legacy previous artifact");
+        }
+        for (String relative : newArtifacts) {
+            secureStableArtifact(relative, "legacy new artifact");
+        }
+        requireNoSymlinkComponents(
+                stableRoot, stableRoot.resolve(PUBLICATION_MANIFEST), "legacy publication manifest");
+    }
+
+    private void backupDirectPublication(
+            Set<String> previousArtifacts,
+            boolean previousManifestExists,
+            Path backupRoot
+    ) throws IOException {
+        createDirectoriesSecure(runRoot, backupRoot);
+        for (String relative : previousArtifacts.stream().sorted().toList()) {
+            Path source = secureStableArtifact(relative, "legacy backup source");
+            if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException("published artifact listed in manifest is missing: " + source);
+            }
+            Path target = inside(backupRoot, backupRoot.resolve("artifacts").resolve(relative));
+            createDirectoriesSecure(backupRoot, target.getParent());
+            copyRegularFileNoFollow(source, target);
+        }
+        if (previousManifestExists) {
+            copyRegularFileNoFollow(
+                    stableRoot.resolve(PUBLICATION_MANIFEST), backupRoot.resolve(PUBLICATION_MANIFEST));
+        }
+    }
+
+    private void rollbackDirectPublication(
+            Set<String> newArtifacts,
+            Set<String> previousArtifacts,
+            boolean previousManifestExists,
+            Path backupRoot
+    ) throws IOException {
+        IOException failure = null;
+        for (String relative : newArtifacts.stream().sorted().toList()) {
+            try {
+                Path target = secureStableArtifact(relative, "legacy rollback deletion");
+                Files.deleteIfExists(target);
+            } catch (IOException | RuntimeException exception) {
+                failure = accumulate(failure, exception);
+            }
+        }
+        for (String relative : previousArtifacts.stream().sorted().toList()) {
+            try {
+                publishFile(
+                        backupRoot,
+                        backupRoot.resolve("artifacts").resolve(relative),
+                        stableRoot,
+                        secureStableArtifact(relative, "legacy rollback restore")
+                );
+            } catch (IOException | RuntimeException exception) {
+                failure = accumulate(failure, exception);
+            }
+        }
+        try {
+            if (previousManifestExists) {
+                publishFile(
+                        backupRoot,
+                        backupRoot.resolve(PUBLICATION_MANIFEST),
+                        stableRoot,
+                        stableRoot.resolve(PUBLICATION_MANIFEST)
+                );
+            } else {
+                Files.deleteIfExists(stableRoot.resolve(PUBLICATION_MANIFEST));
+            }
+        } catch (IOException | RuntimeException exception) {
+            failure = accumulate(failure, exception);
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private IOException accumulate(IOException previous, Throwable exception) {
+        IOException current = exception instanceof IOException io
+                ? io
+                : new IOException("legacy publication rollback failed", exception);
+        if (previous == null) {
+            return current;
+        }
+        previous.addSuppressed(current);
+        return previous;
+    }
+
+    private void reconcileUncommittedForwarders() throws IOException {
+        if (currentGenerationRoot(stableRoot) != null
+                || Files.exists(stableRoot.resolve(PUBLICATION_STORE).resolve(LEGACY_MIGRATION),
+                LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        boolean changed = false;
+        try (var entries = Files.list(stableRoot)) {
+            for (Path entry : entries.toList()) {
+                if (Files.isSymbolicLink(entry)) {
+                    String rootName = entry.getFileName().toString();
+                    if (Files.readSymbolicLink(entry).equals(managedForwarderTarget(rootName))) {
+                        Files.delete(entry);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if (changed) {
+            forceDirectory(stableRoot);
+        }
+    }
+
+    private void rollbackUncommittedForwarders(Set<String> created, Throwable failure) {
+        boolean changed = false;
+        for (String rootName : created.stream().sorted(Comparator.reverseOrder()).toList()) {
+            Path path = stableRoot.resolve(rootName);
+            try {
+                if (Files.isSymbolicLink(path)
+                        && Files.readSymbolicLink(path).equals(managedForwarderTarget(rootName))) {
+                    Files.delete(path);
+                    changed = true;
+                }
+            } catch (IOException | RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+        if (changed) {
+            try {
+                forceDirectory(stableRoot);
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+    }
+
+    private static ReentrantLock publicationJvmLock(Path stableRoot) {
+        return JVM_PUBLICATION_LOCKS.computeIfAbsent(stableRoot.toAbsolutePath().normalize(), ignored ->
+                new ReentrantLock());
+    }
+
+    private void runBestEffort(PostCommitOperation operation) {
+        try {
+            operation.run();
+        } catch (IOException | RuntimeException ignored) {
+            // The current generation pointer is already committed. Reconciliation occurs on the next start/publish.
         }
     }
 
@@ -320,9 +569,31 @@ public final class WorkflowArtifactWorkspace {
         }
     }
 
+    private boolean detectSymbolicLinkSupport() throws IOException {
+        Boolean override = publicationFailureInjector.symbolicLinkSupportOverride();
+        if (override != null) {
+            return override;
+        }
+        Path capabilityRoot = inside(runRoot, runRoot.resolve("capabilities"));
+        createDirectoriesSecure(runRoot, capabilityRoot);
+        Path target = capabilityRoot.resolve("symlink-target");
+        Path link = capabilityRoot.resolve("symlink-probe");
+        Files.writeString(target, "probe", StandardCharsets.UTF_8, CREATE, WRITE,
+                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+        try {
+            Files.createSymbolicLink(link, target.getFileName());
+            return Files.isSymbolicLink(link) && Files.isRegularFile(link);
+        } catch (UnsupportedOperationException | SecurityException | IOException unsupported) {
+            return false;
+        } finally {
+            Files.deleteIfExists(link);
+            Files.deleteIfExists(target);
+            Files.deleteIfExists(capabilityRoot);
+        }
+    }
+
     private void copyGenerationArtifactsToBundle(Path generationRoot) throws IOException {
-        Set<String> publishedArtifacts = artifactPathsFromManifest(
-                generationRoot, generationRoot.resolve(PUBLICATION_MANIFEST));
+        Set<String> publishedArtifacts = validateGenerationManifest(generationRoot).keySet();
         for (String relative : publishedArtifacts.stream().sorted().toList()) {
             Path source = requireNoSymlinkComponents(
                     generationRoot,
@@ -366,6 +637,8 @@ public final class WorkflowArtifactWorkspace {
                 .toList());
         atomicWriteJson(generationRoot.resolve(PUBLICATION_MANIFEST), manifest);
         forceGeneration(generationRoot);
+        makeGenerationReadOnly(generationRoot);
+        validateGenerationManifest(generationRoot);
     }
 
     private Path newGenerationRoot() throws IOException {
@@ -399,20 +672,54 @@ public final class WorkflowArtifactWorkspace {
     }
 
     private void migrateLegacyPublicationIfNecessary() throws IOException {
-        Path current = currentGenerationRoot(stableRoot);
-        if (current != null) {
+        LegacyMigration pending = readLegacyMigration();
+        if (pending != null) {
+            resumeLegacyMigration(pending);
             return;
         }
-        Set<String> legacyArtifacts = previousArtifactPaths();
-        boolean legacyManifestExists = Files.isRegularFile(
-                stableRoot.resolve(PUBLICATION_MANIFEST), LinkOption.NOFOLLOW_LINKS);
-        Map<String, String> legacyArtifactHashes = Map.of();
-        if (legacyArtifacts.isEmpty()) {
-            legacyArtifactHashes = legacyStableArtifacts();
-            legacyArtifacts = legacyArtifactHashes.keySet();
-            if (legacyArtifacts.isEmpty()) {
-                return;
+        Path current = currentGenerationRoot(stableRoot);
+        if (current != null) {
+            if (current.getFileName().toString().startsWith("legacy-before-")) {
+                Set<String> roots = topLevelArtifactNames(validateGenerationManifest(current).keySet());
+                roots.add(PUBLICATION_MANIFEST);
+                LegacyMigration recovered = new LegacyMigration(current, roots);
+                writeLegacyMigration(recovered);
+                resumeLegacyMigration(recovered);
             }
+            return;
+        }
+        Path directLegacyManifest = stableRoot.resolve(PUBLICATION_MANIFEST);
+        if (Files.exists(directLegacyManifest, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(directLegacyManifest, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException(
+                    "legacy publication manifest must be a regular non-symlink file: " + directLegacyManifest);
+        }
+        boolean legacyManifestExists = Files.isRegularFile(directLegacyManifest, LinkOption.NOFOLLOW_LINKS);
+        Map<String, String> actualLegacyArtifacts = legacyStableArtifacts();
+        Map<String, String> legacyArtifactHashes;
+        if (legacyManifestExists) {
+            Path manifest = requireNoSymlinkComponents(
+                    stableRoot, stableRoot.resolve(PUBLICATION_MANIFEST), "legacy publication manifest");
+            legacyArtifactHashes = manifestArtifactHashes(stableRoot, manifest);
+            validateDeclaredArtifactDigests(stableRoot, legacyArtifactHashes);
+            Set<String> unlisted = new LinkedHashSet<>(actualLegacyArtifacts.keySet());
+            unlisted.removeAll(legacyArtifactHashes.keySet());
+            if (!unlisted.isEmpty()) {
+                throw new IllegalStateException("unlisted legacy artifact would be lost during migration: "
+                        + unlisted.iterator().next());
+            }
+            Set<String> missing = new LinkedHashSet<>(legacyArtifactHashes.keySet());
+            missing.removeAll(actualLegacyArtifacts.keySet());
+            if (!missing.isEmpty()) {
+                throw new IllegalStateException("legacy publication manifest artifact is missing: "
+                        + missing.iterator().next());
+            }
+        } else {
+            legacyArtifactHashes = actualLegacyArtifacts;
+        }
+        Set<String> legacyArtifacts = legacyArtifactHashes.keySet();
+        if (legacyArtifacts.isEmpty()) {
+            return;
         }
 
         Path generationsRoot = generationsRoot(stableRoot);
@@ -440,20 +747,153 @@ public final class WorkflowArtifactWorkspace {
             manifest.put("publicationGeneration", Math.max(0L, publicationGeneration - 1));
             manifest.put("mainArtifact", legacyArtifacts.stream().sorted().findFirst().orElseThrow());
             manifest.put("publishedAt", OffsetDateTime.now().toString());
-            Map<String, String> hashes = legacyArtifactHashes;
             manifest.put("artifacts", legacyArtifacts.stream().sorted()
-                    .map(path -> Map.of("path", path, "sha256", hashes.get(path)))
+                    .map(path -> Map.of("path", path, "sha256", legacyArtifactHashes.get(path)))
                     .toList());
             atomicWriteJson(legacyRoot.resolve(PUBLICATION_MANIFEST), manifest);
         }
         forceGeneration(legacyRoot);
+        makeGenerationReadOnly(legacyRoot);
+        validateGenerationManifest(legacyRoot);
 
-        switchCurrentGeneration(legacyRoot);
         Set<String> roots = topLevelArtifactNames(legacyArtifacts);
         roots.add(PUBLICATION_MANIFEST);
-        for (String rootName : roots.stream().sorted().toList()) {
-            replaceLegacyRootWithForwarder(rootName);
+        LegacyMigration migration = new LegacyMigration(legacyRoot, roots);
+        writeLegacyMigration(migration);
+        switchCurrentGeneration(legacyRoot);
+        publicationFailureInjector.afterLegacyPointerSwitch(legacyRoot);
+        resumeLegacyMigration(migration);
+    }
+
+    private void resumeLegacyMigration(LegacyMigration migration) throws IOException {
+        Map<String, String> generationArtifacts = validateGenerationManifest(migration.generationRoot());
+        Path current = currentGenerationRoot(stableRoot);
+        if (current == null) {
+            switchCurrentGeneration(migration.generationRoot());
+            current = migration.generationRoot();
         }
+        if (!current.equals(migration.generationRoot())) {
+            throw new IllegalStateException("legacy migration pointer targets a different generation: " + current);
+        }
+        for (String rootName : migration.rootNames().stream().sorted().toList()) {
+            Path stableEntry = stableRoot.resolve(rootName);
+            if (Files.isSymbolicLink(stableEntry)) {
+                if (!Files.readSymbolicLink(stableEntry).equals(managedForwarderTarget(rootName))) {
+                    throw new IllegalStateException("legacy publication contains an unmanaged symlink: " + stableEntry);
+                }
+                continue;
+            }
+            if (Files.exists(stableEntry, LinkOption.NOFOLLOW_LINKS)) {
+                validateLegacyRootBeforeReplacement(rootName, migration.generationRoot(), generationArtifacts);
+            }
+            replaceLegacyRootWithForwarder(rootName);
+            publicationFailureInjector.afterLegacyRootReplacement(stableEntry);
+        }
+        Path backup = stableRoot.resolve(PUBLICATION_STORE).resolve("migration-backup");
+        deleteGenerationWithoutFollowingLinks(backup);
+        Files.deleteIfExists(legacyMigrationPath());
+        forceDirectory(publicationStore(stableRoot));
+        forceDirectory(stableRoot);
+    }
+
+    private void validateLegacyRootBeforeReplacement(
+            String rootName,
+            Path generationRoot,
+            Map<String, String> generationArtifacts
+    ) throws IOException {
+        if (PUBLICATION_MANIFEST.equals(rootName)) {
+            if (Files.mismatch(stableRoot.resolve(rootName), generationRoot.resolve(rootName)) != -1L) {
+                throw new IllegalStateException("legacy publication manifest changed during migration");
+            }
+            return;
+        }
+        Map<String, String> expected = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : generationArtifacts.entrySet()) {
+            if (Path.of(entry.getKey()).getName(0).toString().equals(rootName)) {
+                expected.put(entry.getKey(), entry.getValue());
+            }
+        }
+        Map<String, String> actual = stableArtifactsUnderRoot(rootName);
+        if (!actual.equals(expected)) {
+            Set<String> unlisted = new LinkedHashSet<>(actual.keySet());
+            unlisted.removeAll(expected.keySet());
+            if (!unlisted.isEmpty()) {
+                throw new IllegalStateException("unlisted legacy artifact would be lost during migration: "
+                        + unlisted.iterator().next());
+            }
+            throw new IllegalStateException("legacy artifact changed during migration: " + rootName);
+        }
+    }
+
+    private Map<String, String> stableArtifactsUnderRoot(String rootName) throws IOException {
+        Path root = secureStableArtifact(rootName, "legacy root validation");
+        Map<String, String> result = new LinkedHashMap<>();
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted().toList()) {
+                requireNoSymlinkComponents(stableRoot, path, "legacy root validation");
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    continue;
+                }
+                if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalStateException("legacy root contains a non-regular artifact: " + path);
+                }
+                result.put(normalize(stableRoot.relativize(path).toString()), sha256(path));
+            }
+        }
+        return result;
+    }
+
+    private void writeLegacyMigration(LegacyMigration migration) throws IOException {
+        Path marker = legacyMigrationPath();
+        Path temporary = marker.resolveSibling(marker.getFileName() + ".tmp-" + executionId());
+        String content = migration.generationRoot().getFileName() + "\n"
+                + String.join("\n", migration.rootNames().stream().sorted().toList()) + "\n";
+        Files.writeString(
+                temporary, content, StandardCharsets.UTF_8,
+                CREATE, WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS
+        );
+        try (FileChannel channel = FileChannel.open(temporary, WRITE, LinkOption.NOFOLLOW_LINKS)) {
+            channel.force(true);
+        }
+        atomicMoveRequired(stableRoot, temporary, marker);
+        forceDirectory(publicationStore(stableRoot));
+    }
+
+    private LegacyMigration readLegacyMigration() throws IOException {
+        Path marker = stableRoot.resolve(PUBLICATION_STORE).resolve(LEGACY_MIGRATION);
+        if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        requireNoSymlinkComponents(stableRoot, marker, "legacy migration marker");
+        List<String> lines = Files.readAllLines(marker, StandardCharsets.UTF_8);
+        if (lines.size() < 2 || lines.getFirst().isBlank()) {
+            throw new IllegalStateException("legacy migration marker is invalid: " + marker);
+        }
+        Path generations = generationsRoot(stableRoot);
+        Path generation = requireNoSymlinkComponents(
+                generations,
+                inside(generations, generations.resolve(lines.getFirst())),
+                "legacy migration generation"
+        );
+        Set<String> roots = new LinkedHashSet<>();
+        for (String line : lines.subList(1, lines.size())) {
+            if (!line.isBlank()) {
+                requireForwardableRootName(line);
+                roots.add(line);
+            }
+        }
+        if (roots.isEmpty()) {
+            throw new IllegalStateException("legacy migration marker has no roots: " + marker);
+        }
+        return new LegacyMigration(generation, roots);
+    }
+
+    private Path legacyMigrationPath() throws IOException {
+        return requireNoSymlinkComponents(
+                stableRoot,
+                publicationStore(stableRoot).resolve(LEGACY_MIGRATION),
+                "legacy migration marker"
+        );
     }
 
     private Map<String, String> legacyStableArtifacts() throws IOException {
@@ -505,9 +945,10 @@ public final class WorkflowArtifactWorkspace {
         } finally {
             Files.deleteIfExists(temporary);
         }
+        forceDirectory(stableRoot);
     }
 
-    private void ensureManagedForwarder(String rootName) throws IOException {
+    private boolean ensureManagedForwarder(String rootName) throws IOException {
         requireForwardableRootName(rootName);
         Path forwarder = stableRoot.resolve(rootName);
         Path expectedTarget = managedForwarderTarget(rootName);
@@ -517,7 +958,7 @@ public final class WorkflowArtifactWorkspace {
                 throw new IllegalStateException(
                         "stable publication artifact contains an unmanaged symlink: " + forwarder);
             }
-            return;
+            return false;
         }
         if (Files.exists(forwarder, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalStateException(
@@ -529,6 +970,8 @@ public final class WorkflowArtifactWorkspace {
         Files.createSymbolicLink(temporary, expectedTarget);
         try {
             atomicMoveRequired(stableRoot, temporary, forwarder);
+            forceDirectory(stableRoot);
+            return true;
         } finally {
             Files.deleteIfExists(temporary);
         }
@@ -585,6 +1028,7 @@ public final class WorkflowArtifactWorkspace {
     private void cleanupStaleForwarders(Set<String> currentRoots) throws IOException {
         Set<String> retained = new LinkedHashSet<>(currentRoots);
         retained.add(PUBLICATION_MANIFEST);
+        boolean changed = false;
         try (var entries = Files.list(stableRoot)) {
             for (Path entry : entries.toList()) {
                 if (!Files.isSymbolicLink(entry)) {
@@ -594,8 +1038,12 @@ public final class WorkflowArtifactWorkspace {
                 if (Files.readSymbolicLink(entry).equals(managedForwarderTarget(rootName))
                         && !retained.contains(rootName)) {
                     Files.delete(entry);
+                    changed = true;
                 }
             }
+        }
+        if (changed) {
+            forceDirectory(stableRoot);
         }
     }
 
@@ -706,19 +1154,40 @@ public final class WorkflowArtifactWorkspace {
         }
         Path generations = generationsRoot(stableRoot);
         Path current = currentGenerationRoot(stableRoot);
+        String pendingLegacyGeneration = pendingLegacyGenerationName(stableRoot);
         try (var entries = Files.list(generations)) {
             for (Path entry : entries.toList()) {
-                if (current == null || !entry.equals(current)) {
+                if ((current == null || !entry.equals(current))
+                        && !entry.getFileName().toString().equals(pendingLegacyGeneration)) {
                     deleteGenerationWithoutFollowingLinks(entry);
                 }
             }
         }
     }
 
+    private static String pendingLegacyGenerationName(Path stableRoot) throws IOException {
+        Path marker = stableRoot.resolve(PUBLICATION_STORE).resolve(LEGACY_MIGRATION);
+        if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        requireNoSymlinkComponents(stableRoot, marker, "legacy migration marker");
+        List<String> lines = Files.readAllLines(marker, StandardCharsets.UTF_8);
+        if (lines.isEmpty() || lines.getFirst().isBlank()) {
+            throw new IllegalStateException("legacy migration marker is invalid: " + marker);
+        }
+        String generationName = lines.getFirst();
+        if (generationName.indexOf('/') >= 0 || generationName.indexOf('\\') >= 0
+                || Path.of(generationName).getNameCount() != 1) {
+            throw new IllegalStateException("legacy migration generation is invalid: " + generationName);
+        }
+        return generationName;
+    }
+
     private static void deleteGenerationWithoutFollowingLinks(Path target) throws IOException {
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
+        makeTreeWritable(target);
         Files.walkFileTree(target, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -767,6 +1236,78 @@ public final class WorkflowArtifactWorkspace {
         forceDirectory(generationRoot.getParent());
     }
 
+    private static void makeGenerationReadOnly(Path generationRoot) throws IOException {
+        try (var paths = Files.walk(generationRoot)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                if (Files.isSymbolicLink(path)) {
+                    throw new IllegalStateException("generation contains a symbolic link: " + path);
+                }
+                PosixFileAttributeView posix = Files.getFileAttributeView(
+                        path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                if (posix != null) {
+                    Set<PosixFilePermission> permissions = new LinkedHashSet<>(posix.readAttributes().permissions());
+                    permissions.remove(PosixFilePermission.OWNER_WRITE);
+                    permissions.remove(PosixFilePermission.GROUP_WRITE);
+                    permissions.remove(PosixFilePermission.OTHERS_WRITE);
+                    posix.setPermissions(permissions);
+                    continue;
+                }
+                DosFileAttributeView dos = Files.getFileAttributeView(
+                        path, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                if (dos != null && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    dos.setReadOnly(true);
+                } else if (!path.toFile().setWritable(false, false)) {
+                    throw new IOException("unable to make generation path read-only: " + path);
+                }
+            }
+        }
+        forceDirectory(generationRoot.getParent());
+    }
+
+    private static void makeTreeWritable(Path root) throws IOException {
+        if (Files.isSymbolicLink(root)) {
+            return;
+        }
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) throws IOException {
+                makePathWritable(directory, true);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (!attrs.isSymbolicLink()) {
+                    makePathWritable(file, false);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void makePathWritable(Path path, boolean directory) throws IOException {
+        PosixFileAttributeView posix = Files.getFileAttributeView(
+                path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (posix != null) {
+            Set<PosixFilePermission> permissions = new LinkedHashSet<>(posix.readAttributes().permissions());
+            permissions.add(PosixFilePermission.OWNER_READ);
+            permissions.add(PosixFilePermission.OWNER_WRITE);
+            if (directory) {
+                permissions.add(PosixFilePermission.OWNER_EXECUTE);
+            }
+            posix.setPermissions(permissions);
+            return;
+        }
+        DosFileAttributeView dos = Files.getFileAttributeView(
+                path, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (dos != null && !directory) {
+            dos.setReadOnly(false);
+        }
+        if (!path.toFile().setWritable(true, true)) {
+            throw new IOException("unable to make generation path writable for cleanup: " + path);
+        }
+    }
+
     private static void forceDirectory(Path directory) throws IOException {
         try (FileChannel channel = FileChannel.open(directory, READ, LinkOption.NOFOLLOW_LINKS)) {
             channel.force(true);
@@ -781,10 +1322,30 @@ public final class WorkflowArtifactWorkspace {
         if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)) {
             return Set.of();
         }
-        return artifactPathsFromManifest(manifestRoot, manifest);
+        Map<String, String> hashes = manifestArtifactHashes(manifestRoot, manifest);
+        validateDeclaredArtifactDigests(manifestRoot, hashes);
+        if (currentGeneration != null) {
+            validateGenerationContents(currentGeneration, hashes.keySet());
+        }
+        return hashes.keySet();
     }
 
-    private Set<String> artifactPathsFromManifest(Path manifestRoot, Path manifest) throws IOException {
+    private Map<String, String> validateGenerationManifest(Path generationRoot) throws IOException {
+        Path manifest = requireNoSymlinkComponents(
+                generationRoot,
+                generationRoot.resolve(PUBLICATION_MANIFEST),
+                "generation publication manifest"
+        );
+        if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("generation publication manifest is missing: " + manifest);
+        }
+        Map<String, String> hashes = manifestArtifactHashes(generationRoot, manifest);
+        validateDeclaredArtifactDigests(generationRoot, hashes);
+        validateGenerationContents(generationRoot, hashes.keySet());
+        return hashes;
+    }
+
+    private Map<String, String> manifestArtifactHashes(Path manifestRoot, Path manifest) throws IOException {
         requireNoSymlinkComponents(manifestRoot, manifest, "publication manifest");
         Map<String, Object> root;
         try (InputStream input = Files.newInputStream(manifest, READ, LinkOption.NOFOLLOW_LINKS)) {
@@ -793,18 +1354,56 @@ public final class WorkflowArtifactWorkspace {
         }
         Object value = root.get("artifacts");
         if (!(value instanceof List<?> list)) {
-            return Set.of();
+            throw new IllegalStateException("publication manifest artifacts must be an array: " + manifest);
         }
-        Set<String> paths = new LinkedHashSet<>();
+        Map<String, String> hashes = new LinkedHashMap<>();
         for (Object item : list) {
-            if (item instanceof Map<?, ?> map && map.get("path") != null) {
+            if (item instanceof Map<?, ?> map && map.get("path") != null && map.get("sha256") != null) {
                 String relative = requireCanonicalRelativeArtifactPath(map.get("path").toString());
-                if (!paths.add(relative)) {
+                String digest = map.get("sha256").toString();
+                if (!digest.matches("[0-9a-f]{64}")) {
+                    throw new IllegalStateException(
+                            "publication manifest contains an invalid sha256 for artifact: " + relative);
+                }
+                if (hashes.putIfAbsent(relative, digest) != null) {
                     throw new IllegalStateException("publication manifest contains duplicate artifact path: " + relative);
                 }
+            } else {
+                throw new IllegalStateException("publication manifest contains an invalid artifact entry: " + manifest);
             }
         }
-        return paths;
+        return hashes;
+    }
+
+    private void validateDeclaredArtifactDigests(Path artifactRoot, Map<String, String> hashes) throws IOException {
+        for (Map.Entry<String, String> entry : hashes.entrySet()) {
+            Path artifact = requireNoSymlinkComponents(
+                    artifactRoot,
+                    inside(artifactRoot, artifactRoot.resolve(entry.getKey())),
+                    "manifest artifact"
+            );
+            if (!Files.isRegularFile(artifact, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException("manifest artifact is missing: " + entry.getKey());
+            }
+            String actual = sha256(artifact);
+            if (!actual.equals(entry.getValue())) {
+                throw new IllegalStateException("publication manifest digest mismatch for artifact: "
+                        + entry.getKey());
+            }
+        }
+    }
+
+    private void validateGenerationContents(Path generationRoot, Set<String> declaredArtifacts) throws IOException {
+        Set<String> actual = new LinkedHashSet<>(artifacts(generationRoot).keySet());
+        actual.remove(PUBLICATION_MANIFEST);
+        if (!actual.equals(new LinkedHashSet<>(declaredArtifacts))) {
+            Set<String> unexpected = new LinkedHashSet<>(actual);
+            unexpected.removeAll(declaredArtifacts);
+            Set<String> missing = new LinkedHashSet<>(declaredArtifacts);
+            missing.removeAll(actual);
+            throw new IllegalStateException("generation contents do not match publication manifest; unexpected="
+                    + unexpected + ", missing=" + missing);
+        }
     }
 
     private void writeRunManifest(String state, String message) throws IOException {
@@ -837,6 +1436,19 @@ public final class WorkflowArtifactWorkspace {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(output, value);
         }
         atomicMoveSecure(root, temporary, target);
+    }
+
+    private void publishFile(Path sourceRoot, Path source, Path targetRoot, Path target) throws IOException {
+        requireNoSymlinkComponents(sourceRoot, source, "publication copy source");
+        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("publication copy source must be a non-symlink regular file: " + source);
+        }
+        createDirectoriesSecure(targetRoot, target.getParent());
+        requireNoSymlinkComponents(targetRoot, target, "publication copy target");
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp-" + executionId());
+        requireNoSymlinkComponents(targetRoot, temporary, "publication temporary target");
+        copyRegularFileNoFollow(source, temporary);
+        atomicMoveSecure(targetRoot, temporary, target);
     }
 
     private static void atomicMoveSecure(Path root, Path source, Path target) throws IOException {
@@ -896,20 +1508,26 @@ public final class WorkflowArtifactWorkspace {
     private static long nextGeneration(Path stableRoot) throws IOException {
         Path lockPath = requireNoSymlinkComponents(
                 stableRoot, stableRoot.resolve(PUBLISH_LOCK), "publication lock");
-        try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE, LinkOption.NOFOLLOW_LINKS);
-             FileLock ignored = channel.lock()) {
-            cleanupOrphanGenerations(stableRoot);
-            long next = readGeneration(stableRoot) + 1;
-            Path target = requireNoSymlinkComponents(
-                    stableRoot, stableRoot.resolve(GENERATION_FILE), "publication generation target");
-            Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
-            requireNoSymlinkComponents(stableRoot, temporary, "publication generation temporary target");
-            Files.writeString(
-                    temporary, Long.toString(next), StandardCharsets.UTF_8,
-                    CREATE, WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS
-            );
-            atomicMoveSecure(stableRoot, temporary, target);
-            return next;
+        ReentrantLock jvmLock = publicationJvmLock(stableRoot);
+        jvmLock.lock();
+        try {
+            try (FileChannel channel = FileChannel.open(lockPath, CREATE, READ, WRITE, LinkOption.NOFOLLOW_LINKS);
+                 FileLock ignored = channel.lock()) {
+                cleanupOrphanGenerations(stableRoot);
+                long next = readGeneration(stableRoot) + 1;
+                Path target = requireNoSymlinkComponents(
+                        stableRoot, stableRoot.resolve(GENERATION_FILE), "publication generation target");
+                Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+                requireNoSymlinkComponents(stableRoot, temporary, "publication generation temporary target");
+                Files.writeString(
+                        temporary, Long.toString(next), StandardCharsets.UTF_8,
+                        CREATE, WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS
+                );
+                atomicMoveSecure(stableRoot, temporary, target);
+                return next;
+            }
+        } finally {
+            jvmLock.unlock();
         }
     }
 
@@ -1092,11 +1710,30 @@ public final class WorkflowArtifactWorkspace {
     public record PublicationResult(boolean published, boolean superseded, Path mainArtifact) {
     }
 
+    private record LegacyMigration(Path generationRoot, Set<String> rootNames) {
+        private LegacyMigration {
+            rootNames = Set.copyOf(rootNames);
+        }
+    }
+
     interface PublicationFailureInjector {
         default void afterGenerationPrepared(Path generationRoot) throws IOException {
         }
 
+        default void beforePointerSwitch(Path generationRoot) throws IOException {
+        }
+
         default void afterPointerSwitch(Path generationRoot) throws IOException {
+        }
+
+        default void afterLegacyPointerSwitch(Path generationRoot) throws IOException {
+        }
+
+        default void afterLegacyRootReplacement(Path stableRootEntry) throws IOException {
+        }
+
+        default Boolean symbolicLinkSupportOverride() {
+            return null;
         }
 
         default void afterDeletion(Path path) throws IOException {
@@ -1104,6 +1741,11 @@ public final class WorkflowArtifactWorkspace {
 
         default void afterReplacement(Path path) throws IOException {
         }
+    }
+
+    @FunctionalInterface
+    private interface PostCommitOperation {
+        void run() throws IOException;
     }
 
 }

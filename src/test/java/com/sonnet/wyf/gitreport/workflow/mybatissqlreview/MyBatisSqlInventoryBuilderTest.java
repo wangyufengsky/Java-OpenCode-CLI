@@ -79,14 +79,11 @@ class MyBatisSqlInventoryBuilderTest {
     }
 
     @Test
-    void rejectsExternalEntitiesEvenWhenXmlPretendsToBeANonMapperDocument() throws Exception {
+    void rejectsExternalEntitiesWhenMapperContentUsesANonMapperFilename() throws Exception {
         write("pom.xml", """
-                <!DOCTYPE project [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
-                <project><name>&xxe;</name></project>
-                """);
-        write("queries.xml", """
-                <mapper namespace="demo.Queries">
-                  <select id="query">SELECT 1</select>
+                <!DOCTYPE mapper [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+                <mapper namespace="demo.Disguised">
+                  <select id="query">SELECT '&xxe;'</select>
                 </mapper>
                 """);
 
@@ -94,6 +91,52 @@ class MyBatisSqlInventoryBuilderTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("external entities are forbidden")
                 .hasMessageContaining("pom.xml");
+    }
+
+    @Test
+    void safelySkipsNonMapperXmlWithAnExternalDoctypeWithoutResolvingIt() throws Exception {
+        write("legacy-spring.xml", """
+                <!DOCTYPE beans SYSTEM "https://invalid.example.test/spring-beans.dtd">
+                <beans><bean id="ignored"/></beans>
+                """);
+        write("queries.xml", """
+                <mapper namespace="demo.Queries">
+                  <select id="query">SELECT 1</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(repository, List.of(), List.of());
+
+        assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly("queries.xml");
+    }
+
+    @Test
+    void ignoresDoctypeTextInsideCommentsBeforeStrictMapperParsing() throws Exception {
+        write("queries.xml", """
+                <!-- <!DOCTYPE mapper SYSTEM "file:///etc/passwd"> -->
+                <mapper namespace="demo.Queries">
+                  <select id="query">SELECT 1</select>
+                </mapper>
+                """);
+
+        assertThat(builder.build(repository, List.of(), List.of()).statements()).singleElement()
+                .extracting(MyBatisSqlStatement::normalizedSql)
+                .isEqualTo("SELECT 1");
+    }
+
+    @Test
+    void rejectsPrefixedOrNamespacedMapperRoots() throws Exception {
+        write("prefixed.xml", """
+                <mb:mapper xmlns:mb="urn:not-mybatis" namespace="demo.Prefixed">
+                  <mb:select id="query">SELECT 1</mb:select>
+                </mb:mapper>
+                """);
+
+        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("mapper root must be unprefixed and have no namespace")
+                .hasMessageContaining("prefixed.xml");
     }
 
     @Test

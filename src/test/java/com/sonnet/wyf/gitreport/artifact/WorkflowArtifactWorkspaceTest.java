@@ -8,12 +8,21 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class WorkflowArtifactWorkspaceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -123,7 +132,7 @@ class WorkflowArtifactWorkspaceTest {
     }
 
     @Test
-    void crashAfterPointerSwitchLeavesOnlyTheNewGenerationVisible() throws Exception {
+    void failureAfterPointerSwitchStillReportsTheCommittedNewGenerationAsPublished() throws Exception {
         publishInitialArtifactSet();
         WorkflowArtifactWorkspace workspace = workspace(
                 "run-crash-after-switch",
@@ -137,16 +146,269 @@ class WorkflowArtifactWorkspaceTest {
         );
         writeReplacementBundle(workspace);
 
-        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
-                .isInstanceOf(java.io.IOException.class)
-                .hasMessageContaining("simulated crash after pointer switch");
+        WorkflowArtifactWorkspace.PublicationResult result = workspace.publish("weekly-report.md");
 
+        assertThat(result.published()).isTrue();
         assertThat(tempDir.resolve("weekly-report.md")).hasContent("new report");
         assertThat(tempDir.resolve("replace.txt")).hasContent("new replacement");
         assertThat(tempDir.resolve("new-only.txt")).hasContent("new only");
         assertThat(tempDir.resolve("old-only.txt")).doesNotExist();
         assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST))
                 .content().contains("\"executionId\" : \"run-crash-after-switch\"");
+    }
+
+    @Test
+    void firstPublishRollsBackForwardersWhenFailureOccursBeforeTheCommitPoint() throws Exception {
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-first-switch-failure",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void beforePointerSwitch(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("failure before first pointer switch");
+                    }
+                }
+        );
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "new report");
+        Files.writeString(workspace.bundleRoot().resolve("nested.txt"), "new nested");
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("failure before first pointer switch");
+
+        assertThat(tempDir.resolve("weekly-report.md")).doesNotExist();
+        assertThat(tempDir.resolve("nested.txt")).doesNotExist();
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).doesNotExist();
+        assertThat(tempDir.resolve(".published/current")).doesNotExist();
+    }
+
+    @Test
+    void legacyMigrationRejectsUnlistedDescendantsBeforeChangingTheStableNamespace() throws Exception {
+        Files.writeString(tempDir.resolve("weekly-report.md"), "old report");
+        Files.createDirectories(tempDir.resolve("reports"));
+        Files.writeString(tempDir.resolve("reports/listed.txt"), "listed");
+        Files.writeString(tempDir.resolve("reports/unlisted.txt"), "must survive");
+        writeLegacyManifest(List.of("weekly-report.md", "reports/listed.txt"));
+        byte[] manifestBefore = Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST));
+        WorkflowArtifactWorkspace workspace = workspace("run-legacy-extra", false);
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "new report");
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unlisted legacy artifact")
+                .hasMessageContaining("reports/unlisted.txt");
+
+        assertThat(tempDir.resolve("reports")).isDirectory();
+        assertThat(Files.isSymbolicLink(tempDir.resolve("reports"))).isFalse();
+        assertThat(tempDir.resolve("reports/listed.txt")).hasContent("listed");
+        assertThat(tempDir.resolve("reports/unlisted.txt")).hasContent("must survive");
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("old report");
+        assertThat(Files.readAllBytes(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)))
+                .isEqualTo(manifestBefore);
+        assertThat(tempDir.resolve(".published/current")).doesNotExist();
+    }
+
+    @Test
+    void resumesLegacyMigrationAfterCurrentSwitchedBeforeRootForwardersWereInstalled() throws Exception {
+        Files.writeString(tempDir.resolve("weekly-report.md"), "old report");
+        writeLegacyManifest(List.of("weekly-report.md"));
+        WorkflowArtifactWorkspace interrupted = workspace(
+                "run-legacy-interrupted",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterLegacyPointerSwitch(Path ignored) throws java.io.IOException {
+                        throw new java.io.IOException("legacy process stopped after pointer switch");
+                    }
+                }
+        );
+        Files.writeString(interrupted.bundleRoot().resolve("weekly-report.md"), "first replacement");
+
+        assertThatThrownBy(() -> interrupted.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("legacy process stopped after pointer switch");
+        assertThat(tempDir.resolve(".published/current")).isSymbolicLink();
+        assertThat(tempDir.resolve("weekly-report.md")).isRegularFile();
+        assertThat(Files.isSymbolicLink(tempDir.resolve("weekly-report.md"))).isFalse();
+
+        Files.delete(tempDir.resolve("weekly-report.md"));
+        WorkflowArtifactWorkspace recovered = workspace("run-legacy-recovered", false);
+        Files.writeString(recovered.bundleRoot().resolve("weekly-report.md"), "recovered replacement");
+
+        WorkflowArtifactWorkspace.PublicationResult result = recovered.publish("weekly-report.md");
+
+        assertThat(result.published()).isTrue();
+        assertThat(tempDir.resolve("weekly-report.md")).isSymbolicLink().hasContent("recovered replacement");
+        assertThat(tempDir.resolve(".published/legacy-migration")).doesNotExist();
+    }
+
+    @Test
+    void resumesLegacyMigrationAfterOnlySomeRootForwardersWereInstalled() throws Exception {
+        Files.writeString(tempDir.resolve("weekly-report.md"), "old report");
+        Files.createDirectories(tempDir.resolve("reports"));
+        Files.writeString(tempDir.resolve("reports/listed.txt"), "old nested");
+        writeLegacyManifest(List.of("weekly-report.md", "reports/listed.txt"));
+        WorkflowArtifactWorkspace interrupted = workspace(
+                "run-legacy-partial-roots",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterLegacyRootReplacement(Path stableRootEntry) throws java.io.IOException {
+                        throw new java.io.IOException("legacy process stopped after one root replacement");
+                    }
+                }
+        );
+        Files.writeString(interrupted.bundleRoot().resolve("weekly-report.md"), "first replacement");
+
+        assertThatThrownBy(() -> interrupted.publish("weekly-report.md"))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("stopped after one root replacement");
+        assertThat(tempDir.resolve(".published/current")).isSymbolicLink();
+        assertThat(tempDir.resolve(".published/legacy-migration")).isRegularFile();
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).isSymbolicLink();
+        assertThat(tempDir.resolve("reports")).isDirectory();
+        assertThat(Files.isSymbolicLink(tempDir.resolve("reports"))).isFalse();
+
+        boolean[] recoveredReportsRoot = {false};
+        WorkflowArtifactWorkspace recovered = workspace(
+                "run-legacy-partial-recovered",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public void afterLegacyRootReplacement(Path stableRootEntry) {
+                        if (stableRootEntry.getFileName().toString().equals("reports")) {
+                            recoveredReportsRoot[0] = true;
+                        }
+                    }
+                }
+        );
+        Files.writeString(recovered.bundleRoot().resolve("weekly-report.md"), "recovered replacement");
+
+        assertThat(recovered.publish("weekly-report.md").published()).isTrue();
+        assertThat(recoveredReportsRoot[0]).isTrue();
+        assertThat(tempDir.resolve("weekly-report.md")).isSymbolicLink().hasContent("recovered replacement");
+        assertThat(tempDir.resolve("reports")).doesNotExist();
+        assertThat(tempDir.resolve(".published/legacy-migration")).doesNotExist();
+    }
+
+    @Test
+    void rejectsAnUnmanagedLegacyManifestSymlinkBeforeCreatingPublicationNamespace() throws Exception {
+        Path external = tempDir.resolve("external-manifest.json");
+        Files.writeString(external, "{}");
+        Files.writeString(tempDir.resolve("weekly-report.md"), "old report");
+        Files.createSymbolicLink(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST), external);
+        WorkflowArtifactWorkspace workspace = workspace("run-legacy-manifest-symlink", false);
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "new report");
+
+        assertThatThrownBy(() -> workspace.publish("weekly-report.md"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("legacy publication manifest")
+                .hasMessageContaining("regular non-symlink file");
+
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("old report");
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).isSymbolicLink();
+        assertThat(tempDir.resolve(".published")).doesNotExist();
+        assertThat(external).hasContent("{}");
+    }
+
+    @Test
+    void nonMyBatisChainKeepsLegacyPublicationWhenSymbolicLinksAreUnavailable() throws Exception {
+        WorkflowArtifactWorkspace workspace = workspace(
+                "run-no-symlink-shared-chain",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public Boolean symbolicLinkSupportOverride() {
+                        return false;
+                    }
+                }
+        );
+        Files.writeString(workspace.bundleRoot().resolve("weekly-report.md"), "legacy backend");
+
+        WorkflowArtifactWorkspace.PublicationResult result = workspace.publish("weekly-report.md");
+
+        assertThat(result.published()).isTrue();
+        assertThat(tempDir.resolve("weekly-report.md")).isRegularFile().hasContent("legacy backend");
+        assertThat(Files.isSymbolicLink(tempDir.resolve("weekly-report.md"))).isFalse();
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST))
+                .isRegularFile();
+        assertThat(Files.isSymbolicLink(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST))).isFalse();
+    }
+
+    @Test
+    void myBatisChainFailsClosedBeforePublishingWhenSymbolicLinksAreUnavailable() throws Exception {
+        WorkflowArtifactWorkspace workspace = workspace(
+                "mybatis-sql-review",
+                "run-no-symlink-mybatis",
+                false,
+                new WorkflowArtifactWorkspace.PublicationFailureInjector() {
+                    @Override
+                    public Boolean symbolicLinkSupportOverride() {
+                        return false;
+                    }
+                }
+        );
+        Files.writeString(workspace.bundleRoot().resolve("mybatis-sql-review-report.md"), "unsafe fallback");
+
+        assertThatThrownBy(() -> workspace.publish("mybatis-sql-review-report.md"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires crash-atomic generation publication")
+                .hasMessageContaining("symbolic links");
+
+        assertThat(tempDir.resolve("mybatis-sql-review-report.md")).doesNotExist();
+        assertThat(tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST)).doesNotExist();
+    }
+
+    @Test
+    void committedGenerationIsReadOnlyAndSeedRejectsDigestTampering() throws Exception {
+        publishInitialArtifactSet();
+        Path currentPointer = tempDir.resolve(".published/current");
+        Path generation = currentPointer.getParent().resolve(Files.readSymbolicLink(currentPointer)).normalize();
+        assumeTrue(Files.getFileStore(generation).supportsFileAttributeView("posix"));
+
+        assertThat(Files.getPosixFilePermissions(generation))
+                .doesNotContain(PosixFilePermission.OWNER_WRITE);
+        assertThat(Files.getPosixFilePermissions(generation.resolve("weekly-report.md")))
+                .doesNotContain(PosixFilePermission.OWNER_WRITE);
+
+        Files.setPosixFilePermissions(generation, Set.of(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE));
+        Files.setPosixFilePermissions(generation.resolve("weekly-report.md"), Set.of(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE));
+        Files.writeString(generation.resolve("weekly-report.md"), "tampered");
+
+        assertThatThrownBy(() -> workspace("run-seed-tampered", true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("digest mismatch")
+                .hasMessageContaining("weekly-report.md");
+    }
+
+    @Test
+    void concurrentPublishSerializesInJvmAndOnlyNewestExecutionCommits() throws Exception {
+        WorkflowArtifactWorkspace older = workspace("run-concurrent-older", false);
+        Files.writeString(older.bundleRoot().resolve("weekly-report.md"), "older");
+        WorkflowArtifactWorkspace newer = workspace("run-concurrent-newer", false);
+        Files.writeString(newer.bundleRoot().resolve("weekly-report.md"), "newer");
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<WorkflowArtifactWorkspace.PublicationResult> olderFuture = executor.submit(() -> {
+                start.await();
+                return older.publish("weekly-report.md");
+            });
+            Future<WorkflowArtifactWorkspace.PublicationResult> newerFuture = executor.submit(() -> {
+                start.await();
+                return newer.publish("weekly-report.md");
+            });
+            start.countDown();
+
+            assertThat(olderFuture.get().superseded()).isTrue();
+            assertThat(newerFuture.get().published()).isTrue();
+        }
+        assertThat(tempDir.resolve("weekly-report.md")).hasContent("newer");
     }
 
     @Test
@@ -281,7 +543,6 @@ class WorkflowArtifactWorkspaceTest {
 
         Path external = Files.createDirectories(tempDir.resolve("external-parent"));
         Files.writeString(external.resolve("old.txt"), "outside old");
-        Files.delete(tempDir.resolve("reports/old.txt"));
         Files.delete(tempDir.resolve("reports"));
         Files.createSymbolicLink(tempDir.resolve("reports"), external);
         WorkflowArtifactWorkspace replacement = workspace("run-symlink-replacement", false);
@@ -363,6 +624,15 @@ class WorkflowArtifactWorkspaceTest {
             boolean seed,
             WorkflowArtifactWorkspace.PublicationFailureInjector injector
     ) throws Exception {
+        return workspace("test-chain", executionId, seed, injector);
+    }
+
+    private WorkflowArtifactWorkspace workspace(
+            String chainId,
+            String executionId,
+            boolean seed,
+            WorkflowArtifactWorkspace.PublicationFailureInjector injector
+    ) throws Exception {
         WorkflowRunRequest request = new WorkflowRunRequest(
                 seed ? "rerun" : "full",
                 "",
@@ -374,8 +644,35 @@ class WorkflowArtifactWorkspaceTest {
                 null
         );
         return WorkflowArtifactWorkspace.start(
-                objectMapper, "test-chain", request, tempDir, seed, injector
+                objectMapper, chainId, request, tempDir, seed, injector
         );
+    }
+
+    private void writeLegacyManifest(List<String> artifactPaths) throws Exception {
+        List<Map<String, String>> artifacts = artifactPaths.stream()
+                .map(path -> {
+                    try {
+                        return Map.of("path", path, "sha256", sha256(tempDir.resolve(path)));
+                    } catch (Exception exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                })
+                .toList();
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(
+                tempDir.resolve(WorkflowArtifactWorkspace.PUBLICATION_MANIFEST).toFile(),
+                Map.of(
+                        "schemaVersion", "workflow-publication/v1",
+                        "chainId", "test-chain",
+                        "executionId", "legacy-run",
+                        "publicationGeneration", 0,
+                        "mainArtifact", "weekly-report.md",
+                        "artifacts", artifacts
+                )
+        );
+    }
+
+    private String sha256(Path path) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
     }
 
     private Map<String, byte[]> publishInitialArtifactSet() throws Exception {

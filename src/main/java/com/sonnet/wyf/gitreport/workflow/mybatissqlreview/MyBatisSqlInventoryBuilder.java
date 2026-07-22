@@ -39,8 +39,6 @@ public final class MyBatisSqlInventoryBuilder {
                     + "\\s+(['\"])https?://mybatis\\.org/dtd/mybatis-3-mapper\\.dtd\\2\\s*>");
     private static final Pattern PLACEHOLDER = Pattern.compile("(?:#|\\$)\\{[^}]+}");
     private static final Pattern PROPERTY_PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)}");
-    private static final Pattern MAPPER_ELEMENT_HINT = Pattern.compile(
-            "(?is)<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?mapper(?:\\s|>)");
     private static final Comparator<ParsedMapper> MAPPER_ORDER = Comparator
             .comparing(ParsedMapper::relativePath)
             .thenComparing(ParsedMapper::namespace);
@@ -170,15 +168,31 @@ public final class MyBatisSqlInventoryBuilder {
             throw new IllegalArgumentException("unable to read MyBatis mapper XML: " + relativePath, ex);
         }
         String source = MyBatisXmlSourceDecoder.decodeUtf8(bytes, relativePath);
+
+        RootElement rootElement;
+        try {
+            rootElement = classifyRootWithoutDtd(source);
+        } catch (XMLStreamException | RuntimeException ex) {
+            String lexicalRoot = lexicalRootName(source);
+            if (lexicalRoot == null || !"mapper".equals(localPart(lexicalRoot))) {
+                return Optional.empty();
+            }
+            throw new IllegalArgumentException("failed to classify MyBatis mapper XML '" + relativePath + "': "
+                    + conciseMessage(ex), ex);
+        }
+        if (rootElement == null || !"mapper".equals(rootElement.localName())) {
+            return Optional.empty();
+        }
+        if (!rootElement.prefix().isEmpty() || !rootElement.namespaceUri().isEmpty()) {
+            throw new IllegalArgumentException("failed to parse MyBatis mapper XML '" + relativePath
+                    + "': mapper root must be unprefixed and have no namespace");
+        }
         validateDoctype(source, relativePath);
 
         XmlNode rootNode;
         try {
             rootNode = parseXml(source);
         } catch (XMLStreamException | RuntimeException ex) {
-            if (!MAPPER_ELEMENT_HINT.matcher(source).find()) {
-                return Optional.empty();
-            }
             throw new IllegalArgumentException("failed to parse MyBatis mapper XML '" + relativePath + "': "
                     + conciseMessage(ex), ex);
         }
@@ -190,26 +204,147 @@ public final class MyBatisSqlInventoryBuilder {
     }
 
     private void validateDoctype(String source, String relativePath) {
-        int start = indexOfIgnoreCase(source, "<!DOCTYPE");
-        if (start < 0) {
+        String declaration = prologDoctype(source, relativePath);
+        if (declaration == null) {
             return;
         }
-        int end = doctypeEnd(source, start);
-        if (end < 0) {
-            throw new IllegalArgumentException(
-                    "failed to parse MyBatis mapper XML '" + relativePath + "': unterminated DOCTYPE");
-        }
-        String declaration = source.substring(start, end + 1);
         if (!MYBATIS_DOCTYPE.matcher(declaration).matches()) {
             throw new IllegalArgumentException(
                     "external entities are forbidden in MyBatis mapper XML: " + relativePath
                             + "; only the standard MyBatis mapper DOCTYPE is allowed");
         }
-        if (indexOfIgnoreCase(source.substring(end + 1), "<!DOCTYPE") >= 0) {
-            throw new IllegalArgumentException(
-                    "external entities are forbidden in MyBatis mapper XML: " + relativePath
-                            + "; multiple DOCTYPE declarations are not allowed");
+    }
+
+    private RootElement classifyRootWithoutDtd(String source) throws XMLStreamException {
+        XMLInputFactory factory = XMLInputFactory.newFactory();
+        factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+        factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+        factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false);
+        setPropertyIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        setPropertyIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> {
+            throw new XMLStreamException("external entity resolution is forbidden during XML classification");
+        });
+
+        XMLStreamReader reader = factory.createXMLStreamReader(new StringReader(source));
+        try {
+            while (reader.hasNext()) {
+                if (reader.next() == XMLStreamConstants.START_ELEMENT) {
+                    return new RootElement(
+                            empty(reader.getPrefix()),
+                            reader.getLocalName(),
+                            empty(reader.getNamespaceURI())
+                    );
+                }
+            }
+            return null;
+        } finally {
+            reader.close();
         }
+    }
+
+    private String prologDoctype(String source, String relativePath) {
+        int cursor = skipBomAndWhitespace(source, 0);
+        String found = null;
+        while (cursor < source.length() && source.charAt(cursor) == '<') {
+            if (source.startsWith("<!--", cursor)) {
+                int end = source.indexOf("-->", cursor + 4);
+                if (end < 0) {
+                    throw new IllegalArgumentException(
+                            "failed to parse MyBatis mapper XML '" + relativePath + "': unterminated comment");
+                }
+                cursor = skipBomAndWhitespace(source, end + 3);
+                continue;
+            }
+            if (source.startsWith("<?", cursor)) {
+                int end = source.indexOf("?>", cursor + 2);
+                if (end < 0) {
+                    throw new IllegalArgumentException(
+                            "failed to parse MyBatis mapper XML '" + relativePath
+                                    + "': unterminated processing instruction");
+                }
+                cursor = skipBomAndWhitespace(source, end + 2);
+                continue;
+            }
+            if (source.regionMatches(true, cursor, "<!DOCTYPE", 0, "<!DOCTYPE".length())) {
+                int end = doctypeEnd(source, cursor);
+                if (end < 0) {
+                    throw new IllegalArgumentException(
+                            "failed to parse MyBatis mapper XML '" + relativePath + "': unterminated DOCTYPE");
+                }
+                if (found != null) {
+                    throw new IllegalArgumentException(
+                            "external entities are forbidden in MyBatis mapper XML: " + relativePath
+                                    + "; multiple DOCTYPE declarations are not allowed");
+                }
+                found = source.substring(cursor, end + 1);
+                cursor = skipBomAndWhitespace(source, end + 1);
+                continue;
+            }
+            break;
+        }
+        return found;
+    }
+
+    private String lexicalRootName(String source) {
+        int cursor = skipBomAndWhitespace(source, 0);
+        while (cursor < source.length() && source.charAt(cursor) == '<') {
+            if (source.startsWith("<!--", cursor)) {
+                int end = source.indexOf("-->", cursor + 4);
+                if (end < 0) {
+                    return null;
+                }
+                cursor = skipBomAndWhitespace(source, end + 3);
+                continue;
+            }
+            if (source.startsWith("<?", cursor)) {
+                int end = source.indexOf("?>", cursor + 2);
+                if (end < 0) {
+                    return null;
+                }
+                cursor = skipBomAndWhitespace(source, end + 2);
+                continue;
+            }
+            if (source.regionMatches(true, cursor, "<!DOCTYPE", 0, "<!DOCTYPE".length())) {
+                int end = doctypeEnd(source, cursor);
+                if (end < 0) {
+                    return null;
+                }
+                cursor = skipBomAndWhitespace(source, end + 1);
+                continue;
+            }
+            int start = cursor + 1;
+            int end = start;
+            while (end < source.length()) {
+                char current = source.charAt(end);
+                if (Character.isWhitespace(current) || current == '>' || current == '/') {
+                    break;
+                }
+                end++;
+            }
+            return end == start ? null : source.substring(start, end);
+        }
+        return null;
+    }
+
+    private int skipBomAndWhitespace(String source, int from) {
+        int cursor = from;
+        if (cursor < source.length() && source.charAt(cursor) == '\uFEFF') {
+            cursor++;
+        }
+        while (cursor < source.length() && Character.isWhitespace(source.charAt(cursor))) {
+            cursor++;
+        }
+        return cursor;
+    }
+
+    private String localPart(String qualifiedName) {
+        int separator = qualifiedName.indexOf(':');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
+    }
+
+    private String empty(String value) {
+        return value == null ? "" : value;
     }
 
     private int doctypeEnd(String source, int start) {
@@ -707,10 +842,6 @@ public final class MyBatisSqlInventoryBuilder {
         return path.toString().replace(path.getFileSystem().getSeparator(), "/");
     }
 
-    private int indexOfIgnoreCase(String value, String needle) {
-        return value.toLowerCase(Locale.ROOT).indexOf(needle.toLowerCase(Locale.ROOT));
-    }
-
     private String conciseMessage(Throwable throwable) {
         String message = throwable.getMessage();
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
@@ -722,6 +853,9 @@ public final class MyBatisSqlInventoryBuilder {
             String sourceSha256,
             String source,
             XmlNode root) {
+    }
+
+    private record RootElement(String prefix, String localName, String namespaceUri) {
     }
 
     private record Fragment(ParsedMapper mapper, XmlNode node, String fullId) {
