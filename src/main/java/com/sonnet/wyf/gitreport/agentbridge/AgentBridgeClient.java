@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.net.ssl.SSLContext;
@@ -36,7 +35,7 @@ import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
-    public static final String MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION = "1.202.0";
+    public static final String DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION = "1.202.0";
     private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
     private static final int MCP_METADATA_RESPONSE_BYTES = 1024 * 1024;
     private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
@@ -47,8 +46,6 @@ public class AgentBridgeClient {
     private final AtomicLong requestIds = new AtomicLong();
     private final Object mcpSessionLock = new Object();
     private final Map<URI, McpSession> mcpSessions = new HashMap<>();
-    private final Map<URI, MyBatisAuditBinding> myBatisWebBindings = new ConcurrentHashMap<>();
-    private final Map<URI, MyBatisAuditBinding> myBatisMcpBindings = new ConcurrentHashMap<>();
 
     public AgentBridgeClient(ObjectMapper objectMapper) {
         this(objectMapper, localAgentBridgeHttpClient());
@@ -60,11 +57,7 @@ public class AgentBridgeClient {
     }
 
     public void postPrompt(URI webBaseUrl, String prompt) throws IOException, InterruptedException {
-        MyBatisAuditBinding strictBinding = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
-        if (strictBinding != null) {
-            requireLoopbackEndpoint(webBaseUrl);
-            agentBridgeInfo(webBaseUrl);
-        }
+        requireLoopbackEndpoint(webBaseUrl);
         ObjectNode body = objectMapper.createObjectNode();
         body.put("text", prompt);
         HttpResponse<String> response = sendJson(webBaseUrl.resolve("/prompt"), body);
@@ -98,36 +91,22 @@ public class AgentBridgeClient {
         return agentBridgeInfo(webBaseUrl).path("running").asBoolean(false);
     }
 
-    public void requireMyBatisSqlReviewCapabilities(URI webBaseUrl)
+    public void requireDatabaseMcpSupport(URI webBaseUrl)
             throws IOException, InterruptedException {
         requireLoopbackEndpoint(webBaseUrl);
         JsonNode info = agentBridgeInfo(webBaseUrl);
-        nativeDatabaseMcpBinding(info);
+        requireDatabaseMcpVersion(info);
     }
 
-    public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI webBaseUrl, URI mcpUrl)
-            throws IOException, InterruptedException {
-        requireLoopbackEndpoint(webBaseUrl);
-        requireLoopbackEndpoint(mcpUrl);
-        MyBatisAuditBinding binding = nativeDatabaseMcpBinding(agentBridgeInfo(webBaseUrl));
-        synchronized (mcpSessionLock) {
-            myBatisWebBindings.put(normalizedWebBase(webBaseUrl), binding);
-            myBatisMcpBindings.put(mcpUrl, binding);
-            mcpSessions.remove(mcpUrl);
-        }
-        mcpSession(mcpUrl);
-        return binding;
-    }
-
-    private MyBatisAuditBinding nativeDatabaseMcpBinding(JsonNode info) {
+    private void requireDatabaseMcpVersion(JsonNode info) {
         String version = info.path("version").asText("").strip();
-        if (!isAtLeastVersion(version, MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION)) {
-            throw incompatibleNativeDatabaseProtocol(version);
+        if (!isAtLeastVersion(version, DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION)) {
+            throw unsupportedDatabaseMcpVersion(version);
         }
-        return new MyBatisAuditBinding(null, null);
     }
 
     private JsonNode agentBridgeInfo(URI webBaseUrl) throws IOException, InterruptedException {
+        requireLoopbackEndpoint(webBaseUrl);
         HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/info"))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
@@ -140,18 +119,14 @@ public class AgentBridgeClient {
         if (!info.isObject()) {
             throw new IllegalStateException("AgentBridge GET /info must return an object");
         }
-        MyBatisAuditBinding expected = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
-        if (expected != null) {
-            nativeDatabaseMcpBinding(info);
-        }
         return info;
     }
 
-    private IllegalStateException incompatibleNativeDatabaseProtocol(String version) {
+    private IllegalStateException unsupportedDatabaseMcpVersion(String version) {
         String reported = version.isBlank() ? "unknown" : version;
         return new IllegalStateException(
-                "AgentBridge " + reported + " is incompatible with native Database MCP evidence; requires AgentBridge >= "
-                        + MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION
+                "AgentBridge " + reported + " does not support Database MCP; requires AgentBridge >= "
+                        + DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION
         );
     }
 
@@ -182,6 +157,7 @@ public class AgentBridgeClient {
     }
 
     public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) throws IOException, InterruptedException {
+        requireLoopbackEndpoint(mcpUrl);
         McpSession session = mcpSession(mcpUrl);
         ObjectNode params = objectMapper.createObjectNode();
         params.put("name", name);
@@ -214,6 +190,7 @@ public class AgentBridgeClient {
     }
 
     public List<ToolDefinition> listTools(URI mcpUrl) throws IOException, InterruptedException {
+        requireLoopbackEndpoint(mcpUrl);
         McpSession session = mcpSession(mcpUrl);
         List<ToolDefinition> tools = new ArrayList<>();
         Set<String> observedCursors = new HashSet<>();
@@ -265,7 +242,7 @@ public class AgentBridgeClient {
 
     public List<ToolCallRecord> getToolCalls(URI webBaseUrl) throws IOException, InterruptedException {
         requireLoopbackEndpoint(webBaseUrl);
-        nativeDatabaseMcpBinding(agentBridgeInfo(webBaseUrl));
+        requireDatabaseMcpVersion(agentBridgeInfo(webBaseUrl));
         HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/tool-calls"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Accept", "application/json")
@@ -309,14 +286,7 @@ public class AgentBridgeClient {
                     structuredHistoryField(item.path("arguments"), "arguments"),
                     structuredHistoryField(item.path("result"), "result"),
                     requiredHistoryDuration(item),
-                    item.path("hooks"),
-                    item.path("identity").path("instanceId").asText(""),
-                    item.path("identity").path("projectId").asText(""),
-                    item.path("identity").path("instanceNonce").asText(""),
-                    item.path("policyFingerprint").asText(""),
-                    item.path("databaseHostFingerprint").asText(""),
-                    item.path("databaseInstanceFingerprint").asText(""),
-                    item.path("topologyFingerprint").asText("")
+                    item.path("hooks")
             ));
         }
         return List.copyOf(calls);
@@ -420,6 +390,7 @@ public class AgentBridgeClient {
     }
 
     private McpSession mcpSession(URI mcpUrl) throws IOException, InterruptedException {
+        requireLoopbackEndpoint(mcpUrl);
         synchronized (mcpSessionLock) {
             McpSession existing = mcpSessions.get(mcpUrl);
             if (existing != null) {
@@ -523,11 +494,6 @@ public class AgentBridgeClient {
         }
     }
 
-    private URI normalizedWebBase(URI uri) {
-        String value = uri.toString();
-        return URI.create(value.endsWith("/") ? value.substring(0, value.length() - 1) : value);
-    }
-
     private void requireSuccess(HttpResponse<String> response, String message) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalStateException(message + ": HTTP " + response.statusCode() + " " + response.body());
@@ -606,34 +572,11 @@ public class AgentBridgeClient {
             JsonNode arguments,
             JsonNode result,
             Long durationMs,
-            JsonNode hooks,
-            String bridgeInstanceId,
-            String bridgeProjectId,
-            String bridgeInstanceNonce,
-            String policyFingerprint,
-            String databaseHostFingerprint,
-            String databaseInstanceFingerprint,
-            String topologyFingerprint) {
+            JsonNode hooks) {
         public ToolCallRecord {
             arguments = copyJson(arguments);
             result = copyJson(result);
             hooks = copyJson(hooks);
-        }
-
-        public ToolCallRecord(
-                String id,
-                String title,
-                String toolName,
-                String kind,
-                String status,
-                Instant timestamp,
-                JsonNode arguments,
-                JsonNode result,
-                Long durationMs,
-                JsonNode hooks
-        ) {
-            this(id, title, toolName, kind, status, timestamp, arguments, result, durationMs, hooks,
-                    "", "", "", "", "", "", "");
         }
 
         @Override
@@ -650,12 +593,6 @@ public class AgentBridgeClient {
         public JsonNode hooks() {
             return copyJson(hooks);
         }
-    }
-
-    public record BridgeIdentity(String instanceId, String projectId, String instanceNonce) {
-    }
-
-    public record MyBatisAuditBinding(BridgeIdentity identity, String policyFingerprint) {
     }
 
     private static JsonNode copyJson(JsonNode value) {

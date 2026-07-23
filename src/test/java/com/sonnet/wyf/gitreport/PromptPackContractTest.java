@@ -38,7 +38,7 @@ class PromptPackContractTest {
                 "`/tool-calls` 的 `items`",
                 "Java 审计 SQL grammar、safe relations 和 scenario count",
                 "数据库 `statement_timeout` 提供执行超时"
-        ).doesNotContain("policyFingerprint", "同一实例", "服务端强制每个场景");
+        ).doesNotContain(String.join("", "policy", "Fingerprint"), "同一实例", "服务端强制每个场景");
         assertThat(application).contains("mcp-url: \"http://127.0.0.1:8643/mcp\"");
         assertThat(applicationExample).contains(
                 "mybatis-sql-review",

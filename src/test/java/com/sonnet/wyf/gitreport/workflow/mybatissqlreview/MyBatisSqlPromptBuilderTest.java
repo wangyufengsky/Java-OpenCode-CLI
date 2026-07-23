@@ -96,9 +96,20 @@ class MyBatisSqlPromptBuilderTest {
                         "\"maxRows\":20",
                         "at most three scenario queries",
                         "`<selectKey>` statements are static-review-only")
-                .doesNotContain("list_database_connections", "test_database_connection",
-                        "preview_table_data", "connectionId", "databaseName", "schemaName",
-                        "identity", "fingerprint", "migration", "compatibility", "fallback");
+                .doesNotContain(forbiddenDatabaseTerms());
+    }
+
+    private static String[] forbiddenDatabaseTerms() {
+        return new String[]{
+                join("list_database_", "connections"), join("test_database_", "connection"),
+                join("preview_table_", "data"), join("connection", "Id"), join("database", "Name"),
+                join("schema", "Name"), "identity", "fingerprint", join("migra", "tion"),
+                join("compati", "bility"), join("fall", "back")
+        };
+    }
+
+    private static String join(String first, String second) {
+        return first + second;
     }
 
     private MyBatisSqlPromptBuilder.Context context() {

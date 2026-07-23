@@ -1,4 +1,4 @@
 {
-  "databaseName": "orders",
+  "catalog": "orders",
   "schemas": ["audit", "public"]
 }

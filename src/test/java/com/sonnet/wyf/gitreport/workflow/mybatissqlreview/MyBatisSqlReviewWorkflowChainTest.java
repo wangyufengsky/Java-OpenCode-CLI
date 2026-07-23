@@ -577,7 +577,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         }
 
         @Override
-        public void requireMyBatisSqlReviewCapabilities(URI ignored) {
+        public void requireDatabaseMcpSupport(URI ignored) {
             // The fixture exposes the strict capability/tool contract directly.
         }
 

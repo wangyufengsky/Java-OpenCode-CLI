@@ -72,7 +72,7 @@ final class VerifiedMyBatisDatabaseFixture {
         }
 
         @Override
-        public void requireMyBatisSqlReviewCapabilities(URI ignoredWeb) {
+        public void requireDatabaseMcpSupport(URI ignoredWeb) {
         }
 
         @Override

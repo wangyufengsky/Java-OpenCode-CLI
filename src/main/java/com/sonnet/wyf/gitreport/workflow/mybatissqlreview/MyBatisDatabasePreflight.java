@@ -124,7 +124,7 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(mcpUri, "mcpUri");
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(contract, "contract");
-        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
+        client.requireDatabaseMcpSupport(webBaseUri);
         verifyCredentialContract(contract);
         DatabaseMcpContract.Binding binding = new DatabaseMcpContract.Binding(
                 contract.connectionName(), contract.databaseName(), contract.schemaName(), projectPath,
@@ -156,7 +156,7 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(mcpUri, "mcpUri");
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(verified, "verified");
-        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
+        client.requireDatabaseMcpSupport(webBaseUri);
         DatabaseMcpContract nativeContract = new DatabaseMcpContract(
                 new com.fasterxml.jackson.databind.ObjectMapper(), verified.binding());
         Map<String, AgentBridgeClient.ToolDefinition> tools = requireNativeTools(mcpUri);
@@ -290,7 +290,7 @@ public final class MyBatisDatabasePreflight {
         }
         JsonNode tables = response.path("tables");
         if (!tables.isArray() || tables.isEmpty()) {
-            throw new IllegalStateException("list_table_schema must return at least one base TABLE");
+            throw new IllegalStateException("Database MCP table-schema inspection must return at least one base TABLE");
         }
         Set<String> relations = new LinkedHashSet<>();
         for (JsonNode table : tables) {

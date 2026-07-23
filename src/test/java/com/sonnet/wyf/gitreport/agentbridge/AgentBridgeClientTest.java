@@ -75,19 +75,16 @@ class AgentBridgeClientTest {
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
         server.start();
 
-        client.requireMyBatisSqlReviewCapabilities(baseUri(server));
+        client.requireDatabaseMcpSupport(baseUri(server));
     }
 
     @Test
-    void bindsNativeLoopbackWebAndMcpEndpoints() throws Exception {
-        HttpServer server = nativeBindingServer();
+    void acceptsDatabaseMcpSupportFromLoopbackInfo() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
         server.start();
 
-        AgentBridgeClient.MyBatisAuditBinding binding = client.bindMyBatisSqlReviewEndpoints(
-                baseUri(server), URI.create(baseUri(server) + "/mcp")
-        );
-
-        assertThat(binding).isNotNull();
+        client.requireDatabaseMcpSupport(baseUri(server));
     }
 
     @Test
@@ -96,7 +93,7 @@ class AgentBridgeClientTest {
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.201.9\"}"));
         server.start();
 
-        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+        assertThatThrownBy(() -> client.requireDatabaseMcpSupport(baseUri(server)))
                 .hasMessageContaining("1.201.9")
                 .hasMessageContaining("1.202.0");
     }
@@ -106,40 +103,57 @@ class AgentBridgeClientTest {
         CapturingHttpClient transport = new CapturingHttpClient("{}");
         AgentBridgeClient strictClient = new AgentBridgeClient(objectMapper, transport);
 
-        assertThatThrownBy(() -> strictClient.bindMyBatisSqlReviewEndpoints(
-                URI.create("https://agentbridge.example.com"),
-                URI.create("https://agentbridge.example.com/mcp")
+        assertThatThrownBy(() -> strictClient.requireDatabaseMcpSupport(
+                URI.create("https://agentbridge.example.com")
         )).hasMessageContaining("loopback");
         assertThat(transport.requestCount).isZero();
     }
 
     @Test
-    void usesDirectWebAndMcpEndpointsOutsideNativeDatabaseBinding() throws Exception {
+    void postsPromptsToLoopbackEndpoint() throws Exception {
         CapturingHttpClient webTransport = new CapturingHttpClient("{}");
         AgentBridgeClient webClient = new AgentBridgeClient(objectMapper, webTransport);
         webClient.postPrompt(
-                URI.create("https://agentbridge.example.com"),
+                URI.create("http://127.0.0.1:8642"),
                 "workflow"
         );
         assertThat(webTransport.lastRequest.uri()).isEqualTo(
-                URI.create("https://agentbridge.example.com/prompt")
+                URI.create("http://127.0.0.1:8642/prompt")
         );
 
-        CapturingHttpClient mcpTransport = new CapturingHttpClient("""
-                {"jsonrpc":"2.0","id":3,"result":{
-                  "content":[{"type":"text","text":"{\\\"ok\\\":true}"}]
-                }}
-                """);
-        AgentBridgeClient mcpClient = new AgentBridgeClient(objectMapper, mcpTransport);
-        AgentBridgeClient.ToolResponse response = mcpClient.callTool(
-                URI.create("https://agentbridge.example.com/mcp"),
-                "list_tests",
-                objectMapper.createObjectNode()
-        );
-        assertThat(response.structured().path("ok").asBoolean()).isTrue();
-        assertThat(mcpTransport.lastRequest.uri()).isEqualTo(
-                URI.create("https://agentbridge.example.com/mcp")
-        );
+    }
+
+    @Test
+    void rejectsRemoteWebAndMcpEndpointsBeforeAnyRequestWithoutBindingState() {
+        URI remoteWeb = URI.create("https://agentbridge.example.com");
+        URI remoteMcp = URI.create("https://agentbridge.example.com/mcp");
+        CapturingHttpClient transport = new CapturingHttpClient("{}");
+        AgentBridgeClient strictClient = new AgentBridgeClient(objectMapper, transport);
+
+        assertThatThrownBy(() -> strictClient.postPrompt(remoteWeb, "workflow"))
+                .hasMessageContaining("loopback");
+        assertThatThrownBy(() -> strictClient.isRunning(remoteWeb))
+                .hasMessageContaining("loopback");
+        assertThatThrownBy(() -> strictClient.listTools(remoteMcp))
+                .hasMessageContaining("loopback");
+        assertThatThrownBy(() -> strictClient.callTool(remoteMcp, "list_tests", objectMapper.createObjectNode()))
+                .hasMessageContaining("loopback");
+        assertThat(transport.requestCount).isZero();
+    }
+
+    @Test
+    void exposesOnlyCurrentDatabaseMcpStateAndNativeToolCallHistoryFields() {
+        assertThat(AgentBridgeClient.class.getDeclaredMethods())
+                .extracting(java.lang.reflect.Method::getName)
+                .doesNotContain(join("requireMyBatis", "SqlReviewCapabilities"),
+                        join("bindMyBatis", "SqlReviewEndpoints"));
+        assertThat(AgentBridgeClient.class.getDeclaredClasses())
+                .extracting(Class::getSimpleName)
+                .doesNotContain(join("MyBatis", "AuditBinding"), join("Bridge", "Identity"));
+        assertThat(AgentBridgeClient.ToolCallRecord.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .containsExactly("id", "title", "toolName", "kind", "status", "timestamp",
+                        "arguments", "result", "durationMs", "hooks");
     }
 
     @Test
@@ -276,7 +290,7 @@ class AgentBridgeClientTest {
                           "result":{"tools":[{
                             "name":"cmcp_db_database_execute_sql_query",
                             "description":"Execute a database query",
-                            "inputSchema":{"type":"object","required":["connectionId","queryText"]}
+                            "inputSchema":{"type":"object","required":["dataSource","sql"]}
                           }]}
                         }
                         """);
@@ -363,7 +377,7 @@ class AgentBridgeClientTest {
         assertThat(calls).singleElement().satisfies(call -> {
             assertThat(call.id()).isEqualTo("call-17");
             assertThat(call.timestamp()).isEqualTo(Instant.parse("2026-07-22T09:15:30Z"));
-            assertThat(call.arguments().path("connectionId").asText()).isEqualTo("gauss-readonly");
+            assertThat(call.arguments().path("dataSource").asText()).isEqualTo("GaussDB-ReadOnly");
             assertThat(call.result().path("rows")).hasSize(1);
             assertThat(call.durationMs()).isEqualTo(42L);
             assertThat(call.hooks().path("post").asBoolean()).isTrue();
@@ -569,7 +583,7 @@ class AgentBridgeClientTest {
         assertThatThrownBy(() -> client.callTool(
                 URI.create("http://127.0.0.1:" + mcpServer.getAddress().getPort() + "/mcp"),
                 "cmcp_db_database_execute_sql_query",
-                objectMapper.createObjectNode().put("queryText", "SELECT 1")
+                objectMapper.createObjectNode().put("sql", "SELECT 1")
         )).hasMessageContaining("byte limit");
     }
 
@@ -583,14 +597,18 @@ class AgentBridgeClientTest {
                 .put("timestamp", timestamp)
                 .put("durationMs", 42);
         call.set("arguments", objectMapper.createObjectNode()
-                .put("connectionId", "gauss-readonly")
-                .put("databaseName", "orders")
-                .put("schemaName", "audit")
-                .put("queryText", "SELECT id FROM orders LIMIT 1"));
+                .put("dataSource", "GaussDB-ReadOnly")
+                .put("catalog", "orders")
+                .put("schema", "audit")
+                .put("sql", "SELECT id FROM orders LIMIT 1"));
         call.set("result", objectMapper.createObjectNode()
                 .set("rows", objectMapper.createArrayNode().addObject().put("id", 1)));
         call.set("hooks", objectMapper.createObjectNode().put("post", true));
         return call;
+    }
+
+    private static String join(String first, String second) {
+        return first + second;
     }
 
     private void assertInvalidHistoryRecord(String field, JsonNode value, String message) throws Exception {

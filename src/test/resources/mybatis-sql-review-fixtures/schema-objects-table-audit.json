@@ -1,7 +1,7 @@
 {
-  "connectionId": "gauss-readonly",
-  "databaseName": "orders",
-  "schemaName": "audit",
+  "dataSource": "GaussDB-ReadOnly",
+  "catalog": "orders",
+  "schema": "audit",
   "kind": "TABLE",
   "objects": [
     {

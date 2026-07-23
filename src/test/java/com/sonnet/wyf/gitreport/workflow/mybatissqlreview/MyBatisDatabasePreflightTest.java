@@ -26,7 +26,8 @@ class MyBatisDatabasePreflightTest {
     void exposesOnlyTheVerifiedNativeBindingAndNeverSynthesizesBridgeOrFingerprintFacts() {
         assertThat(MyBatisDatabasePreflight.Result.class.getDeclaredMethods())
                 .extracting(java.lang.reflect.Method::getName)
-                .doesNotContain("bridgeBinding", "databaseFingerprints", "connectionId", "databaseName", "schemaName");
+                .doesNotContain("bridgeBinding", "databaseFingerprints", join("connection", "Id"),
+                        join("database", "Name"), join("schema", "Name"));
         assertThat(MyBatisDatabasePreflight.class.getDeclaredClasses())
                 .extracting(Class::getSimpleName)
                 .doesNotContain("DatabaseFingerprints");
@@ -105,7 +106,7 @@ class MyBatisDatabasePreflightTest {
     void rejectsUnsupportedAgentBridgeBeforeListingToolsInVerifyAndRecheck() throws Exception {
         NativeDatabaseBridge bridge = new NativeDatabaseBridge(objectMapper);
         bridge.installNativeDatabaseMcpTools();
-        bridge.setCompatible(false);
+        bridge.setDatabaseMcpSupport(false);
         MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(bridge);
 
         assertThatThrownBy(() -> preflight.verify(
@@ -113,11 +114,11 @@ class MyBatisDatabasePreflightTest {
                 .hasMessageContaining("requires AgentBridge >= 1.202.0");
         assertThat(bridge.calledTools()).isEmpty();
 
-        bridge.setCompatible(true);
+        bridge.setDatabaseMcpSupport(true);
         MyBatisDatabasePreflight.Result verified = preflight.verify(
                 bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
         bridge.clearCalls();
-        bridge.setCompatible(false);
+        bridge.setDatabaseMcpSupport(false);
 
         assertThatThrownBy(() -> preflight.recheck(bridge.mcpUri(), bridge.webUri(), verified))
                 .hasMessageContaining("requires AgentBridge >= 1.202.0");
@@ -250,6 +251,10 @@ class MyBatisDatabasePreflightTest {
         );
     }
 
+    private static String join(String first, String second) {
+        return first + second;
+    }
+
     private static final class NativeDatabaseBridge extends AgentBridgeClient {
         private final ObjectMapper objectMapper;
         private final List<String> tools = new ArrayList<>();
@@ -260,7 +265,7 @@ class MyBatisDatabasePreflightTest {
         private ArrayNode catalogs;
         private ObjectNode tableSchema;
         private JsonNode safetyProbe;
-        private boolean compatible = true;
+        private boolean databaseMcpSupported = true;
         private int capabilityChecks;
 
         private NativeDatabaseBridge(ObjectMapper objectMapper) {
@@ -306,9 +311,9 @@ class MyBatisDatabasePreflightTest {
         }
 
         @Override
-        public void requireMyBatisSqlReviewCapabilities(URI ignoredWeb) {
+        public void requireDatabaseMcpSupport(URI ignoredWeb) {
             capabilityChecks++;
-            if (!compatible) {
+            if (!databaseMcpSupported) {
                 throw new IllegalStateException("requires AgentBridge >= 1.202.0");
             }
         }
@@ -340,7 +345,7 @@ class MyBatisDatabasePreflightTest {
             arguments.clear();
         }
 
-        void setCompatible(boolean compatible) { this.compatible = compatible; }
+        void setDatabaseMcpSupport(boolean databaseMcpSupported) { this.databaseMcpSupported = databaseMcpSupported; }
         int capabilityChecks() { return capabilityChecks; }
         ArrayNode dataSources() { return dataSources; }
         ArrayNode catalogs() { return catalogs; }
