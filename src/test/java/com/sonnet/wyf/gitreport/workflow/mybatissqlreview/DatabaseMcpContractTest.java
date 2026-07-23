@@ -62,6 +62,12 @@ class DatabaseMcpContractTest {
     }
 
     @Test
+    void unknownToolsAreProhibitedByDefault() {
+        assertThat(contract.isProhibitedTool("cmcp_db_database_drop_catalog"))
+                .isTrue();
+    }
+
+    @Test
     void scopeParsesCaseInsensitiveConfiguredValues() {
         assertThat(DatabaseMcpContract.Scope.parse(" project "))
                 .isEqualTo(DatabaseMcpContract.Scope.PROJECT);

@@ -52,6 +52,14 @@ public final class DatabaseMcpContract {
         return PROHIBITED_TOOLS;
     }
 
+    public boolean isReadTool(String toolName) {
+        return READ_TOOLS.contains(toolName);
+    }
+
+    public boolean isProhibitedTool(String toolName) {
+        return !isReadTool(toolName);
+    }
+
     public ObjectNode dataSourceArguments() {
         return commonArguments();
     }
