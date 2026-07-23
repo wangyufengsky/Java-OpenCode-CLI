@@ -44,19 +44,19 @@ public final class DatabaseMcpContract {
         this.binding = Objects.requireNonNull(binding, "binding");
     }
 
-    public Set<String> readTools() {
+    public static Set<String> readTools() {
         return READ_TOOLS;
     }
 
-    public Set<String> prohibitedTools() {
+    public static Set<String> prohibitedTools() {
         return PROHIBITED_TOOLS;
     }
 
-    public boolean isReadTool(String toolName) {
+    public static boolean isReadTool(String toolName) {
         return READ_TOOLS.contains(toolName);
     }
 
-    public boolean isProhibitedTool(String toolName) {
+    public static boolean isProhibitedTool(String toolName) {
         return !isReadTool(toolName);
     }
 

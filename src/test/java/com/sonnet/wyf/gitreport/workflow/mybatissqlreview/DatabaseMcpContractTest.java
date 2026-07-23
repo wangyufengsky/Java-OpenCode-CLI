@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -58,6 +59,13 @@ class DatabaseMcpContractTest {
         assertThatThrownBy(() -> contract.readTools().add("unexpected"))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> contract.prohibitedTools().add("unexpected"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void staticReadToolAllowlistIsTheSameImmutableSource() {
+        assertThat(DatabaseMcpContract.readTools()).isSameAs(contract.readTools());
+        assertThatThrownBy(() -> DatabaseMcpContract.readTools().add("unexpected"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 

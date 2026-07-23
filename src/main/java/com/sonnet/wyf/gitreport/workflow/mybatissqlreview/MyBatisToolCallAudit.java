@@ -48,20 +48,6 @@ public final class MyBatisToolCallAudit {
         requireArguments(toolName, arguments, binding, callId);
     }
 
-    /** Compatibility entry point for the offline validator; online audit always supplies its verified binding. */
-    static void validateDatabaseBinding(String toolName, JsonNode arguments, String dataSource, String catalog,
-                                        String schema, String callId) {
-        requireReadTool(toolName, callId);
-        if (arguments == null || !arguments.isObject()) {
-            throw new IllegalStateException("tool call " + callId + " arguments must be an object");
-        }
-        if (!DatabaseMcpContract.LIST_DATASOURCES.equals(toolName)) exact(arguments, "dataSource", dataSource, callId);
-        if (DatabaseMcpContract.LIST_TABLE_SCHEMA.equals(toolName)) {
-            exact(arguments, "catalog", catalog, callId);
-            exact(arguments, "schema", schema, callId);
-        }
-    }
-
     public Result audit(List<AgentBridgeClient.ToolCallRecord> history, Boundary boundary,
                         MyBatisDatabasePreflight.Result database, StatementContext statement) {
         Objects.requireNonNull(history, "history");
@@ -81,8 +67,8 @@ public final class MyBatisToolCallAudit {
                 continue;
             }
             if (call.timestamp().isBefore(boundary.startedAt())) throw violation(call, "incomplete pre-task id snapshot contains an unknown old call");
-            requireCompleted(call);
-            if (!new DatabaseMcpContract(objectMapper, database.binding()).readTools().contains(call.toolName())) {
+            requireSuccessful(call);
+            if (!DatabaseMcpContract.readTools().contains(call.toolName())) {
                 throw violation(call, "unapproved tool: " + call.toolName());
             }
             validateDatabaseBinding(call.toolName(), call.arguments(), database.binding(), call.id());
@@ -112,8 +98,7 @@ public final class MyBatisToolCallAudit {
     }
 
     private static void requireReadTool(String toolName, String callId) {
-        if (!Set.of(DatabaseMcpContract.LIST_DATASOURCES, DatabaseMcpContract.LIST_DATABASES,
-                DatabaseMcpContract.LIST_TABLE_SCHEMA, DatabaseMcpContract.EXECUTE_QUERY).contains(toolName)) {
+        if (!DatabaseMcpContract.readTools().contains(toolName)) {
             throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         }
     }
@@ -176,8 +161,8 @@ public final class MyBatisToolCallAudit {
 
     private static void requireRow(AgentBridgeClient.ToolCallRecord call, JsonNode row) { if (!row.isObject() && !row.isArray()) throw violation(call, "query result rows must contain objects or arrays"); }
     private static void requireHistoryShape(AgentBridgeClient.ToolCallRecord call) { if (call == null || call.id() == null || call.id().isBlank() || call.timestamp() == null) throw new IllegalStateException("tool-call history contains a call with missing id or timestamp"); }
-    private static void requireCompleted(AgentBridgeClient.ToolCallRecord call) {
-        if (call.toolName() == null || call.toolName().isBlank() || call.status() == null || !"completed".equalsIgnoreCase(call.status()) || call.durationMs() == null || call.durationMs() < 0 || call.result() == null || call.result().isNull()) throw violation(call, "new tool call is incomplete or not completed successfully");
+    private static void requireSuccessful(AgentBridgeClient.ToolCallRecord call) {
+        if (call.toolName() == null || call.toolName().isBlank() || call.status() == null || !"success".equalsIgnoreCase(call.status()) || call.durationMs() == null || call.durationMs() < 0 || call.result() == null || call.result().isMissingNode() || call.result().isNull()) throw violation(call, "new tool call is incomplete or not successful");
     }
     private static IllegalStateException violation(AgentBridgeClient.ToolCallRecord call, String message) { return new IllegalStateException("tool call " + call.id() + " rejected: " + message); }
 

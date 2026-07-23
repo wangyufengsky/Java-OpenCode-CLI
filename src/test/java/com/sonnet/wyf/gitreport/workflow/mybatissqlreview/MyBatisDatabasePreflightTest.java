@@ -98,7 +98,7 @@ class MyBatisDatabasePreflightTest {
         );
         assertThat(bridge.argumentsFor(DatabaseMcpContract.EXECUTE_QUERY).path("dataSource").asText())
                 .isEqualTo(result.binding().dataSource());
-        assertThat(bridge.compatibilityChecks()).isEqualTo(2);
+        assertThat(bridge.capabilityChecks()).isEqualTo(2);
     }
 
     @Test
@@ -261,7 +261,7 @@ class MyBatisDatabasePreflightTest {
         private ObjectNode tableSchema;
         private JsonNode safetyProbe;
         private boolean compatible = true;
-        private int compatibilityChecks;
+        private int capabilityChecks;
 
         private NativeDatabaseBridge(ObjectMapper objectMapper) {
             super(objectMapper);
@@ -307,7 +307,7 @@ class MyBatisDatabasePreflightTest {
 
         @Override
         public void requireMyBatisSqlReviewCapabilities(URI ignoredWeb) {
-            compatibilityChecks++;
+            capabilityChecks++;
             if (!compatible) {
                 throw new IllegalStateException("requires AgentBridge >= 1.202.0");
             }
@@ -341,7 +341,7 @@ class MyBatisDatabasePreflightTest {
         }
 
         void setCompatible(boolean compatible) { this.compatible = compatible; }
-        int compatibilityChecks() { return compatibilityChecks; }
+        int capabilityChecks() { return capabilityChecks; }
         ArrayNode dataSources() { return dataSources; }
         ArrayNode catalogs() { return catalogs; }
         ObjectNode tableSchema() { return tableSchema; }

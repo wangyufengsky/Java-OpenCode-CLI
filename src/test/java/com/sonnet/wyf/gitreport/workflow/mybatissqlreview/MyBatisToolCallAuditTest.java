@@ -42,6 +42,28 @@ class MyBatisToolCallAuditTest {
         });
     }
 
+    @Test
+    void acceptsAgentBridgeSuccessAndRejectsEveryOtherStatus() {
+        assertThat(audit.audit(List.of(call("success", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1))), boundary(), database,
+                selectStatement()).auditedCallIds()).containsExactly("success");
+
+        assertThatThrownBy(() -> audit.audit(List.of(callWithStatus("failed", "failed", rows(1))),
+                boundary(), database, selectStatement())).hasMessageContaining("not successful");
+    }
+
+    @Test
+    void rejectsMissingOrNullResultsForMetadataAndQueryCalls() {
+        for (JsonNode missing : List.of(objectMapper.getNodeFactory().missingNode(), objectMapper.nullNode())) {
+            assertThatThrownBy(() -> audit.audit(List.of(call("metadata-result", DatabaseMcpContract.LIST_DATASOURCES,
+                    commonArguments(), missing)), boundary(), database, selectStatement()))
+                    .hasMessageContaining("incomplete");
+            assertThatThrownBy(() -> audit.audit(List.of(call("query-result", DatabaseMcpContract.EXECUTE_QUERY,
+                    nativeQueryArguments("SELECT id FROM orders LIMIT 1"), missing)), boundary(), database,
+                    selectStatement())).hasMessageContaining("incomplete");
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             DatabaseMcpContract.EXECUTE_DML,
@@ -127,6 +149,20 @@ class MyBatisToolCallAuditTest {
                 .hasMessageContaining("unsupported argument");
     }
 
+    @Test
+    void acceptsEachNativeMetadataArgumentContract() {
+        ObjectNode databases = commonArguments().put("dataSource", database.binding().dataSource());
+        ObjectNode tableSchema = databases.deepCopy().put("catalog", database.binding().catalog())
+                .put("schema", database.binding().schema()).put("includeColumns", true)
+                .put("includeIndexes", true).put("maxTables", DatabaseMcpContract.MAX_TABLES);
+        assertThat(audit.audit(List.of(
+                call("sources", DatabaseMcpContract.LIST_DATASOURCES, commonArguments(), objectMapper.createArrayNode()),
+                call("catalogs", DatabaseMcpContract.LIST_DATABASES, databases, objectMapper.createArrayNode()),
+                call("tables", DatabaseMcpContract.LIST_TABLE_SCHEMA, tableSchema, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement()).auditedCallIds())
+                .containsExactly("sources", "catalogs", "tables");
+    }
+
     private MyBatisToolCallAudit.Boundary boundary() {
         return new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of());
     }
@@ -155,7 +191,13 @@ class MyBatisToolCallAuditTest {
     }
 
     private AgentBridgeClient.ToolCallRecord call(String id, String toolName, JsonNode arguments, JsonNode result) {
-        return new AgentBridgeClient.ToolCallRecord(id, toolName, toolName, "mcp", "completed",
+        return new AgentBridgeClient.ToolCallRecord(id, toolName, toolName, "mcp", "success",
                 STARTED_AT.plusSeconds(1), arguments, result, 10L, objectMapper.createObjectNode());
+    }
+
+    private AgentBridgeClient.ToolCallRecord callWithStatus(String id, String status, JsonNode result) {
+        return new AgentBridgeClient.ToolCallRecord(id, DatabaseMcpContract.EXECUTE_QUERY,
+                DatabaseMcpContract.EXECUTE_QUERY, "mcp", status, STARTED_AT.plusSeconds(1),
+                nativeQueryArguments("SELECT id FROM orders LIMIT 1"), result, 10L, objectMapper.createObjectNode());
     }
 }

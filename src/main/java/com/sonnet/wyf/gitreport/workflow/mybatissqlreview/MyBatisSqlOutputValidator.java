@@ -200,14 +200,14 @@ public final class MyBatisSqlOutputValidator {
             String callId = requireText(scenario, "tool_call_id", "scenario");
             requireUniqueCallEvidence(representedCallIds, callId);
             requireText(scenario, "timestamp", "scenario");
-            String queryText = requireText(scenario, "query_text", "scenario");
+            String sql = requireText(scenario, "query_text", "scenario");
             JsonNode arguments = requireObject(scenario, "arguments", "scenario");
             requireOfflineDatabaseArguments(DatabaseMcpContract.EXECUTE_QUERY, arguments, evidence, callId);
-            requireExactText(arguments, "sql", queryText,
+            requireExactText(arguments, "sql", sql,
                     "scenario arguments");
             long durationMs = requireNonNegativeLong(scenario, "duration_ms", "scenario");
             MyBatisToolCallAudit.validateDeterminableScenario(
-                    queryText, callId, evidence.path("schema").asText(), durationMs
+                    sql, callId, evidence.path("schema").asText(), durationMs
             );
             JsonNode result = requireObject(scenario, "result", "scenario");
             JsonNode columns = requireArray(scenario, "columns", "scenario");

@@ -17,15 +17,14 @@ final class VerifiedMyBatisDatabaseFixture {
     static final AgentBridgeClient.BridgeIdentity BRIDGE_IDENTITY =
             new AgentBridgeClient.BridgeIdentity("instance-a", "project-a", "nonce-a-0123456789");
     static final String POLICY_FINGERPRINT = "sha256:" + "a".repeat(64);
-    // Retained only for the not-yet-migrated WorkflowChainTest; Task 4 audit and validator never consume it.
-    static final LegacyDatabaseFingerprints DATABASE_FINGERPRINTS =
-            new LegacyDatabaseFingerprints(
+    static final DatabaseTestFacts DATABASE_FINGERPRINTS =
+            new DatabaseTestFacts(
                     "sha256:" + "b".repeat(64), "sha256:" + "c".repeat(64), "sha256:" + "d".repeat(64));
 
     private VerifiedMyBatisDatabaseFixture() {
     }
 
-    record LegacyDatabaseFingerprints(String hostFingerprint, String instanceFingerprint, String topologyFingerprint) { }
+    record DatabaseTestFacts(String hostFingerprint, String instanceFingerprint, String topologyFingerprint) { }
 
     static MyBatisDatabasePreflight.Result verified(ObjectMapper objectMapper) {
         return verified(objectMapper, "GaussDB-ReadOnly", "orders", "audit", Set.of("orders", "line_items"));
@@ -51,17 +50,6 @@ final class VerifiedMyBatisDatabaseFixture {
         } catch (Exception exception) {
             throw new AssertionError("test preflight could not mint a verified database capability", exception);
         }
-    }
-
-    static MyBatisDatabasePreflight.Result verified(
-            ObjectMapper objectMapper,
-            String ignoredConnectionId,
-            String dataSource,
-            String catalog,
-            String schema,
-            Set<String> baseTables
-    ) {
-        return verified(objectMapper, dataSource, catalog, schema, baseTables);
     }
 
     private static final class NativeFixtureClient extends AgentBridgeClient {
