@@ -118,7 +118,7 @@
     },
     'mybatis-sql-review': {
       label: 'MyBatis SQL 审查',
-      description: '发现 MyBatis XML 映射语句，结合受限数据库证据生成逐 SQL 审查和项目汇总报告。',
+      description: '发现 MyBatis XML 映射语句；review agent 通过 AgentBridge MCP 调用 AgentBridge Custom MCP 注册的数据库只读工具，生成逐 SQL 审查和项目汇总报告。',
       fields: [
         field('project.id', '项目标识', '写入清单和报告元信息的项目 ID。', 'text', 'project', true, true),
         field('project.name', '项目名称', '写入报告标题和摘要的项目名称。', 'text', 'project', true, true),
@@ -141,7 +141,7 @@
         field('database.retain-raw-rows', '保留原始证据行', '固定开启；确保报告证据可复核。', 'checkbox', 'validation', true),
         field('database.allow-agent-select', '允许受限 SELECT', '固定开启；仅允许 Java 审计策略规定的简单只读 SELECT。', 'checkbox', 'validation', true),
         field('agentbridge.web-base-url', 'AgentBridge Web URL', '提交 prompt、清理会话和读取 tool-call 历史的 Web Access 地址。', 'text', 'agentbridge', true),
-        field('agentbridge.mcp-url', 'AgentBridge MCP URL', '数据库工具预检与调用使用的 MCP JSON-RPC 地址。', 'text', 'agentbridge', true),
+        field('agentbridge.mcp-url', 'AgentBridge MCP URL', '应用预检和 review agent 都通过 AgentBridge MCP 调用 AgentBridge Custom MCP 注册的数据库工具；默认 http://127.0.0.1:8643/mcp。scope 取 GLOBAL、PROJECT 或 ALL，默认 ALL。', 'text', 'agentbridge', true),
         field('agentbridge.concurrency', '任务并发数', '固定为 1；SQL 审查任务严格串行执行。', 'number', 'agentbridge', true),
         field('agentbridge.max-concurrency', '最大并发数', '固定为 1；Java 会拒绝其它值。', 'number', 'agentbridge', true),
         field('agentbridge.timeout-minutes', '任务超时分钟数', '单个 AgentBridge SQL 审查 task 的最大等待时间。', 'number', 'agentbridge', true),

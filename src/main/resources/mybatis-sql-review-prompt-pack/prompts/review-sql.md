@@ -24,6 +24,14 @@ For every `cmcp_db_database_execute_sql_query` call, pass `dataSource`, `sql`, `
 
 Do not call DML, DDL, NoSQL, or unknown tools. `<insert>`, `<update>`, `<delete>`, and `<selectKey>` statements are static-review-only: do not execute a query scenario for them. Do not execute the original mapped SQL.
 
+## Required connection safety
+
+Use a centralized GaussDB physical read replica. Test databases and self-attested environment labels are not accepted. The connection uses a non-owner, non-admin, read-only account with no role inheritance.
+
+Query only safe base tables for which RLS is disabled. The account cannot execute user-defined or security-definer functions, including PUBLIC grants. The effective `statement_timeout` is positive and no greater than 30 seconds.
+
+Database credentials, permissions, and timeout enforcement are the hard safety boundary. The post-hoc audit cannot prevent or undo a database call.
+
 ## Evidence and output contract
 
 Treat returned rows as representative evidence, not proof of production cardinality, selectivity, or plan stability. Record actual native tool names, normalized arguments, audited tool-call ids, results, and limitations. The UTF-8 encoded `database-evidence.json` must not exceed 262144 bytes.

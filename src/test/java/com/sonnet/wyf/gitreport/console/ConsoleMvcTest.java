@@ -290,6 +290,9 @@ class ConsoleMvcTest {
                 "database.allow-agent-select",
                 "agentbridge.web-base-url",
                 "agentbridge.mcp-url",
+                "AgentBridge Custom MCP 注册的数据库工具",
+                "http://127.0.0.1:8643/mcp",
+                "GLOBAL、PROJECT 或 ALL，默认 ALL",
                 "agentbridge.concurrency",
                 "agentbridge.max-concurrency",
                 "agentbridge.timeout-minutes",
@@ -786,7 +789,7 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['database.retain-raw-rows']").value(true))
                 .andExpect(jsonPath("$.defaults['database.allow-agent-select']").value(true))
                 .andExpect(jsonPath("$.defaults['agentbridge.web-base-url']").value("https://127.0.0.1:9642"))
-                .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8642/mcp"))
+                .andExpect(jsonPath("$.defaults['agentbridge.mcp-url']").value("http://127.0.0.1:8643/mcp"))
                 .andExpect(jsonPath("$.defaults['agentbridge.concurrency']").value(1))
                 .andExpect(jsonPath("$.defaults['agentbridge.max-concurrency']").value(1))
                 .andExpect(jsonPath("$.defaults['agentbridge.timeout-minutes']").value(40))

@@ -11,6 +11,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PromptPackContractTest {
     @Test
+    void myBatisPromptPackUsesNativeDatabaseMcpVocabulary() throws Exception {
+        String prompt = Files.readString(Path.of(
+                "src/main/resources/mybatis-sql-review-prompt-pack/prompts/review-sql.md"));
+        String readme = Files.readString(Path.of("README.md"));
+
+        assertThat(prompt).contains(
+                "cmcp_db_database_list_datasources",
+                "cmcp_db_database_list_databases",
+                "cmcp_db_database_list_table_schema",
+                "cmcp_db_database_execute_sql_query",
+                "{\"dataSource\":\"configured data source\",\"sql\":\"SELECT columns FROM safe_table LIMIT 1\",\"maxRows\":20,\"project\":\"absolute project path\",\"scope\":\"ALL\"}",
+                "Do not call DML, DDL, NoSQL, or unknown tools."
+        );
+        assertThat(readme).contains(
+                "http://127.0.0.1:8643/mcp",
+                "AgentBridge Custom MCP",
+                "`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
+                "`cmcp_db_database_execute_sql_query`",
+                "`dataSource`、`sql`、`maxRows: 20`、`project` 和 `scope`"
+        );
+    }
+
+    @Test
     void myBatisSqlReviewPromptDefaultsAndDocumentationKeepTheHardSafetyBoundaryVisible() throws Exception {
         String prompt = Files.readString(Path.of(
                 "src/main/resources/mybatis-sql-review-prompt-pack/prompts/review-sql.md"));
@@ -45,17 +68,19 @@ class PromptPackContractTest {
         assertThat(readme).contains(
                 "AgentBridge Web Access",
                 "AgentBridge MCP",
-                "Database Tools & SQL",
-                "JetBrains AI Assistant",
+                "AgentBridge Custom MCP",
+                "http://127.0.0.1:8643/mcp",
+                "cmcp_db_database_execute_sql_query",
+                "GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
+                "DML、DDL、NoSQL 与未知工具均禁止调用",
                 "集中式 GaussDB",
                 "物理只读副本",
-                "非 owner、非管理员的专用只读账号",
+                "独立只读账号",
                 "RLS",
                 "SECURITY DEFINER",
                 "PUBLIC",
                 "30 秒",
-                "v1.199.2",
-                "不能阻止或撤销"
+                "调用前的安全边界"
         );
     }
 

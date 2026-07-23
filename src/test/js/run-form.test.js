@@ -235,7 +235,7 @@ function createHarness(fetchImplementation, options = {}) {
   }
   const script = fs.readFileSync(path.join(__dirname, '../../main/resources/static/js/run-form.js'), 'utf8');
   vm.runInContext(script, context, { filename: 'run-form.js' });
-  return { nodes, location };
+  return { nodes, location, consoleCommon: window.ConsoleCommon };
 }
 
 async function flush() {
@@ -409,6 +409,19 @@ test('MyBatis metadata renders every field, all summaries, and the three rerun m
   assert.equal(harness.nodes.rerunId.disabled, true);
   assert.equal(harness.nodes.rerunId.required, false);
   assert.equal(harness.nodes.rerunId.value, '');
+});
+
+test('MyBatis console metadata describes the native Database MCP boundary', () => {
+  const harness = createHarness(() => Promise.resolve(response({ defaults: {} })), {
+    loadConsoleCommon: true,
+    selectedChain: 'mybatis-sql-review'
+  });
+  const definition = harness.consoleCommon.chainConfigDefinitions['mybatis-sql-review'];
+  const mcpUrl = definition.fields.find((field) => field.key === 'agentbridge.mcp-url');
+
+  assert.match(definition.description, /AgentBridge Custom MCP/);
+  assert.match(mcpUrl.description, /http:\/\/127\.0\.0\.1:8643\/mcp/);
+  assert.match(mcpUrl.description, /GLOBAL、PROJECT 或 ALL，默认 ALL/);
 });
 
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {

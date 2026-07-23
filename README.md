@@ -18,7 +18,7 @@ agentbridge-runner:
     id:
   agentbridge:
     web-base-url: "https://127.0.0.1:9642"
-    mcp-url: "http://127.0.0.1:8642/mcp"
+    mcp-url: "http://127.0.0.1:8643/mcp"
     concurrency: 1
     max-concurrency: 1
     timeout-minutes: 40
@@ -318,7 +318,7 @@ test:
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
-  mcp-url: "http://127.0.0.1:8642/mcp"
+  mcp-url: "http://127.0.0.1:8643/mcp"
   timeout-minutes: 40
   max-attempts: 5
 ```
@@ -387,7 +387,7 @@ database:
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
-  mcp-url: "http://127.0.0.1:8642/mcp"
+  mcp-url: "http://127.0.0.1:8643/mcp"
   concurrency: 1
   max-concurrency: 1
   timeout-minutes: 40
@@ -402,31 +402,36 @@ agentbridge:
 | `project.id` / `project.name` / `project.repo` | 项目标识、展示名称和 MyBatis mapper 所在的本地仓库。 |
 | `paths.out` | 隔离运行、稳定报告和控制台 `output_path` 对应的输出根目录。 |
 | `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
-| `database.connection-name` | AgentBridge Database Tools 中必须唯一匹配的连接名。 |
+| `database.connection-name` | AgentBridge Custom MCP 注册的 Database MCP 数据源名，必须唯一匹配。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
 | `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。每个 SQL task 提交前还会重验同一 AgentBridge、数据库主机/实例/拓扑指纹、physical standby 和连接可用性。测试库或其它自证环境标签均不接受。 |
-| `database.non-owner-non-admin-read-only-account` | 运行前必须改成 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
-| `database.row-level-security-disabled-for-safe-base-tables` | 运行前必须改成 `true`，确认所有可取证基础表均禁用 RLS。 |
-| `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 运行前必须改成 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
+| `database.non-owner-non-admin-read-only-account` | 必须为 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
+| `database.row-level-security-disabled-for-safe-base-tables` | 必须为 `true`，确认所有可取证基础表均禁用 RLS。 |
+| `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 必须为 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
 | `database.statement-timeout-seconds` / `statement-timeout-scope` | 数据库、server 或 role 级硬超时；必须大于 0 且不超过 30 秒。 |
 | `database.max-rows` / `max-scenarios-per-sql` | 固定为每次 20 行、每条 SQL 最多 3 个代表性 SELECT 场景。 |
 | `database.max-evidence-bytes` | 单 task 数据库证据固定最多 262144 字节。 |
 | `database.retain-raw-rows` / `allow-agent-select` | 固定为 `true`；保留可复核证据，并仅允许受 Java 策略约束的简单 SELECT。 |
-| `agentbridge.web-base-url` / `mcp-url` | AgentBridge Web Access 与 AgentBridge MCP 地址。 |
+| `agentbridge.web-base-url` / `mcp-url` | AgentBridge Web Access 与 AgentBridge MCP 地址；默认 MCP 地址为 `http://127.0.0.1:8643/mcp`。 |
 | `agentbridge.concurrency` / `max-concurrency` | 两者固定为 `1`，所有 statement task 严格串行。 |
 | `agentbridge.timeout-minutes` / `poll-millis` / `validation-settle-seconds` | AgentBridge task 超时、轮询和工具历史/产物沉降等待。 |
 | `agentbridge.validation-max-corrections` | 固定为 `0`；每个 SQL task 只有一个完整 prompt 和一次候选产物尝试。 |
 | `agentbridge.task-message` | 附加到完整 SQL 审查 prompt 前的执行说明。 |
 
-#### 必要运行环境与安全边界
+#### Database MCP 与安全边界
 
-- IntelliJ IDEA 需要启用 JetBrains AI Assistant，并提供可用的 AgentBridge Web Access 与 AgentBridge MCP；数据库插件需要启用 **Database Tools & SQL**，且 MCP 工具清单必须包含链路预检要求的数据库工具。MyBatis SQL review 的 Web/MCP URL 只接受 `http(s)://localhost`、`127.0.0.0/8` 或 `::1`；本地自签名 TLS 兼容仅限 loopback，远程 URL 一律拒绝，不能借用 trust-all TLS。
-- 只能连接集中式 GaussDB 的物理只读副本，不能连接生产主库，也不接受 `test` 环境声明代替物理 standby 证明。必须使用非 owner、非管理员、无角色继承的专用只读账号；应用层 prompt 或 Java 事后审计不能替代数据库凭证隔离。
-- 所有允许取证的基础表必须禁用 RLS。安全探针遍历全部非系统 schema，而不是只检查 `current_schema()`：审计账号不得拥有任何非系统 schema/table/column/sequence 的 owner、DML 或 `CREATE` 权限，也不得拥有 database `CREATE/TEMPORARY`、GaussDB `ANY`、package/function、foreign server 或 directory 危险权限（包括经 `PUBLIC` 获得的函数执行权）；有效 `statement_timeout` 必须大于 0 且不超过配置值和 30 秒。探针返回字段缺失或事实无法证明时一律 fail closed。
-- AgentBridge release gate 要求版本不低于 `1.200.0`，且 `/info` 必须显式声明 MyBatis SQL review audit contract v1，并提供不可复用的 `instanceId/projectId/instanceNonce`。Web `/info`、MCP `initialize`、`tools/list`、`tools/call`、`/tool-calls` 快照及其每一条记录必须绑定同一实例和 `policyFingerprint`；连接元数据、探针与历史还必须携带服务端生成的 database host/instance/topology SHA-256 指纹。
-- `execute_sql_query` 必须由 AgentBridge 服务端强制执行同一指纹策略：仅支持简单 SELECT 语法，只能访问预检得到的安全基础表 allowlist，禁止函数和系统副作用，每个 SQL 最多 3 个场景、每次最多 20 行、超时最多 30 秒。缺少这份策略时在首次数据库工具调用前 fail closed，不能只依赖 prompt 或 Java 事后解析。
-- 已检查的 AgentBridge v1.199.2 明确不兼容：`preview_table_data` 的上限参数可选，`/tool-calls` 仅提供 `{items}`，单字段会截断至 8000 字符且历史最多 200 条，无法形成完整审计证据；预检会在任何数据库工具调用前给出不兼容错误。只有未来版本同时满足上述版本与能力合同，并在集中式 GaussDB 物理只读副本上完成静态 SELECT、动态 SELECT、DML mapper 与 `selectKey` live smoke gate 后，才可发布启用。
-- `/tool-calls` 检查属于 post-hoc 事后审计：它只能在调用发生后拒绝产物，不能阻止或撤销已经发出的数据库调用。数据库侧只读账号、RLS/函数权限和 statement timeout 才是硬安全边界。
+Database MCP 作为 AgentBridge Custom MCP 注册工具运行。应用预检与 review agent 都通过 AgentBridge MCP 调用它，默认地址为 `http://127.0.0.1:8643/mcp`。MyBatis SQL review 使用以下四个 native read tools：
+
+- `cmcp_db_database_list_datasources`
+- `cmcp_db_database_list_databases`
+- `cmcp_db_database_list_table_schema`
+- `cmcp_db_database_execute_sql_query`
+
+每次调用都携带 `project` 和 `scope`；`scope` 取 `GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`。`cmcp_db_database_execute_sql_query` 的参数精确为 `dataSource`、`sql`、`maxRows: 20`、`project` 和 `scope`。DML、DDL、NoSQL 与未知工具均禁止调用；`insert`、`update`、`delete` 与 `selectKey` 仅进行静态审查。
+
+数据库连接指向集中式 GaussDB 物理只读副本，使用非 owner、非管理员、无角色继承的独立只读账号。安全预检确认可取证基础表的 RLS 状态、函数执行权限、有效 `statement_timeout` 以及账号没有写入或危险对象权限；任一安全事实无法证明时停止运行。数据库凭证隔离、权限与超时构成调用前的安全边界。
+
+AgentBridge `/info`、MCP `initialize`、`tools/list`、`tools/call` 与工具调用记录绑定同一实例和 `policyFingerprint`。服务端执行简单只读 SELECT，只访问预检得到的安全基础表，并强制每个场景最多 20 行、每条 SQL 最多 3 个场景与最多 30 秒超时。
 
 ## 运行时行为
 
@@ -437,7 +442,7 @@ agentbridge:
 ## 运行方式
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.arguments="--agentbridge-runner.enabled=true"
+mvn spring-boot:run -Dspring-boot.run.arguments="--agentbridge-runner.enabled=true --agentbridge-runner.active-chain=mybatis-sql-review"
 ```
 
 重跑示例：
