@@ -315,6 +315,9 @@ test:
   jacoco-version: "0.8.15"
   jacoco-jvm-arg-property: "sqlite.native.access.argument"
   jacoco-jvm-arg-base: "--enable-native-access=ALL-UNNAMED"
+  additional-build-artifact-globs:
+    - "generated/**"
+    - "**/generated/**"
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
@@ -340,6 +343,7 @@ agentbridge:
 | `test.jacoco-version` | `test.require-coverage=true` 时，验收命令使用的 JaCoCo 版本。 |
 | `test.jacoco-jvm-arg-property` | `test.require-coverage=true` 时，目标项目 Maven/Surefire 实际读取的 JVM 参数属性；普通项目通常是 `argLine`。 |
 | `test.jacoco-jvm-arg-base` | `test.require-coverage=true` 时，可选 JVM 基础参数，会追加在 JaCoCo agent 参数前。 |
+| `test.additional-build-artifact-globs` | 可选的额外构建产物白名单，只用于保护快照；即使匹配也不会放行 `src/main/**` 或 `src/test/**`。内置已放行 `target/**`、`build/**`、`out/**`、`.gradle/**`、`*.iml` 和 Maven 生成 POM。 |
 | `agentbridge.web-base-url` | AgentBridge Web Access 地址，用于提交 prompt 和轮询状态。 |
 | `agentbridge.mcp-url` | AgentBridge MCP JSON-RPC 地址，用于 Java 侧验收测试。 |
 | `agentbridge.timeout-minutes` | 单个单元测试生成 task 的最大等待时间；JaCoCo/Maven 验收命令的 MCP 请求等待时间也会按该值放大。 |

@@ -112,7 +112,12 @@ public class ProjectUnitTestGenerationBatchRunner {
             Path runDir = WorkflowArtifactContext
                     .nextTaskAttempt("test-batch:" + batchId, out.resolve("test-batches").resolve(batchId))
                     .root();
-            ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(properties.getProject().getRepo(), out, batch);
+            ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(
+                    properties.getProject().getRepo(),
+                    out,
+                    batch,
+                    properties.getTest().getAdditionalBuildArtifactGlobs()
+            );
             Path promptFile = runDir.resolve("worker-prompt.md");
             Files.writeString(promptFile, promptBuilder.buildBatchPrompt(
                     properties.getProject().getRepo(),
@@ -540,19 +545,34 @@ public class ProjectUnitTestGenerationBatchRunner {
         private final Path out;
         private final List<String> allowedWriteGlobs;
         private final List<String> targetTestFiles;
+        private final List<String> additionalBuildArtifactGlobs;
         private final Map<String, String> before;
 
-        private ProtectedSnapshot(Path repo, Path out, List<String> allowedWriteGlobs, List<String> targetTestFiles, Map<String, String> before) {
+        private ProtectedSnapshot(
+                Path repo,
+                Path out,
+                List<String> allowedWriteGlobs,
+                List<String> targetTestFiles,
+                List<String> additionalBuildArtifactGlobs,
+                Map<String, String> before
+        ) {
             this.repo = repo.toAbsolutePath().normalize();
             this.out = out.toAbsolutePath().normalize();
             this.allowedWriteGlobs = List.copyOf(allowedWriteGlobs);
             this.targetTestFiles = List.copyOf(targetTestFiles);
+            this.additionalBuildArtifactGlobs = List.copyOf(additionalBuildArtifactGlobs);
             this.before = before;
         }
 
-        static ProtectedSnapshot capture(Path repo, Path out, Map<String, Object> batch) throws Exception {
+        static ProtectedSnapshot capture(
+                Path repo,
+                Path out,
+                Map<String, Object> batch,
+                List<String> additionalBuildArtifactGlobs
+        ) throws Exception {
             Path normalizedRepo = repo.toAbsolutePath().normalize();
-            Path normalizedOut = out.toAbsolutePath().normalize();
+            var workspace = WorkflowArtifactContext.currentOrNull();
+            Path normalizedOut = (workspace == null ? out : workspace.runRoot()).toAbsolutePath().normalize();
             List<String> allowedWriteGlobs = listOfStrings(batch.get("allowed_write_globs"));
             List<String> targetTestFiles = listOfStrings(batch.get("target_test_files"));
             return new ProtectedSnapshot(
@@ -560,13 +580,26 @@ public class ProjectUnitTestGenerationBatchRunner {
                     normalizedOut,
                     allowedWriteGlobs,
                     targetTestFiles,
-                    fingerprint(normalizedRepo, normalizedOut, allowedWriteGlobs, targetTestFiles)
+                    additionalBuildArtifactGlobs,
+                    fingerprint(
+                            normalizedRepo,
+                            normalizedOut,
+                            allowedWriteGlobs,
+                            targetTestFiles,
+                            additionalBuildArtifactGlobs
+                    )
             );
         }
 
         ValidationCheck validate() {
             try {
-                Map<String, String> after = fingerprint(repo, out, allowedWriteGlobs, targetTestFiles);
+                Map<String, String> after = fingerprint(
+                        repo,
+                        out,
+                        allowedWriteGlobs,
+                        targetTestFiles,
+                        additionalBuildArtifactGlobs
+                );
                 for (String path : before.keySet()) {
                     if (!after.containsKey(path)) {
                         return ValidationCheck.failed("deleted protected file: " + path);
@@ -586,14 +619,27 @@ public class ProjectUnitTestGenerationBatchRunner {
             }
         }
 
-        private static Map<String, String> fingerprint(Path repo, Path out, List<String> allowedWriteGlobs, List<String> targetTestFiles) throws Exception {
+        private static Map<String, String> fingerprint(
+                Path repo,
+                Path out,
+                List<String> allowedWriteGlobs,
+                List<String> targetTestFiles,
+                List<String> additionalBuildArtifactGlobs
+        ) throws Exception {
             if (!Files.exists(repo)) {
                 return Map.of();
             }
             Map<String, String> hashes = new LinkedHashMap<>();
             try (var stream = Files.walk(repo)) {
                 for (Path file : stream.filter(Files::isRegularFile)
-                        .filter(file -> !isAllowedWrite(repo, out, file, allowedWriteGlobs, targetTestFiles))
+                        .filter(file -> !isAllowedWrite(
+                                repo,
+                                out,
+                                file,
+                                allowedWriteGlobs,
+                                targetTestFiles,
+                                additionalBuildArtifactGlobs
+                        ))
                         .sorted(Comparator.comparing(Path::toString))
                         .toList()) {
                     hashes.put(normalize(repo.relativize(file.toAbsolutePath().normalize()).toString()), sha256(file));
@@ -602,14 +648,21 @@ public class ProjectUnitTestGenerationBatchRunner {
             return hashes;
         }
 
-        private static boolean isAllowedWrite(Path repo, Path out, Path file, List<String> allowedWriteGlobs, List<String> targetTestFiles) {
+        private static boolean isAllowedWrite(
+                Path repo,
+                Path out,
+                Path file,
+                List<String> allowedWriteGlobs,
+                List<String> targetTestFiles,
+                List<String> additionalBuildArtifactGlobs
+        ) {
             Path normalized = file.toAbsolutePath().normalize();
             Path gitRoot = repo.resolve(".git").normalize();
             Path agentBridgeRoot = repo.resolve(".agentbridge").normalize();
             Path ideaRoot = repo.resolve(".idea").normalize();
             return ProjectUnitTestGenerationPaths.isAllowedBatchTestWrite(repo, normalized, allowedWriteGlobs, targetTestFiles)
                     || ProjectUnitTestGenerationPaths.isAllowedBatchPomWrite(repo, normalized, allowedWriteGlobs)
-                    || ProjectUnitTestGenerationPaths.isBuildArtifact(repo, normalized)
+                    || ProjectUnitTestGenerationPaths.isBuildArtifact(repo, normalized, additionalBuildArtifactGlobs)
                     || normalized.startsWith(gitRoot)
                     || normalized.startsWith(agentBridgeRoot)
                     || normalized.startsWith(ideaRoot)

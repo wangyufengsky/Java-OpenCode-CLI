@@ -152,6 +152,7 @@ public class ProjectUnitTestGenerationProperties {
         private String jacocoVersion = "0.8.15";
         private String jacocoJvmArgProperty = "argLine";
         private String jacocoJvmArgBase = "";
+        private List<String> additionalBuildArtifactGlobs = new ArrayList<>();
 
         @JsonProperty("require-coverage")
         public boolean isRequireCoverage() {
@@ -203,6 +204,18 @@ public class ProjectUnitTestGenerationProperties {
         @JsonProperty("jacoco-jvm-arg-base")
         public void setJacocoJvmArgBase(String jacocoJvmArgBase) {
             this.jacocoJvmArgBase = jacocoJvmArgBase == null ? "" : jacocoJvmArgBase;
+        }
+
+        @JsonProperty("additional-build-artifact-globs")
+        public List<String> getAdditionalBuildArtifactGlobs() {
+            return additionalBuildArtifactGlobs;
+        }
+
+        @JsonProperty("additional-build-artifact-globs")
+        public void setAdditionalBuildArtifactGlobs(List<String> additionalBuildArtifactGlobs) {
+            this.additionalBuildArtifactGlobs = additionalBuildArtifactGlobs == null
+                    ? new ArrayList<>()
+                    : new ArrayList<>(additionalBuildArtifactGlobs);
         }
 
     }

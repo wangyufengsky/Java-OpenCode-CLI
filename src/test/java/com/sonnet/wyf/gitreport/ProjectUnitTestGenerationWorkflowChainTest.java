@@ -81,6 +81,85 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void allowsWorkflowArtifactsWhenOutputDirectoryIsInsideRepository() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        properties.getPaths().setOut(properties.getProject().getRepo().resolve("project-unit-tests"));
+        writeSource(properties.getProject().getRepo());
+        FakeAgentBridgeClient client = new FakeAgentBridgeClient(properties);
+
+        chain(properties, client).run(request("full", "", ""));
+
+        assertThat(client.prompts).hasSize(1);
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void allowsIdeaCompilerOutput() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new RepositoryArtifactWritingClient(
+                properties, List.of("out/test/demo/OrderServiceTest.class")
+        )).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void allowsMavenGeneratedPomArtifacts() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new RepositoryArtifactWritingClient(
+                properties, List.of(".flattened-pom.xml", "dependency-reduced-pom.xml")
+        )).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void allowsIdeaModuleMetadata() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new RepositoryArtifactWritingClient(
+                properties, List.of("modules/demo.iml")
+        )).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
+    void allowsExplicitAdditionalBuildArtifactGlobs() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        objectMapper.readerForUpdating(properties.getTest()).readValue("""
+                {
+                  "additional-build-artifact-globs": [
+                    "generated/**",
+                    "**/generated/**"
+                  ]
+                }
+                """);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+
+        chain(properties, new RepositoryArtifactWritingClient(
+                properties, List.of("modules/demo/generated/reports/result.json")
+        )).run(request("full", "", ""));
+
+        assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
+                .contains("accepted: `1`", "failed: `0`");
+    }
+
+    @Test
     void coverageValidationIsOptIn() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         properties.getTest().setRequireCoverage(true);
@@ -247,6 +326,7 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     void failsWhenAgentCreatesProductionFile() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        properties.getPaths().setOut(properties.getProject().getRepo().resolve("project-unit-tests"));
         writeSource(properties.getProject().getRepo());
 
         assertThatThrownBy(() -> chain(properties, new ProductionWritingClient(properties)).run(request("full", "", "")))
@@ -734,6 +814,25 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             Path productionFile = properties.getProject().getRepo().resolve("src/main/java/com/acme/build/BuildInfo.java");
             Files.createDirectories(productionFile.getParent());
             Files.writeString(productionFile, "package com.acme.build; class BuildInfo {}\n");
+            super.createTargetTest(prompt);
+        }
+    }
+
+    private class RepositoryArtifactWritingClient extends FakeAgentBridgeClient {
+        private final List<String> relativePaths;
+
+        RepositoryArtifactWritingClient(ProjectUnitTestGenerationProperties properties, List<String> relativePaths) {
+            super(properties);
+            this.relativePaths = relativePaths;
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            for (String relativePath : relativePaths) {
+                Path artifact = properties.getProject().getRepo().resolve(relativePath);
+                Files.createDirectories(artifact.getParent());
+                Files.writeString(artifact, "generated\n");
+            }
             super.createTargetTest(prompt);
         }
     }

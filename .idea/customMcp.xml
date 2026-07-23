@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CustomMcpSettings">
+    <option name="servers">
+      <list>
+        <CustomMcpServerConfig>
+          <option name="id" value="ddde8a85-49c7-41c5-a2da-7df9ee8ab950" />
+          <option name="name" value="db" />
+          <option name="url" value="http://127.0.0.1:18765/mcp" />
+        </CustomMcpServerConfig>
+      </list>
+    </option>
+  </component>
+</project>
