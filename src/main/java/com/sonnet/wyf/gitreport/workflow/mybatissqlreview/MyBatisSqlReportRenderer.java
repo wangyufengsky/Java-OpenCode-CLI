@@ -521,6 +521,8 @@ public final class MyBatisSqlReportRenderer {
                 .append("- [SQL tasks](").append(TASKS).append(")\n")
                 .append("- [Traceability](").append(TRACEABILITY).append(")\n")
                 .append("- [Data quality](").append(DATA_QUALITY).append(")\n\n")
+                .append("## Database evidence\n\n")
+                .append("Detailed reports contain native Database MCP evidence bound to `data_source`, `catalog`, `schema`, `project`, and `scope`.\n\n")
                 .append("## Mapper reports\n\n");
         if (inventory.mappers().isEmpty()) {
             md.append("No mapper XML files were discovered.\n");
@@ -564,7 +566,7 @@ public final class MyBatisSqlReportRenderer {
 
                 ## Evidence boundary
 
-                Findings are review results and do not cause a technical workflow failure. Missing discovery, database, tool-call audit, candidate artifacts, schema validation, or aggregate link targets fail the run before stable publication.
+                Detailed reports retain native Database MCP tool names and normalized `data_source`, `catalog`, `schema`, `project`, and `scope` arguments. Findings are review results and do not cause a technical workflow failure. Missing discovery, database, tool-call audit, candidate artifacts, schema validation, or aggregate link targets fail the run before stable publication.
                 """.formatted(inventory.mappers().size(), inventory.statements().size(), summaries.size());
     }
 

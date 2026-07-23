@@ -120,6 +120,26 @@ class MyBatisSqlReviewWorkflowChainTest {
             assertThat(paths.filter(path -> path.getFileName().toString().equals("tool-call-boundary.json")).toList())
                     .hasSize(3);
         }
+        try (var paths = Files.walk(runRoot.resolve("tasks"))) {
+            assertThat(paths.filter(path -> path.getFileName().toString().equals("task.json")).toList())
+                    .hasSize(3)
+                    .allSatisfy(taskJson -> assertThat(taskJson)
+                            .content().contains("\"data_source\"", "\"catalog\"", "\"schema\"",
+                                    "\"project\"", "\"scope\" : \"ALL\"")
+                            .doesNotContain("connection_id", "database_name", "schema_name"));
+        }
+    }
+
+    @Test
+    void defaultsDatabaseScopeToAllAndBindsItToNativePreflightCalls() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config).replace("                  scope: ALL\n", ""));
+
+        chain.run(request("full", "", "", "run-default-scope"));
+
+        assertThat(client.toolArguments)
+                .isNotEmpty()
+                .allSatisfy(arguments -> assertThat(arguments.path("scope").asText()).isEqualTo("ALL"));
     }
 
     @Test
@@ -148,17 +168,17 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         assertThatThrownBy(() -> chain.run(request("full", "", "", "run-missing-tool")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("database tools unavailable");
+                .hasMessageContaining("Database MCP tools unavailable");
         assertThat(stableOut.resolve("mybatis-sql-review-report.md")).hasContent(previousReport);
         assertThat(client.postedStatementKeys).hasSize(3);
     }
 
     @Test
-    void perTaskRecheckTopologyMismatchPreventsPromptSubmission() {
-        client.mismatchTopologyOnRecheck = true;
+    void perTaskRecheckDataSourceMismatchPreventsPromptSubmission() {
+        client.mismatchDataSourceOnRecheck = true;
 
         assertThatThrownBy(() -> chain.run(request("full", "", "", "run-recheck-drift")))
-                .hasMessageContaining("host/instance/topology fingerprint mismatch");
+                .hasMessageContaining("data-source environment must identify a physical read-replica target");
         assertThat(client.postedStatementKeys).isEmpty();
     }
 
@@ -238,9 +258,9 @@ class MyBatisSqlReviewWorkflowChainTest {
         assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
 
         assertThatThrownBy(() -> chain.run(request("rerun", "sql", sqlKey, "run-sql-no-db")))
-                .hasMessageContaining("database tools unavailable");
+                .hasMessageContaining("Database MCP tools unavailable");
         assertThatThrownBy(() -> chain.run(request("rerun", "xml", mapperKey, "run-xml-no-db")))
-                .hasMessageContaining("database tools unavailable");
+                .hasMessageContaining("Database MCP tools unavailable");
     }
 
     @Test
@@ -509,6 +529,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                   connection-name: Gauss Review
                   database-name: orders
                   schema-name: audit
+                  scope: ALL
                   environment: read-replica
                   non-owner-non-admin-read-only-account: true
                   row-level-security-disabled-for-safe-base-tables: true
@@ -540,13 +561,14 @@ class MyBatisSqlReviewWorkflowChainTest {
         private final List<Duration> waitTimeouts = new ArrayList<>();
         private final List<Duration> waitPollIntervals = new ArrayList<>();
         private final List<String> postedPrompts = new ArrayList<>();
+        private final List<JsonNode> toolArguments = new ArrayList<>();
         private int activeTasks;
         private int maximumActiveTasks;
         private boolean clearPending;
         private boolean omitEvidence;
         private boolean missingRequiredTool;
-        private boolean mismatchTopologyOnRecheck;
-        private int connectionCalls;
+        private boolean mismatchDataSourceOnRecheck;
+        private int dataSourceCalls;
         private Runnable onListTools;
 
         private RecordingAgentBridgeClient(ObjectMapper objectMapper) {
@@ -557,14 +579,6 @@ class MyBatisSqlReviewWorkflowChainTest {
         @Override
         public void requireMyBatisSqlReviewCapabilities(URI ignored) {
             // The fixture exposes the strict capability/tool contract directly.
-        }
-
-        @Override
-        public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI ignoredWeb, URI ignoredMcp) {
-            return new MyBatisAuditBinding(
-                    VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY,
-                    VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT
-            );
         }
 
         @Override
@@ -625,7 +639,7 @@ class MyBatisSqlReviewWorkflowChainTest {
             }
             LinkedHashSet<String> names = new LinkedHashSet<>(MyBatisDatabasePreflight.REQUIRED_DATABASE_TOOLS);
             if (missingRequiredTool) {
-                names.remove("execute_sql_query");
+                names.remove(DatabaseMcpContract.EXECUTE_QUERY);
             }
             return names.stream()
                     .map(name -> new ToolDefinition(name, name, toolSchema(name)))
@@ -634,61 +648,60 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         @Override
         public ToolResponse callTool(URI ignored, String name, JsonNode arguments) {
+            toolArguments.add(arguments.deepCopy());
             JsonNode structured = switch (name) {
-                case "list_database_connections" -> connections();
-                case "test_database_connection" -> objectMapper.createObjectNode().put("success", true);
-                case "list_database_schemas" -> schemas();
-                case "list_schema_object_kinds" -> objectKinds();
-                case "list_schema_objects" -> tableObjects();
-                case "execute_sql_query" -> safetyProbe();
-                default -> objectMapper.createObjectNode();
+                case DatabaseMcpContract.LIST_DATASOURCES -> dataSources();
+                case DatabaseMcpContract.LIST_DATABASES -> databases();
+                case DatabaseMcpContract.LIST_TABLE_SCHEMA -> tableSchema();
+                case DatabaseMcpContract.EXECUTE_QUERY -> safetyProbe();
+                default -> throw new IllegalArgumentException("unexpected native tool: " + name);
             };
             return new ToolResponse(structured, "", structured);
         }
 
-        private ObjectNode connections() {
-            connectionCalls++;
-            ObjectNode response = objectMapper.createObjectNode();
-            ObjectNode connection = response.putArray("connections").addObject()
-                    .put("id", "gauss-readonly")
+        private ArrayNode dataSources() {
+            dataSourceCalls++;
+            ArrayNode response = objectMapper.createArrayNode();
+            ObjectNode source = response.addObject()
                     .put("name", "Gauss Review")
                     .put("databaseSystem", "GaussDB")
-                    .put("deployment", "centralized")
-                    .put("environment", "read-replica")
-                    .put("environmentSource", "managed-connection-metadata")
-                    .put("topologyRole", "physical-standby")
-                    .put("topologySource", "server-observed")
-                    .put("readOnly", true);
-            addDatabaseBinding(connection);
-            if (mismatchTopologyOnRecheck && connectionCalls > 1) {
-                connection.put("topologyFingerprint", "sha256:" + "e".repeat(64));
-            }
-            connection.putArray("databases").add("orders");
+                    .put("environment", mismatchDataSourceOnRecheck && dataSourceCalls > 1
+                            ? "primary" : "read-replica");
+            return response;
+        }
+
+        private ArrayNode databases() {
+            ArrayNode response = objectMapper.createArrayNode();
+            response.addObject().put("name", "orders");
+            return response;
+        }
+
+        private ObjectNode tableSchema() {
+            ObjectNode response = objectMapper.createObjectNode()
+                    .put("catalog", "orders").put("schema", "audit");
+            response.putArray("tables").addObject().put("name", "orders").put("type", "TABLE");
             return response;
         }
 
         private JsonNode toolSchema(String name) {
-            if (!"execute_sql_query".equals(name) && !"preview_table_data".equals(name)) {
-                return objectMapper.createObjectNode().put("type", "object");
-            }
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
-            schema.put("x-agentbridge-policyFingerprint",
-                    VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT);
             ObjectNode properties = schema.putObject("properties");
-            for (String field : List.of("connectionId", "databaseName", "schemaName")) {
-                properties.putObject(field).put("type", "string");
-            }
-            if ("execute_sql_query".equals(name)) {
-                properties.putObject("queryText").put("type", "string");
-                schema.putArray("required")
-                        .add("connectionId").add("databaseName").add("schemaName").add("queryText");
-            } else {
-                properties.putObject("tableName").put("type", "string");
-                properties.putObject("maxRowCount").put("type", "integer")
-                        .put("minimum", 1).put("maximum", 20);
-                schema.putArray("required")
-                        .add("connectionId").add("databaseName").add("schemaName")
-                        .add("tableName").add("maxRowCount");
+            ArrayNode required = schema.putArray("required");
+            List<String> fields = switch (name) {
+                case DatabaseMcpContract.LIST_DATASOURCES -> List.of("project", "scope");
+                case DatabaseMcpContract.LIST_DATABASES -> List.of("project", "scope", "dataSource");
+                case DatabaseMcpContract.LIST_TABLE_SCHEMA -> List.of(
+                        "project", "scope", "dataSource", "catalog", "schema", "includeColumns", "includeIndexes", "maxTables");
+                case DatabaseMcpContract.EXECUTE_QUERY -> List.of("project", "scope", "dataSource", "sql", "maxRows");
+                default -> throw new IllegalArgumentException("unexpected native tool: " + name);
+            };
+            for (String field : fields) {
+                properties.putObject(field).put("type", switch (field) {
+                    case "includeColumns", "includeIndexes" -> "boolean";
+                    case "maxRows", "maxTables" -> "integer";
+                    default -> "string";
+                });
+                required.add(field);
             }
             return schema;
         }
@@ -700,6 +713,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("currentSchema", "audit")
                     .put("currentUser", "sql_auditor")
                     .put("superuser", false)
+                    .put("rolbypassrls", false)
                     .put("systemAdmin", false)
                     .put("auditAdmin", false)
                     .put("roleAdmin", false)
@@ -724,58 +738,16 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("executablePackageCount", 0)
                     .put("unsafeForeignServerPrivilegeCount", 0)
                     .put("unsafeDirectoryPrivilegeCount", 0)
-                    .put("unsafeForeignServerPrivilegeCount", 0)
-                    .put("unsafeDirectoryPrivilegeCount", 0)
                     .put("statementTimeoutMs", 12_000)
                     .put("baseTableNames", "orders")
                     .put("baseTableCount", 1)
                     .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
-            addDatabaseBinding(result);
             row.fieldNames().forEachRemaining(result.putArray("columns")::add);
             result.putArray("rows").add(row);
             return result;
         }
 
-        private void addDatabaseBinding(ObjectNode node) {
-            node.putObject("identity")
-                    .put("instanceId", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceId())
-                    .put("projectId", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.projectId())
-                    .put("instanceNonce", VerifiedMyBatisDatabaseFixture.BRIDGE_IDENTITY.instanceNonce());
-            node.put("policyFingerprint", VerifiedMyBatisDatabaseFixture.POLICY_FINGERPRINT)
-                    .put("fingerprintSource", "server-generated")
-                    .put("databaseHostFingerprint",
-                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.hostFingerprint())
-                    .put("databaseInstanceFingerprint",
-                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.instanceFingerprint())
-                    .put("topologyFingerprint",
-                            VerifiedMyBatisDatabaseFixture.DATABASE_FINGERPRINTS.topologyFingerprint());
-        }
-
-        private ObjectNode tableObjects() {
-            ObjectNode response = bound().put("kind", "TABLE");
-            response.putArray("objects").addObject().put("name", "orders").put("kind", "TABLE");
-            return response;
-        }
-
-        private ObjectNode schemas() {
-            ObjectNode response = objectMapper.createObjectNode().put("databaseName", "orders");
-            response.putArray("schemas").add("audit");
-            return response;
-        }
-
-        private ObjectNode objectKinds() {
-            ObjectNode response = bound();
-            response.putArray("objectKinds").addObject().put("code", "TABLE").put("name", "Table");
-            return response;
-        }
-
-        private ObjectNode bound() {
-            return objectMapper.createObjectNode()
-                    .put("connectionId", "gauss-readonly")
-                    .put("databaseName", "orders")
-                    .put("schemaName", "audit");
-        }
 
         private JsonNode runtimeContext(String prompt) throws Exception {
             String marker = "## Runtime task context\n\n```json\n";
@@ -833,6 +805,11 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("select_key", selectKey)
                     .put("risk_level", "none")
                     .put("scenario_count", 0)
+                    .put("data_source", runtime.path("data_source").asText())
+                    .put("catalog", runtime.path("catalog").asText())
+                    .put("schema", runtime.path("schema").asText())
+                    .put("project", runtime.path("project").asText())
+                    .put("scope", runtime.path("scope").asText())
                     .put("evidence_file", "database-evidence.json")
                     .put("report_file", "report.md");
             summary.putArray("findings");
@@ -846,9 +823,11 @@ class MyBatisSqlReviewWorkflowChainTest {
                         .put("statement_id", statementId)
                         .put("command_type", commandType)
                         .put("select_key", selectKey)
-                        .put("connection_id", "gauss-readonly")
-                        .put("database_name", "orders")
-                        .put("schema_name", "audit");
+                        .put("data_source", runtime.path("data_source").asText())
+                        .put("catalog", runtime.path("catalog").asText())
+                        .put("schema", runtime.path("schema").asText())
+                        .put("project", runtime.path("project").asText())
+                        .put("scope", runtime.path("scope").asText());
                 evidence.putObject("audit")
                         .put("post_hoc", true)
                         .put("permission_to_execute_original_dml", false)

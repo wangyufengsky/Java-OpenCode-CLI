@@ -38,9 +38,11 @@ public final class MyBatisSqlPromptBuilder {
         runtime.put("normalized_sql", context.normalizedSql());
         runtime.putPOJO("dynamic_nodes", context.dynamicNodes());
         runtime.putPOJO("parameter_placeholders", context.parameterPlaceholders());
-        runtime.put("connection_id", context.connectionId());
-        runtime.put("database_name", context.databaseName());
-        runtime.put("schema_name", context.schemaName());
+        runtime.put("data_source", context.dataSource());
+        runtime.put("catalog", context.catalog());
+        runtime.put("schema", context.schema());
+        runtime.put("project", context.project().toAbsolutePath().normalize().toString());
+        runtime.put("scope", context.scope());
         Path candidateDirectory = context.candidateDirectory().toAbsolutePath().normalize();
         runtime.put("candidate_directory", candidateDirectory.toString());
         runtime.put("report_path", candidateDirectory.resolve("report.md").toString());
@@ -80,9 +82,11 @@ public final class MyBatisSqlPromptBuilder {
             String normalizedSql,
             List<String> dynamicNodes,
             List<String> parameterPlaceholders,
-            String connectionId,
-            String databaseName,
-            String schemaName,
+            String dataSource,
+            String catalog,
+            String schema,
+            Path project,
+            String scope,
             Path candidateDirectory
     ) {
         public Context {
@@ -98,9 +102,11 @@ public final class MyBatisSqlPromptBuilder {
             requireNonBlank(normalizedSql, "normalizedSql");
             dynamicNodes = List.copyOf(dynamicNodes == null ? List.of() : dynamicNodes);
             parameterPlaceholders = List.copyOf(parameterPlaceholders == null ? List.of() : parameterPlaceholders);
-            requireNonBlank(connectionId, "connectionId");
-            requireNonBlank(databaseName, "databaseName");
-            requireNonBlank(schemaName, "schemaName");
+            requireNonBlank(dataSource, "dataSource");
+            requireNonBlank(catalog, "catalog");
+            requireNonBlank(schema, "schema");
+            project = Objects.requireNonNull(project, "project").toAbsolutePath().normalize();
+            scope = DatabaseMcpContract.Scope.parse(scope).name();
             Objects.requireNonNull(candidateDirectory, "candidateDirectory");
         }
 

@@ -14,17 +14,8 @@ import java.util.Set;
 
 final class VerifiedMyBatisDatabaseFixture {
     private static final URI TEST_URI = URI.create("http://127.0.0.1:1");
-    static final AgentBridgeClient.BridgeIdentity BRIDGE_IDENTITY =
-            new AgentBridgeClient.BridgeIdentity("instance-a", "project-a", "nonce-a-0123456789");
-    static final String POLICY_FINGERPRINT = "sha256:" + "a".repeat(64);
-    static final DatabaseTestFacts DATABASE_FINGERPRINTS =
-            new DatabaseTestFacts(
-                    "sha256:" + "b".repeat(64), "sha256:" + "c".repeat(64), "sha256:" + "d".repeat(64));
-
     private VerifiedMyBatisDatabaseFixture() {
     }
-
-    record DatabaseTestFacts(String hostFingerprint, String instanceFingerprint, String topologyFingerprint) { }
 
     static MyBatisDatabasePreflight.Result verified(ObjectMapper objectMapper) {
         return verified(objectMapper, "GaussDB-ReadOnly", "orders", "audit", Set.of("orders", "line_items"));

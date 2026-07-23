@@ -37,6 +37,8 @@ class MyBatisSqlPromptBuilderTest {
                 "gauss-readonly",
                 "orders",
                 "audit",
+                tempDir.resolve("project"),
+                "ALL",
                 candidateDirectory
         );
 
@@ -65,29 +67,38 @@ class MyBatisSqlPromptBuilderTest {
     }
 
     @Test
-    void statesTheHardAndPostHocSafetyBoundariesWithoutConflatingNativeWrites() throws Exception {
+    void statesNativeDatabaseBoundariesAndOutputContract() throws Exception {
         String prompt = new MyBatisSqlPromptBuilder(objectMapper).build(context());
 
         assertThat(prompt)
-                .contains("non-owner, non-admin, read-only account")
-                .contains("database-side controls are the only hard safety boundary")
-                .contains("RLS is disabled for every safe base table")
-                .contains("user-defined and security-definer functions")
-                .contains("including PUBLIC grants")
-                .contains("post-hoc audit cannot prevent or undo")
-                .contains("confirmed database/server/role statement_timeout")
-                .contains("30 seconds")
-                .contains("native filesystem writes")
-                .contains("exact absolute paths")
-                .contains("simple-read grammar")
-                .contains("exact `TABLE` kind code")
-                .contains("views, materialized views, foreign or external tables, and unknown kinds")
-                .contains("immutable safe base-relation set")
-                .contains("`preview_table_data.tableName`")
-                .contains("deployed object-kind codes and response shapes")
-                .contains("WHERE, functions, casts, and operators are forbidden")
-                .contains("Database Evidence section must contain exactly")
+                .contains("only these four read-oriented tools")
+                .contains("DML, DDL, NoSQL, or unknown tools")
+                .contains("`<selectKey>` statements are static-review-only")
+                .contains("exact absolute output paths")
+                .contains("Database Evidence section contains exactly")
                 .contains("[database-evidence.json](database-evidence.json)");
+    }
+
+    @Test
+    void promptUsesOnlyNativeDatabaseMcpToolsAndCurrentRuntimeArguments() throws Exception {
+        String prompt = new MyBatisSqlPromptBuilder(objectMapper).build(context());
+
+        assertThat(prompt)
+                .contains("`cmcp_db_database_list_datasources`",
+                        "`cmcp_db_database_list_databases`",
+                        "`cmcp_db_database_list_table_schema`",
+                        "`cmcp_db_database_execute_sql_query`",
+                        "\"data_source\" : \"gauss-readonly\"",
+                        "\"catalog\" : \"orders\"",
+                        "\"schema\" : \"audit\"",
+                        "\"project\"",
+                        "\"scope\" : \"ALL\"",
+                        "\"maxRows\":20",
+                        "at most three scenario queries",
+                        "`<selectKey>` statements are static-review-only")
+                .doesNotContain("list_database_connections", "test_database_connection",
+                        "preview_table_data", "connectionId", "databaseName", "schemaName",
+                        "identity", "fingerprint", "migration", "compatibility", "fallback");
     }
 
     private MyBatisSqlPromptBuilder.Context context() {
@@ -107,6 +118,8 @@ class MyBatisSqlPromptBuilderTest {
                 "gauss-readonly",
                 "orders",
                 "audit",
+                tempDir.resolve("project"),
+                "ALL",
                 tempDir.resolve("candidate")
         );
     }

@@ -128,7 +128,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     MyBatisDatabasePreflight.Result database = databasePreflight.verify(
                             URI.create(settings.getMcpUrl()),
                             URI.create(settings.getWebBaseUrl()),
-                            configuration.getDatabase().toContract()
+                            configuration.getDatabase().toContract(),
+                            configuration.getProject().getRepo(),
+                            configuration.getDatabase().getScope()
                     );
                     for (MyBatisSqlStatement statement : selected) {
                         prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
@@ -1015,6 +1017,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         private String connectionName;
         private String databaseName;
         private String schemaName;
+        private String scope = DatabaseMcpContract.Scope.ALL.name();
         private String environment;
         private boolean nonOwnerNonAdminReadOnlyAccount;
         private boolean rowLevelSecurityDisabledForSafeBaseTables;
@@ -1049,6 +1052,14 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
 
         public void setSchemaName(String schemaName) {
             this.schemaName = schemaName;
+        }
+
+        public String getScope() {
+            return scope;
+        }
+
+        public void setScope(String scope) {
+            this.scope = scope;
         }
 
         public String getEnvironment() {
@@ -1143,6 +1154,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             requireNonBlank(connectionName, "database.connection-name");
             requireNonBlank(databaseName, "database.database-name");
             requireNonBlank(schemaName, "database.schema-name");
+            scope = DatabaseMcpContract.Scope.parse(scope).name();
             requireNonBlank(environment, "database.environment");
             requireNonBlank(statementTimeoutScope, "database.statement-timeout-scope");
             if (statementTimeoutSeconds < 1 || statementTimeoutSeconds > 30) {

@@ -65,7 +65,11 @@ class MyBatisSqlReportRendererTest {
         String mapperIndex = Files.readString(tempDir.resolve("reports").resolve(mapper.mapperKey()).resolve("index.md"));
         String projectReport = Files.readString(result.mainReport());
         assertThat(mapperIndex).contains("Statements: `5`", "Findings: `5`", "P0: `1`", "P3: `2`");
-        assertThat(projectReport).contains("Mappers: `1`", "Statements: `5`", "Findings: `5`");
+        assertThat(projectReport).contains(
+                "Mappers: `1`", "Statements: `5`", "Findings: `5`",
+                "native Database MCP evidence",
+                "`data_source`, `catalog`, `schema`, `project`, and `scope`"
+        );
         assertAllMarkdownLinksExist(tempDir);
     }
 
@@ -224,6 +228,14 @@ class MyBatisSqlReportRendererTest {
                         : statement.commandType().toLowerCase(Locale.ROOT))
                 .put("select_key", statement.selectKey())
                 .put("risk_level", highestRisk(severities));
+        summary.put("scenario_count", 0)
+                .put("data_source", "Gauss Review")
+                .put("catalog", "orders")
+                .put("schema", "audit")
+                .put("project", tempDir.resolve("repo").toAbsolutePath().normalize().toString())
+                .put("scope", "ALL")
+                .put("evidence_file", "database-evidence.json")
+                .put("report_file", "report.md");
         var findings = summary.putArray("findings");
         for (int index = 0; index < severities.size(); index++) {
             findings.addObject()

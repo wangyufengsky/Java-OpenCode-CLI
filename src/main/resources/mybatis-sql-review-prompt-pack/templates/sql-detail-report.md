@@ -1,6 +1,6 @@
 # SQL Review
 
-This candidate report reviews exactly one inventory statement and distinguishes static observations from database evidence. State its exact statement key, mapper-relative path, namespace, statement id, command type, selectKey flag, and source line range.
+This candidate report reviews exactly one inventory statement and distinguishes static observations from native Database MCP evidence. State its exact statement key, mapper-relative path, namespace, statement id, command type, selectKey flag, source line range, and runtime `data_source`, `catalog`, `schema`, `project`, and `scope` binding.
 
 ## Statement
 
@@ -24,4 +24,4 @@ Give actionable, scoped recommendations that do not require executing the origin
 
 ## Limitations
 
-State the post-hoc nature of the tool-call audit, the limits of representative rows, and every unresolved uncertainty.
+State the limits of representative rows and every unresolved uncertainty.

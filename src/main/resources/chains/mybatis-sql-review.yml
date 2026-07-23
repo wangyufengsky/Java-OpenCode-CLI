@@ -1,8 +1,7 @@
 # MyBatis XML SQL review chain. Replace every CHANGE_ME value before running.
 # Database credentials must be an isolated non-owner/non-admin read-only account on a
-# centralized GaussDB physical read replica. Every SQL task rechecks the bound local AgentBridge
-# instance/policy and server-generated database host/instance/topology fingerprints before submit.
-# Test databases and self-attested environment labels are rejected.
+# centralized GaussDB physical read replica. Every SQL task rechecks the configured native
+# Database MCP data source and safety probe before submit.
 
 project:
   id: "example-project"
@@ -25,6 +24,7 @@ database:
   connection-name: "CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"
   database-name: "CHANGE_ME_DATABASE"
   schema-name: "CHANGE_ME_SCHEMA"
+  scope: "ALL"
   environment: "read-replica"
   non-owner-non-admin-read-only-account: false
   row-level-security-disabled-for-safe-base-tables: false
@@ -39,7 +39,7 @@ database:
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
-  mcp-url: "http://127.0.0.1:8642/mcp"
+  mcp-url: "http://127.0.0.1:8643/mcp"
   concurrency: 1
   max-concurrency: 1
   timeout-minutes: 40
