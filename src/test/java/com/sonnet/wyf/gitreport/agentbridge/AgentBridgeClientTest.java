@@ -70,80 +70,35 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void acceptsOnlyTheFutureStrictMyBatisAuditProtocolCapabilityContract() throws Exception {
+    void acceptsNativeAgentBridgeVersionWithoutInventedCapabilityFields() throws Exception {
         HttpServer server = server();
-        server.createContext("/info", exchange -> respond(exchange, 200, strictAuditInfo()));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
         server.start();
 
         client.requireMyBatisSqlReviewCapabilities(baseUri(server));
     }
 
     @Test
-    void bindsStrictWebAndMcpEndpointsToTheSameInstanceAndPolicy() throws Exception {
-        HttpServer server = strictBindingServer("instance-a", "nonce-a-0123456789");
+    void bindsNativeLoopbackWebAndMcpEndpoints() throws Exception {
+        HttpServer server = nativeBindingServer();
         server.start();
 
         AgentBridgeClient.MyBatisAuditBinding binding = client.bindMyBatisSqlReviewEndpoints(
                 baseUri(server), URI.create(baseUri(server) + "/mcp")
         );
 
-        assertThat(binding.identity().instanceId()).isEqualTo("instance-a");
-        assertThat(binding.identity().projectId()).isEqualTo("project-a");
-        assertThat(binding.policyFingerprint()).startsWith("sha256:");
+        assertThat(binding).isNotNull();
     }
 
     @Test
-    void rejectsWebAndMcpInstanceIdentityMismatch() throws Exception {
-        HttpServer server = strictBindingServer(
-                "instance-a", "nonce-a-0123456789",
-                "instance-b", "nonce-b-0123456789"
-        );
-        server.start();
-
-        assertThatThrownBy(() -> client.bindMyBatisSqlReviewEndpoints(
-                baseUri(server), URI.create(baseUri(server) + "/mcp")
-        )).hasMessageContaining("identity mismatch");
-    }
-
-    @Test
-    void revalidatesBoundMyBatisWebIdentityBeforeSendingEachPrompt() throws Exception {
-        AtomicInteger infoCalls = new AtomicInteger();
-        AtomicInteger promptCalls = new AtomicInteger();
+    void rejectsAgentBridgeVersionsBefore12020() throws Exception {
         HttpServer server = server();
-        server.createContext("/info", exchange -> {
-            boolean initialBinding = infoCalls.getAndIncrement() == 0;
-            respond(exchange, 200, strictAuditInfo(
-                    initialBinding ? "instance-a" : "instance-b",
-                    initialBinding ? "nonce-a-0123456789" : "nonce-b-0123456789"
-            ));
-        });
-        server.createContext("/prompt", exchange -> {
-            promptCalls.incrementAndGet();
-            respond(exchange, 200, "{}");
-        });
-        server.createContext("/mcp", exchange -> {
-            JsonNode request = objectMapper.readTree(body(exchange));
-            switch (request.path("method").asText()) {
-                case "initialize" -> respondWithSession(exchange, 200, "strict-session", """
-                        {"jsonrpc":"2.0","id":1,"result":{
-                          "protocolVersion":"2025-11-25",
-                          "identity":{"instanceId":"instance-a","projectId":"project-a",
-                            "instanceNonce":"nonce-a-0123456789"},
-                          "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                        }}
-                        """);
-                case "notifications/initialized" -> respondWithSession(
-                        exchange, 202, "strict-session", "");
-                default -> respond(exchange, 400, "unknown MCP method");
-            }
-        });
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.201.9\"}"));
         server.start();
-        URI web = baseUri(server);
-        client.bindMyBatisSqlReviewEndpoints(web, URI.create(web + "/mcp"));
 
-        assertThatThrownBy(() -> client.postPrompt(web, "must not reach another instance"))
-                .hasMessageContaining("identity or policy fingerprint mismatch");
-        assertThat(promptCalls).hasValue(0);
+        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
+                .hasMessageContaining("1.201.9")
+                .hasMessageContaining("1.202.0");
     }
 
     @Test
@@ -159,15 +114,15 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void preservesLegacyNonLoopbackWebAndMcpCompatibilityOutsideStrictMyBatisBinding() throws Exception {
+    void usesDirectWebAndMcpEndpointsOutsideNativeDatabaseBinding() throws Exception {
         CapturingHttpClient webTransport = new CapturingHttpClient("{}");
-        AgentBridgeClient legacyWebClient = new AgentBridgeClient(objectMapper, webTransport);
-        legacyWebClient.postPrompt(
-                URI.create("https://legacy-agentbridge.example.com"),
-                "legacy workflow"
+        AgentBridgeClient webClient = new AgentBridgeClient(objectMapper, webTransport);
+        webClient.postPrompt(
+                URI.create("https://agentbridge.example.com"),
+                "workflow"
         );
         assertThat(webTransport.lastRequest.uri()).isEqualTo(
-                URI.create("https://legacy-agentbridge.example.com/prompt")
+                URI.create("https://agentbridge.example.com/prompt")
         );
 
         CapturingHttpClient mcpTransport = new CapturingHttpClient("""
@@ -175,74 +130,16 @@ class AgentBridgeClientTest {
                   "content":[{"type":"text","text":"{\\\"ok\\\":true}"}]
                 }}
                 """);
-        AgentBridgeClient legacyMcpClient = new AgentBridgeClient(objectMapper, mcpTransport);
-        AgentBridgeClient.ToolResponse response = legacyMcpClient.callTool(
-                URI.create("https://legacy-agentbridge.example.com/mcp"),
+        AgentBridgeClient mcpClient = new AgentBridgeClient(objectMapper, mcpTransport);
+        AgentBridgeClient.ToolResponse response = mcpClient.callTool(
+                URI.create("https://agentbridge.example.com/mcp"),
                 "list_tests",
                 objectMapper.createObjectNode()
         );
         assertThat(response.structured().path("ok").asBoolean()).isTrue();
         assertThat(mcpTransport.lastRequest.uri()).isEqualTo(
-                URI.create("https://legacy-agentbridge.example.com/mcp")
+                URI.create("https://agentbridge.example.com/mcp")
         );
-    }
-
-    @Test
-    void rejectsStrictCapabilityWithoutServerEnforcedExecuteSqlPolicy() throws Exception {
-        HttpServer server = server();
-        ObjectNode info = (ObjectNode) objectMapper.readTree(strictAuditInfo());
-        ((ObjectNode) info.at("/capabilities/mybatisSqlReviewAudit")).remove("executeSqlQueryPolicy");
-        server.createContext("/info", exchange -> respond(exchange, 200, info.toString()));
-        server.start();
-
-        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
-                .hasMessageContaining("execute_sql_query policy");
-    }
-
-    @Test
-    void rejectsLegacy11992BeforeDatabaseToolsCanBeUsed() throws Exception {
-        HttpServer server = server();
-        server.createContext("/info", exchange -> respond(exchange, 200, """
-                {"version":"1.199.2","capabilities":{}}
-                """));
-        server.start();
-
-        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
-                .hasMessageContaining("1.199.2")
-                .hasMessageContaining("incompatible")
-                .hasMessageContaining("immutable")
-                .hasMessageContaining("preview");
-    }
-
-    @Test
-    void rejectsVersionOnlyOrPartialAuditCapabilityClaims() throws Exception {
-        HttpServer server = server();
-        server.createContext("/info", exchange -> respond(exchange, 200, """
-                {
-                  "version":"1.200.0",
-                  "capabilities":{"mybatisSqlReviewAudit":{"contractVersion":1}}
-                }
-                """));
-        server.start();
-
-        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
-                .hasMessageContaining("capability")
-                .hasMessageContaining("untruncatedStructuredToolArguments");
-    }
-
-    @Test
-    void rejectsPreviewCapabilityWhenServerMaximumIsNotExactlyTwenty() throws Exception {
-        HttpServer server = server();
-        server.createContext("/info", exchange -> respond(
-                exchange, 200, strictAuditInfo().replace(
-                        "\"serverEnforcedPreviewMaxRows\":20",
-                        "\"serverEnforcedPreviewMaxRows\":21"
-                )
-        ));
-        server.start();
-
-        assertThatThrownBy(() -> client.requireMyBatisSqlReviewCapabilities(baseUri(server)))
-                .hasMessageContaining("server-enforced preview max 20");
     }
 
     @Test
@@ -377,7 +274,7 @@ class AgentBridgeClientTest {
                           "jsonrpc":"2.0",
                           "id":2,
                           "result":{"tools":[{
-                            "name":"execute_sql_query",
+                            "name":"cmcp_db_database_execute_sql_query",
                             "description":"Execute a database query",
                             "inputSchema":{"type":"object","required":["connectionId","queryText"]}
                           }]}
@@ -395,7 +292,7 @@ class AgentBridgeClientTest {
         assertThat(requests).extracting(request -> request.path("method").asText())
                 .containsExactly("initialize", "notifications/initialized", "tools/list");
         assertThat(tools).singleElement().satisfies(tool -> {
-            assertThat(tool.name()).isEqualTo("execute_sql_query");
+            assertThat(tool.name()).isEqualTo("cmcp_db_database_execute_sql_query");
             assertThat(tool.description()).contains("database query");
             assertThat(tool.inputSchema().path("required")).hasSize(2);
         });
@@ -418,14 +315,14 @@ class AgentBridgeClientTest {
                     if (cursor.isEmpty()) {
                         respondWithSession(exchange, 200, "paged-session", """
                                 {"jsonrpc":"2.0","id":2,"result":{
-                                  "tools":[{"name":"list_database_connections","inputSchema":{"type":"object"}}],
+                                  "tools":[{"name":"cmcp_db_database_list_datasources","inputSchema":{"type":"object"}}],
                                   "nextCursor":"page-2"
                                 }}
                                 """);
                     } else {
                         respondWithSession(exchange, 200, "paged-session", """
                                 {"jsonrpc":"2.0","id":3,"result":{
-                                  "tools":[{"name":"execute_sql_query","inputSchema":{"type":"object"}}]
+                                  "tools":[{"name":"cmcp_db_database_execute_sql_query","inputSchema":{"type":"object"}}]
                                 }}
                                 """);
                     }
@@ -440,7 +337,7 @@ class AgentBridgeClientTest {
         );
 
         assertThat(tools).extracting(AgentBridgeClient.ToolDefinition::name)
-                .containsExactly("list_database_connections", "execute_sql_query");
+                .containsExactly("cmcp_db_database_list_datasources", "cmcp_db_database_execute_sql_query");
         assertThat(requests).extracting(request -> request.path("method").asText())
                 .containsExactly("initialize", "notifications/initialized", "tools/list", "tools/list");
         assertThat(requests.get(3).at("/params/cursor").asText()).isEqualTo("page-2");
@@ -449,15 +346,13 @@ class AgentBridgeClientTest {
     @Test
     void readsTypedWebToolCallHistory() throws Exception {
         HttpServer server = server();
+        nativeInfo(server);
         JsonNode fixtureCall = objectMapper.readTree(
                 resource("/mybatis-sql-review-fixtures/tool-calls.json")
         ).get(0);
         server.createContext("/tool-calls", exchange -> respond(exchange, 200,
                 objectMapper.createObjectNode()
-                        .put("complete", true)
-                        .put("snapshotToken", "snapshot-typed")
-                        .put("total", 1)
-                        .set("toolCalls", objectMapper.createArrayNode().add(fixtureCall.deepCopy()))
+                        .set("items", objectMapper.createArrayNode().add(fixtureCall.deepCopy()))
                         .toString()));
         server.start();
 
@@ -467,7 +362,6 @@ class AgentBridgeClientTest {
 
         assertThat(calls).singleElement().satisfies(call -> {
             assertThat(call.id()).isEqualTo("call-17");
-            assertThat(call.toolName()).isEqualTo("execute_sql_query");
             assertThat(call.timestamp()).isEqualTo(Instant.parse("2026-07-22T09:15:30Z"));
             assertThat(call.arguments().path("connectionId").asText()).isEqualTo("gauss-readonly");
             assertThat(call.result().path("rows")).hasSize(1);
@@ -477,127 +371,83 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void followsStableCursorPagesAndDeduplicatesOverlappingRecords() throws Exception {
-        List<String> queries = new ArrayList<>();
-        JsonNode firstCall = toolCall("call-1", "2026-07-22T09:15:30Z");
-        JsonNode secondCall = toolCall("call-2", "2026-07-22T09:16:30Z");
+    void toolCallsParseStringEncodedArgumentsAndResults() throws Exception {
         HttpServer server = server();
-        server.createContext("/tool-calls", exchange -> {
-            queries.add(exchange.getRequestURI().getRawQuery());
-            if (exchange.getRequestURI().getRawQuery() == null) {
-                respond(exchange, 200, objectMapper.createObjectNode()
-                        .put("complete", false)
-                        .put("snapshotToken", "snapshot-1")
-                        .put("total", 2)
-                        .put("nextCursor", "page-2")
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
+                {"items":[{"id":"17","title":"Query","toolName":"cmcp_db_database_execute_sql_query",
+                "kind":"execute","status":"success","timestamp":"2026-07-23T00:00:00Z",
+                "arguments":"{\\"dataSource\\":\\"GaussDB-ReadOnly\\",\\"sql\\":\\"SELECT id FROM audit.orders LIMIT 1\\",\\"maxRows\\":20,\\"project\\":\\"/workspace/example\\",\\"scope\\":\\"ALL\\"}",
+                "result":"[{\\"id\\":1}]","durationMs":25}]}
+                """));
+        server.start();
+
+        AgentBridgeClient.ToolCallRecord call = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(call.arguments().path("maxRows").intValue()).isEqualTo(20);
+        assertThat(call.result().isArray()).isTrue();
+    }
+
+    @Test
+    void malformedToolCallJsonFailsClosed() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
+                {"items":[{"id":"17","toolName":"cmcp_db_database_execute_sql_query",
+                "timestamp":"2026-07-23T00:00:00Z","arguments":"not-json","result":"[]"}]}
+                """));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("arguments must contain JSON");
+    }
+
+    @Test
+    void rejectsDuplicateToolCallIds() throws Exception {
+        JsonNode firstCall = toolCall("call-1", "2026-07-22T09:15:30Z");
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                objectMapper.createObjectNode()
                         .set("items", objectMapper.createArrayNode()
                                 .add(firstCall.deepCopy())
-                                .add(secondCall.deepCopy()))
-                        .toString());
-            } else {
-                respond(exchange, 200, objectMapper.createObjectNode()
-                        .put("complete", true)
-                        .put("snapshotToken", "snapshot-1")
-                        .put("total", 2)
-                        .set("items", objectMapper.createArrayNode().add(secondCall.deepCopy()))
-                        .toString());
-            }
-        });
+                                .add(firstCall.deepCopy()))
+                        .toString()));
         server.start();
 
-        List<AgentBridgeClient.ToolCallRecord> calls = client.getToolCalls(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
-        );
-
-        assertThat(calls).extracting(AgentBridgeClient.ToolCallRecord::id)
-                .containsExactly("call-1", "call-2");
-        assertThat(queries).containsExactly(null, "cursor=page-2");
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("duplicate id: call-1");
     }
 
     @Test
-    void followsPageTokenPaginationWithStableBoundaryAndTotal() throws Exception {
-        List<String> queries = new ArrayList<>();
+    void rejectsNonNativeToolCallHistoryShapes() throws Exception {
         HttpServer server = server();
-        server.createContext("/tool-calls", exchange -> {
-            queries.add(exchange.getRequestURI().getRawQuery());
-            boolean first = exchange.getRequestURI().getRawQuery() == null;
-            ObjectNode page = objectMapper.createObjectNode()
-                    .put("complete", !first)
-                    .put("snapshotToken", "snapshot-token")
-                    .put("total", 1);
-            if (first) {
-                page.put("nextPageToken", "token-2");
-                page.set("toolCalls", objectMapper.createArrayNode());
-            } else {
-                page.set("toolCalls", objectMapper.createArrayNode()
-                        .add(toolCall("call-token", "2026-07-22T09:17:30Z")));
-            }
-            respond(exchange, 200, page.toString());
-        });
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, "{\"toolCalls\":[]}"));
         server.start();
 
-        assertThat(client.getToolCalls(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
-        )).extracting(AgentBridgeClient.ToolCallRecord::id).containsExactly("call-token");
-        assertThat(queries).containsExactly(null, "pageToken=token-2");
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("items array");
     }
 
     @Test
-    void rejectsMissingOrRepeatedPaginationTokenAndPageDrift() throws Exception {
-        assertToolCallsRejected(List.of("""
-                {"items":[],"total":0}
-                """), "boolean complete");
-        assertToolCallsRejected(List.of("""
-                {"items":[],"complete":false,"snapshotToken":"stable","total":1}
-                """), "missing continuation token");
-        assertToolCallsRejected(List.of("""
-                {"items":[],"complete":true,"snapshotToken":"stable","total":1}
-                """), "total does not match");
-        assertToolCallsRejected(List.of(
-                """
-                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"same"}
-                """,
-                """
-                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"same"}
-                """
-        ), "repeated continuation token");
-        assertToolCallsRejected(List.of(
-                """
-                {"items":[],"complete":false,"snapshotToken":"stable","total":1,"nextCursor":"page-2"}
-                """,
-                """
-                {"items":[],"complete":true,"snapshotToken":"changed","total":0}
-                """
-        ), "page drift");
-    }
-
-    @Test
-    void rejectsArrayHistoryEvenWhenLegacyHeaderClaimsCompleteness() throws Exception {
+    void rejectsArrayToolCallHistory() throws Exception {
         HttpServer server = server();
+        nativeInfo(server);
         server.createContext("/tool-calls", exchange -> respond(exchange, 200, "[]"));
         server.start();
         URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
 
         assertThatThrownBy(() -> client.getToolCalls(base))
-                .hasMessageContaining("immutable complete snapshot");
-        server.stop(0);
-
-        HttpServer completeServer = server();
-        completeServer.createContext("/tool-calls", exchange -> {
-            exchange.getResponseHeaders().set("X-AgentBridge-Tool-Calls-Complete", "true");
-            respond(exchange, 200, "[]");
-        });
-        completeServer.start();
-        assertThatThrownBy(() -> client.getToolCalls(
-                URI.create("http://127.0.0.1:" + completeServer.getAddress().getPort())
-        )).hasMessageContaining("immutable complete snapshot");
+                .hasMessageContaining("items array");
     }
 
     @Test
     void abortsOversizedToolCallHistoryAndSqlToolResultBodies() throws Exception {
         HttpServer historyServer = server();
+        nativeInfo(historyServer);
         historyServer.createContext("/tool-calls", exchange -> respond(exchange, 200,
-                "{\"complete\":true,\"total\":0,\"items\":[],\"padding\":\""
+                "{\"items\":[],\"padding\":\""
                         + "x".repeat(1_200_000) + "\"}"));
         historyServer.start();
         assertThatThrownBy(() -> client.getToolCalls(
@@ -622,29 +472,16 @@ class AgentBridgeClientTest {
 
         assertThatThrownBy(() -> client.callTool(
                 URI.create("http://127.0.0.1:" + mcpServer.getAddress().getPort() + "/mcp"),
-                "execute_sql_query",
+                "cmcp_db_database_execute_sql_query",
                 objectMapper.createObjectNode().put("queryText", "SELECT 1")
         )).hasMessageContaining("byte limit");
-    }
-
-    private void assertToolCallsRejected(List<String> pages, String message) throws Exception {
-        AtomicInteger page = new AtomicInteger();
-        HttpServer server = server();
-        server.createContext("/tool-calls", exchange -> respond(
-                exchange, 200, pages.get(Math.min(page.getAndIncrement(), pages.size() - 1))
-        ));
-        server.start();
-        assertThatThrownBy(() -> client.getToolCalls(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort())
-        )).hasMessageContaining(message);
-        server.stop(0);
     }
 
     private ObjectNode toolCall(String id, String timestamp) {
         ObjectNode call = objectMapper.createObjectNode()
                 .put("id", id)
                 .put("title", "Execute SQL")
-                .put("toolName", "execute_sql_query")
+                .put("toolName", "cmcp_db_database_execute_sql_query")
                 .put("kind", "mcp")
                 .put("status", "completed")
                 .put("timestamp", timestamp)
@@ -666,62 +503,18 @@ class AgentBridgeClientTest {
         return server;
     }
 
+    private void nativeInfo(HttpServer server) {
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
+    }
+
     private URI baseUri(HttpServer server) {
         return URI.create("http://127.0.0.1:" + server.getAddress().getPort());
     }
 
-    private String strictAuditInfo() {
-        return strictAuditInfo("instance-a", "nonce-a-0123456789");
-    }
-
-    private String strictAuditInfo(String instanceId, String nonce) {
-        return """
-                {
-                  "version":"1.200.0",
-                  "identity":{
-                    "instanceId":"%s",
-                    "projectId":"project-a",
-                    "instanceNonce":"%s"
-                  },
-                  "capabilities":{
-                    "mybatisSqlReviewAudit":{
-                      "contractVersion":1,
-                      "untruncatedStructuredToolArguments":true,
-                      "untruncatedStructuredToolResults":true,
-                      "immutableToolCallSnapshot":true,
-                      "stableToolCallTotal":true,
-                      "explicitToolCallHistoryComplete":true,
-                      "serverEnforcedPreviewMaxRows":20,
-                      "previewMaxRowsRequired":true,
-                      "executeSqlQueryPolicy":{
-                        "simpleSelectGrammar":true,
-                        "safeRelationAllowlist":true,
-                        "functionsForbidden":true,
-                        "systemSideEffectsForbidden":true,
-                        "maxScenarios":3,
-                        "maxRows":20,
-                        "maxTimeoutSeconds":30,
-                        "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                      }
-                    }
-                  }
-                }
-                """.formatted(instanceId, nonce);
-    }
-
-    private HttpServer strictBindingServer(String instanceId, String nonce) throws IOException {
-        return strictBindingServer(instanceId, nonce, instanceId, nonce);
-    }
-
-    private HttpServer strictBindingServer(
-            String webInstanceId,
-            String webNonce,
-            String mcpInstanceId,
-            String mcpNonce
-    ) throws IOException {
+    private HttpServer nativeBindingServer() throws IOException {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(
-                exchange, 200, strictAuditInfo(webInstanceId, webNonce)
+                exchange, 200, "{\"version\":\"1.202.0\"}"
         ));
         server.createContext("/mcp", exchange -> {
             JsonNode request = objectMapper.readTree(body(exchange));
@@ -731,16 +524,10 @@ class AgentBridgeClientTest {
                           "jsonrpc":"2.0",
                           "id":1,
                           "result":{
-                            "protocolVersion":"2025-11-25",
-                            "identity":{
-                              "instanceId":"%s",
-                              "projectId":"project-a",
-                              "instanceNonce":"%s"
-                            },
-                            "policyFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            "protocolVersion":"2025-11-25"
                           }
                         }
-                        """.formatted(mcpInstanceId, mcpNonce));
+                        """);
                 case "notifications/initialized" -> respondWithSession(
                         exchange, 202, "strict-session", ""
                 );

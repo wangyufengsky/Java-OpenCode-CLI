@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayOutputStream;
@@ -36,7 +37,7 @@ import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
-    public static final String MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION = "1.200.0";
+    public static final String MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION = "1.202.0";
     private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
     private static final int MCP_METADATA_RESPONSE_BYTES = 1024 * 1024;
     private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
@@ -104,82 +105,29 @@ public class AgentBridgeClient {
             throws IOException, InterruptedException {
         requireLoopbackEndpoint(webBaseUrl);
         JsonNode info = agentBridgeInfo(webBaseUrl);
-        strictMyBatisAuditBinding(info);
+        nativeDatabaseMcpBinding(info);
     }
 
     public MyBatisAuditBinding bindMyBatisSqlReviewEndpoints(URI webBaseUrl, URI mcpUrl)
             throws IOException, InterruptedException {
         requireLoopbackEndpoint(webBaseUrl);
         requireLoopbackEndpoint(mcpUrl);
-        MyBatisAuditBinding binding = strictMyBatisAuditBinding(agentBridgeInfo(webBaseUrl));
+        MyBatisAuditBinding binding = nativeDatabaseMcpBinding(agentBridgeInfo(webBaseUrl));
         synchronized (mcpSessionLock) {
             myBatisWebBindings.put(normalizedWebBase(webBaseUrl), binding);
             myBatisMcpBindings.put(mcpUrl, binding);
             mcpSessions.remove(mcpUrl);
         }
         McpSession session = mcpSession(mcpUrl);
-        if (!binding.equals(session.auditBinding())) {
-            throw new IllegalStateException("AgentBridge Web/MCP identity mismatch");
-        }
         return binding;
     }
 
-    private MyBatisAuditBinding strictMyBatisAuditBinding(JsonNode info) {
+    private MyBatisAuditBinding nativeDatabaseMcpBinding(JsonNode info) {
         String version = info.path("version").asText("").strip();
         if (!isAtLeastVersion(version, MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION)) {
-            throw incompatibleMyBatisAuditProtocol(version);
+            throw incompatibleNativeDatabaseProtocol(version);
         }
-        JsonNode capability = info.path("capabilities").path("mybatisSqlReviewAudit");
-        List<String> requiredBooleans = List.of(
-                "untruncatedStructuredToolArguments",
-                "untruncatedStructuredToolResults",
-                "immutableToolCallSnapshot",
-                "stableToolCallTotal",
-                "explicitToolCallHistoryComplete",
-                "previewMaxRowsRequired"
-        );
-        if (!capability.isObject()
-                || !capability.path("contractVersion").isIntegralNumber()
-                || capability.path("contractVersion").intValue() != 1) {
-            throw incompatibleMyBatisAuditProtocol(version);
-        }
-        for (String requirement : requiredBooleans) {
-            if (!capability.path(requirement).isBoolean()
-                    || !capability.path(requirement).booleanValue()) {
-                throw new IllegalStateException(
-                        "AgentBridge " + version + " MyBatis SQL review capability is missing required "
-                                + requirement + "; strict audit protocol is incompatible"
-                );
-            }
-        }
-        if (!capability.path("serverEnforcedPreviewMaxRows").isIntegralNumber()
-                || capability.path("serverEnforcedPreviewMaxRows").intValue() != 20) {
-            throw incompatibleMyBatisAuditProtocol(version);
-        }
-        JsonNode policy = capability.path("executeSqlQueryPolicy");
-        for (String requirement : List.of(
-                "simpleSelectGrammar",
-                "safeRelationAllowlist",
-                "functionsForbidden",
-                "systemSideEffectsForbidden"
-        )) {
-            if (!policy.path(requirement).isBoolean() || !policy.path(requirement).booleanValue()) {
-                throw new IllegalStateException(
-                        "AgentBridge " + version + " execute_sql_query policy is missing required " + requirement
-                );
-            }
-        }
-        if (!policy.path("maxScenarios").isIntegralNumber() || policy.path("maxScenarios").intValue() != 3
-                || !policy.path("maxRows").isIntegralNumber() || policy.path("maxRows").intValue() != 20
-                || !policy.path("maxTimeoutSeconds").isIntegralNumber()
-                || policy.path("maxTimeoutSeconds").intValue() != 30) {
-            throw new IllegalStateException(
-                    "AgentBridge " + version
-                            + " execute_sql_query policy must enforce scenarios<=3, rows<=20, timeout<=30"
-            );
-        }
-        String fingerprint = requiredFingerprint(policy, "policyFingerprint", "execute_sql_query policy");
-        return new MyBatisAuditBinding(requiredIdentity(info.path("identity"), "AgentBridge /info"), fingerprint);
+        return new MyBatisAuditBinding(null, null);
     }
 
     private JsonNode agentBridgeInfo(URI webBaseUrl) throws IOException, InterruptedException {
@@ -196,10 +144,8 @@ public class AgentBridgeClient {
             throw new IllegalStateException("AgentBridge GET /info must return an object");
         }
         MyBatisAuditBinding expected = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
-        if (expected != null && !expected.equals(strictMyBatisAuditBinding(info))) {
-            throw new IllegalStateException(
-                    "AgentBridge GET /info identity or policy fingerprint mismatch"
-            );
+        if (expected != null) {
+            nativeDatabaseMcpBinding(info);
         }
         return info;
     }
@@ -229,13 +175,11 @@ public class AgentBridgeClient {
         return value;
     }
 
-    private IllegalStateException incompatibleMyBatisAuditProtocol(String version) {
+    private IllegalStateException incompatibleNativeDatabaseProtocol(String version) {
         String reported = version.isBlank() ? "unknown" : version;
         return new IllegalStateException(
-                "AgentBridge " + reported + " is incompatible with MyBatis SQL review; requires AgentBridge >= "
+                "AgentBridge " + reported + " is incompatible with native Database MCP evidence; requires AgentBridge >= "
                         + MYBATIS_SQL_REVIEW_MINIMUM_AGENTBRIDGE_VERSION
-                        + " and explicit capabilities for untruncated structured arguments/results, immutable "
-                        + "paginated tool-call snapshots with stable total/complete, and server-enforced preview max 20"
         );
     }
 
@@ -276,7 +220,7 @@ public class AgentBridgeClient {
         body.put("method", "tools/call");
         body.set("params", params);
 
-        int responseLimit = isSqlEvidenceTool(name)
+        int responseLimit = isNativeDatabaseEvidenceTool(name)
                 ? SQL_TOOL_RESPONSE_BYTES
                 : GENERAL_TOOL_RESPONSE_BYTES;
         HttpResponse<String> response = sendJson(
@@ -328,25 +272,15 @@ public class AgentBridgeClient {
                 throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
             }
             JsonNode result = root.path("result");
-            MyBatisAuditBinding binding = requireBoundPayload(
-                    mcpUrl, result, "AgentBridge MCP tools/list result"
-            );
+            requireBoundPayload(mcpUrl, result, "AgentBridge MCP tools/list result");
             if (!result.path("tools").isArray()) {
                 throw new IllegalStateException("AgentBridge MCP tools/list returned no tools array");
             }
             for (JsonNode tool : result.path("tools")) {
-                if (binding != null && isSqlEvidenceTool(tool.path("name").asText())
-                        && !binding.policyFingerprint().equals(
-                        tool.path("inputSchema").path("x-agentbridge-policyFingerprint").asText())) {
-                    throw new IllegalStateException(
-                            "AgentBridge MCP tool schema policy fingerprint mismatch: "
-                                    + tool.path("name").asText("<unknown>")
-                    );
-                }
                 tools.add(new ToolDefinition(
                         tool.path("name").asText(),
                         tool.path("description").asText(""),
-                        tool.path("inputSchema")
+                        tool.path("inputSchema").deepCopy()
                 ));
             }
             cursor = result.path("nextCursor").asText("").strip();
@@ -360,169 +294,45 @@ public class AgentBridgeClient {
     }
 
     public List<ToolCallRecord> getToolCalls(URI webBaseUrl) throws IOException, InterruptedException {
-        URI endpoint = webBaseUrl.resolve("/tool-calls");
-        URI pageUri = endpoint;
-        Map<String, JsonNode> uniqueItems = new LinkedHashMap<>();
-        Set<String> observedTokens = new HashSet<>();
-        String stableSnapshot = null;
-        Long stableTotal = null;
-        String paginationParameter = null;
-        long accumulatedBytes = 0;
-        boolean complete = false;
-
-        for (int pageNumber = 0; pageNumber < MAX_TOOL_CALL_PAGES && !complete; pageNumber++) {
-            HttpRequest request = HttpRequest.newBuilder(pageUri)
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-            HttpResponse<String> response = sendBounded(
-                    request,
-                    TOOL_CALL_PAGE_RESPONSE_BYTES,
-                    "AgentBridge GET /tool-calls page response"
-            );
-            requireSuccess(response, "AgentBridge GET /tool-calls failed");
-            accumulatedBytes += response.body().getBytes(StandardCharsets.UTF_8).length;
-            if (accumulatedBytes > TOOL_CALL_HISTORY_RESPONSE_BYTES) {
-                throw new IllegalStateException(
-                        "AgentBridge GET /tool-calls history exceeded cumulative byte limit of "
-                                + TOOL_CALL_HISTORY_RESPONSE_BYTES
-                );
-            }
-
-            JsonNode root = objectMapper.readTree(response.body());
-            MyBatisAuditBinding historyBinding = myBatisWebBindings.get(normalizedWebBase(webBaseUrl));
-            if (historyBinding != null) {
-                requireBinding(root, historyBinding, "AgentBridge GET /tool-calls snapshot");
-            }
-            JsonNode items;
-            String nextToken = null;
-            String nextParameter = null;
-            if (root.isArray()) {
-                throw new IllegalStateException(
-                        "AgentBridge GET /tool-calls array response cannot prove an immutable complete snapshot"
-                );
-            } else if (root.isObject()) {
-                boolean toolCallsArray = root.path("toolCalls").isArray();
-                boolean itemsArray = root.path("items").isArray();
-                if (toolCallsArray == itemsArray) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls must return exactly one toolCalls or items array"
-                    );
-                }
-                items = toolCallsArray ? root.path("toolCalls") : root.path("items");
-                if (!root.path("complete").isBoolean()) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls response cannot prove complete history without boolean complete"
-                    );
-                }
-                complete = root.path("complete").booleanValue();
-                if (root.has("hasMore") && (!root.path("hasMore").isBoolean()
-                        || root.path("hasMore").booleanValue() == complete)) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls complete/hasMore contract is inconsistent"
-                    );
-                }
-
-                String snapshot = root.path("snapshotToken").asText("").strip();
-                Long total = requiredOptionalTotal(root);
-                if (snapshot.isBlank() || total == null) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls lacks an immutable snapshotToken/total boundary"
-                    );
-                }
-                if (stableSnapshot == null) {
-                    stableSnapshot = snapshot;
-                    stableTotal = total;
-                } else if (!stableSnapshot.equals(snapshot) || !stableTotal.equals(total)) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls page drift changed snapshotToken or total"
-                    );
-                }
-
-                String cursor = root.path("nextCursor").asText("").strip();
-                String pageToken = root.path("nextPageToken").asText("").strip();
-                if (!cursor.isBlank() && !pageToken.isBlank()) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls returned multiple continuation token fields"
-                    );
-                }
-                if (complete) {
-                    if (!cursor.isBlank() || !pageToken.isBlank()) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls complete page unexpectedly returned a continuation token"
-                        );
-                    }
-                } else {
-                    if (cursor.isBlank() && pageToken.isBlank()) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls incomplete page is missing continuation token"
-                        );
-                    }
-                    nextParameter = cursor.isBlank() ? "pageToken" : "cursor";
-                    nextToken = cursor.isBlank() ? pageToken : cursor;
-                    if (paginationParameter == null) {
-                        paginationParameter = nextParameter;
-                    } else if (!paginationParameter.equals(nextParameter)) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls page drift changed continuation token type"
-                        );
-                    }
-                    String observed = nextParameter + "=" + nextToken;
-                    if (!observedTokens.add(observed)) {
-                        throw new IllegalStateException(
-                                "AgentBridge GET /tool-calls repeated continuation token: " + nextToken
-                        );
-                    }
-                }
-            } else {
-                throw new IllegalStateException("AgentBridge GET /tool-calls returned no tool-call array");
-            }
-
-            for (JsonNode item : items) {
-                if (historyBinding != null) {
-                    requireBinding(item, historyBinding, "AgentBridge GET /tool-calls item");
-                }
-                String id = item.path("id").asText("");
-                if (id.isBlank()) {
-                    throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
-                }
-                JsonNode previous = uniqueItems.putIfAbsent(id, item.deepCopy());
-                if (previous != null && !previous.equals(item)) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls page drift returned conflicting duplicate id: " + id
-                    );
-                }
-            }
-            if (complete) {
-                Long declaredTotal = root.isObject() ? requiredOptionalTotal(root) : null;
-                Long expectedTotal = stableTotal == null ? declaredTotal : stableTotal;
-                if (expectedTotal != null && expectedTotal != uniqueItems.size()) {
-                    throw new IllegalStateException(
-                            "AgentBridge GET /tool-calls complete history total does not match unique records"
-                    );
-                }
-            } else {
-                pageUri = continuationUri(endpoint, nextParameter, nextToken);
-            }
+        requireLoopbackEndpoint(webBaseUrl);
+        nativeDatabaseMcpBinding(agentBridgeInfo(webBaseUrl));
+        HttpRequest request = HttpRequest.newBuilder(webBaseUrl.resolve("/tool-calls"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        HttpResponse<String> response = sendBounded(
+                request,
+                TOOL_CALL_PAGE_RESPONSE_BYTES,
+                "AgentBridge GET /tool-calls response"
+        );
+        requireSuccess(response, "AgentBridge GET /tool-calls failed");
+        JsonNode root = objectMapper.readTree(response.body());
+        if (!root.isObject() || !root.path("items").isArray()) {
+            throw new IllegalStateException("AgentBridge GET /tool-calls must return an items array");
         }
-        if (!complete) {
-            throw new IllegalStateException(
-                    "AgentBridge GET /tool-calls exceeded page limit without proving complete history"
-            );
-        }
-
         List<ToolCallRecord> calls = new ArrayList<>();
-        for (JsonNode item : uniqueItems.values()) {
+        Set<String> ids = new HashSet<>();
+        for (JsonNode item : root.path("items")) {
+            if (!item.isObject()) {
+                throw new IllegalStateException("AgentBridge GET /tool-calls items must be objects");
+            }
+            String id = item.path("id").asText("").strip();
+            if (id.isEmpty()) {
+                throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
+            }
+            if (!ids.add(id)) {
+                throw new IllegalStateException("AgentBridge GET /tool-calls returned duplicate id: " + id);
+            }
             calls.add(new ToolCallRecord(
-                    item.path("id").asText(),
+                    id,
                     item.path("title").asText(""),
                     item.path("toolName").asText(),
                     item.path("kind").asText(""),
                     item.path("status").asText(""),
                     Instant.parse(item.path("timestamp").asText()),
-                    item.path("arguments"),
-                    item.path("result"),
+                    structuredHistoryField(item.path("arguments"), "arguments"),
+                    structuredHistoryField(item.path("result"), "result"),
                     item.hasNonNull("durationMs") ? item.path("durationMs").longValue() : null,
                     item.path("hooks"),
                     item.path("identity").path("instanceId").asText(""),
@@ -535,6 +345,24 @@ public class AgentBridgeClient {
             ));
         }
         return List.copyOf(calls);
+    }
+
+    private JsonNode structuredHistoryField(JsonNode value, String label) {
+        if (value.isObject() || value.isArray()) {
+            return value.deepCopy();
+        }
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalStateException(label + " must contain JSON");
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(value.textValue());
+            if (!parsed.isObject() && !parsed.isArray()) {
+                throw new IllegalStateException(label + " must contain an object or array");
+            }
+            return parsed;
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(label + " must contain JSON", exception);
+        }
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body) throws IOException, InterruptedException {
@@ -619,18 +447,7 @@ public class AgentBridgeClient {
                 .orElseThrow(() -> new IllegalStateException("AgentBridge MCP initialize did not return Mcp-Session-Id"));
         JsonNode initializeResult = objectMapper.readTree(response.body()).path("result");
         String protocolVersion = initializeResult.path("protocolVersion").asText(MCP_CLIENT_PROTOCOL_VERSION);
-        MyBatisAuditBinding expectedBinding = myBatisMcpBindings.get(mcpUrl);
-        MyBatisAuditBinding actualBinding = null;
-        if (expectedBinding != null) {
-            actualBinding = new MyBatisAuditBinding(
-                    requiredIdentity(initializeResult.path("identity"), "AgentBridge MCP initialize"),
-                    requiredFingerprint(initializeResult, "policyFingerprint", "AgentBridge MCP initialize")
-            );
-            if (!expectedBinding.equals(actualBinding)) {
-                throw new IllegalStateException("AgentBridge Web/MCP identity mismatch");
-            }
-        }
-        McpSession session = new McpSession(sessionId, protocolVersion, actualBinding);
+        McpSession session = new McpSession(sessionId, protocolVersion, myBatisMcpBindings.get(mcpUrl));
 
         ObjectNode initialized = objectMapper.createObjectNode();
         initialized.put("jsonrpc", "2.0");
@@ -658,38 +475,12 @@ public class AgentBridgeClient {
         return Duration.ofSeconds(30);
     }
 
-    private boolean isSqlEvidenceTool(String name) {
-        return "execute_sql_query".equals(name) || "preview_table_data".equals(name);
-    }
-
-    private Long requiredOptionalTotal(JsonNode root) {
-        if (!root.has("total")) {
-            return null;
-        }
-        if (!root.path("total").isIntegralNumber() || root.path("total").longValue() < 0) {
-            throw new IllegalStateException(
-                    "AgentBridge GET /tool-calls total must be a non-negative integer"
-            );
-        }
-        return root.path("total").longValue();
+    private boolean isNativeDatabaseEvidenceTool(String name) {
+        return "cmcp_db_database_execute_sql_query".equals(name);
     }
 
     private MyBatisAuditBinding requireBoundPayload(URI mcpUrl, JsonNode payload, String label) {
-        MyBatisAuditBinding expected = myBatisMcpBindings.get(mcpUrl);
-        if (expected != null) {
-            requireBinding(payload, expected, label);
-        }
-        return expected;
-    }
-
-    private void requireBinding(JsonNode payload, MyBatisAuditBinding expected, String label) {
-        MyBatisAuditBinding actual = new MyBatisAuditBinding(
-                requiredIdentity(payload.path("identity"), label),
-                requiredFingerprint(payload, "policyFingerprint", label)
-        );
-        if (!expected.equals(actual)) {
-            throw new IllegalStateException(label + " identity or policy fingerprint mismatch");
-        }
+        return myBatisMcpBindings.get(mcpUrl);
     }
 
     private URI continuationUri(URI endpoint, String parameter, String token) {
@@ -762,11 +553,11 @@ public class AgentBridgeClient {
 
     private JsonNode structured(String text, JsonNode result) {
         if (result.has("structuredContent")) {
-            return result.path("structuredContent");
+            return result.path("structuredContent").deepCopy();
         }
         if (!text.isBlank()) {
             try {
-                return objectMapper.readTree(text);
+                return objectMapper.readTree(text).deepCopy();
             } catch (Exception ignored) {
                 return objectMapper.createObjectNode();
             }
