@@ -18,7 +18,7 @@ agentbridge-runner:
     id:
   agentbridge:
     web-base-url: "https://127.0.0.1:9642"
-    mcp-url: "http://127.0.0.1:8643/mcp"
+    mcp-url: "http://127.0.0.1:8642/mcp"
     concurrency: 1
     max-concurrency: 1
     timeout-minutes: 40
@@ -318,7 +318,7 @@ test:
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
-  mcp-url: "http://127.0.0.1:8643/mcp"
+  mcp-url: "http://127.0.0.1:8642/mcp"
   timeout-minutes: 40
   max-attempts: 5
 ```
@@ -388,7 +388,7 @@ database:
 
 agentbridge:
   web-base-url: "https://127.0.0.1:9642"
-  mcp-url: "http://127.0.0.1:8643/mcp"
+  mcp-url: "http://127.0.0.1:8642/mcp"
   concurrency: 1
   max-concurrency: 1
   timeout-minutes: 40
@@ -414,7 +414,7 @@ agentbridge:
 | `database.max-rows` / `max-scenarios-per-sql` | 固定为每次 20 行、每条 SQL 最多 3 个代表性 SELECT 场景。 |
 | `database.max-evidence-bytes` | 单 task 数据库证据固定最多 262144 字节。 |
 | `database.retain-raw-rows` / `allow-agent-select` | 固定为 `true`；保留可复核证据，并仅允许受 Java 策略约束的简单 SELECT。 |
-| `agentbridge.web-base-url` / `mcp-url` | AgentBridge Web Access 与 AgentBridge MCP 地址；默认 MCP 地址为 `http://127.0.0.1:8643/mcp`。 |
+| `agentbridge.web-base-url` / `mcp-url` | AgentBridge Web Access 与 AgentBridge MCP 地址；默认 MCP 地址为 `http://127.0.0.1:8642/mcp`。 |
 | `agentbridge.concurrency` / `max-concurrency` | 两者固定为 `1`，所有 statement task 严格串行。 |
 | `agentbridge.timeout-minutes` / `poll-millis` / `validation-settle-seconds` | AgentBridge task 超时、轮询和工具历史/产物沉降等待。 |
 | `agentbridge.validation-max-corrections` | 固定为 `0`；每个 SQL task 只有一个完整 prompt 和一次候选产物尝试。 |
@@ -422,7 +422,7 @@ agentbridge:
 
 #### Database MCP 与安全边界
 
-Database MCP 作为 AgentBridge Custom MCP 注册工具运行。应用预检与 review agent 都通过 AgentBridge MCP 调用它，默认地址为 `http://127.0.0.1:8643/mcp`。MyBatis SQL review 使用以下四个 native read tools：
+Database MCP 作为 AgentBridge Custom MCP 注册工具运行。应用预检与 review agent 都通过 AgentBridge MCP 调用它，默认地址为 `http://127.0.0.1:8642/mcp`。MyBatis SQL review 使用以下四个 native read tools：
 
 - `cmcp_db_database_list_datasources`
 - `cmcp_db_database_list_databases`

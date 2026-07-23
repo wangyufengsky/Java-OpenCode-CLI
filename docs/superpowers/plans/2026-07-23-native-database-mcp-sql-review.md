@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Application and review agents connect to AgentBridge MCP at `http://127.0.0.1:8643/mcp`; Database MCP remains behind AgentBridge Custom MCP.
+- Application and review agents connect to AgentBridge MCP at `http://127.0.0.1:8642/mcp`; Database MCP remains behind AgentBridge Custom MCP.
 - Native read tools are `cmcp_db_database_list_datasources`, `cmcp_db_database_list_databases`, `cmcp_db_database_list_table_schema`, and `cmcp_db_database_execute_sql_query`.
 - SQL query calls always bind `dataSource`, `sql`, `maxRows: 20`, absolute `project`, and configured `scope`.
 - `scope` is one of `GLOBAL`, `PROJECT`, or `ALL`, and defaults to `ALL`.
@@ -405,7 +405,7 @@ Expected: assertions fail because configuration, prompts, and reports still use 
 
 - [ ] **Step 3: Implement workflow wiring and native wording**
 
-Add `scope` to `DatabaseDefinition`, validate with `DatabaseMcpContract.Scope.parse`, pass repository path/scope to preflight, and set MCP URL to port 8643. Update task JSON and evidence/report rendering to use `data_source`, `catalog`, `schema`, `project`, and `scope`.
+Add `scope` to `DatabaseDefinition`, validate with `DatabaseMcpContract.Scope.parse`, pass repository path/scope to preflight, and set MCP URL to port 8642. Update task JSON and evidence/report rendering to use `data_source`, `catalog`, `schema`, `project`, and `scope`.
 
 Rewrite the prompt and report template as direct native Database MCP instructions. Describe only current tool names and input fields. Ensure DML/selectKey tasks state that query execution is prohibited, and every SELECT scenario includes `LIMIT 1..20` plus `maxRows: 20`.
 
@@ -455,7 +455,7 @@ void myBatisPromptPackUsesNativeDatabaseMcpVocabulary() throws Exception {
 }
 ```
 
-Add console tests that require scope help text and the 8643 MCP default.
+Add console tests that require scope help text and the 8642 MCP default.
 
 - [ ] **Step 2: Run contract/UI tests and verify RED**
 
@@ -465,7 +465,7 @@ Expected: native vocabulary/default assertions fail.
 
 - [ ] **Step 3: Rewrite documentation and configuration copy**
 
-Document AgentBridge Custom MCP routing, four native read tools, prohibited write tools, `scope`, `maxRows: 20`, read-only GaussDB account requirements, and the normal run command. Use current-tense operational wording only. Update application and console defaults to `http://127.0.0.1:8643/mcp`.
+Document AgentBridge Custom MCP routing, four native read tools, prohibited write tools, `scope`, `maxRows: 20`, read-only GaussDB account requirements, and the normal run command. Use current-tense operational wording only. Update application and console defaults to `http://127.0.0.1:8642/mcp`.
 
 - [ ] **Step 4: Run contract/UI tests and verify GREEN**
 

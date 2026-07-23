@@ -16,7 +16,7 @@ agentbridge-runner:
     id:
   agentbridge:
     web-base-url: "https://127.0.0.1:9642"
-    mcp-url: "http://127.0.0.1:8643/mcp"
+    mcp-url: "http://127.0.0.1:8642/mcp"
     concurrency: 1
     max-concurrency: 1
     timeout-minutes: 40

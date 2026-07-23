@@ -427,7 +427,7 @@ test('MyBatis console metadata describes the native Database MCP boundary', () =
   assert.doesNotMatch(connectionName.description, /AgentBridge Database Tools/);
   assert.match(databaseScope.description, /GLOBAL、PROJECT 或 ALL/);
   assert.doesNotMatch(mcpUrl.description, /GLOBAL、PROJECT 或 ALL/);
-  assert.match(mcpUrl.description, /http:\/\/127\.0\.0\.1:8643\/mcp/);
+  assert.match(mcpUrl.description, /http:\/\/127\.0\.0\.1:8642\/mcp/);
 });
 
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {

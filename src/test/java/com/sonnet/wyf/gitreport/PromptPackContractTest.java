@@ -27,7 +27,7 @@ class PromptPackContractTest {
                 "Do not call DML, DDL, NoSQL, or unknown tools."
         );
         assertThat(readme).contains(
-                "http://127.0.0.1:8643/mcp",
+                "http://127.0.0.1:8642/mcp",
                 "AgentBridge Custom MCP",
                 "`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
                 "`database.scope`",
@@ -46,10 +46,10 @@ class PromptPackContractTest {
                 "rerun.type=sql",
                 "rerun.id=<statement-key>"
         ).doesNotContain(String.join("", "policy", "Fingerprint"), "同一实例", "服务端强制每个场景");
-        assertThat(application).contains("mcp-url: \"http://127.0.0.1:8643/mcp\"");
+        assertThat(application).contains("mcp-url: \"http://127.0.0.1:8642/mcp\"");
         assertThat(applicationExample).contains(
                 "mybatis-sql-review",
-                "mcp-url: \"http://127.0.0.1:8643/mcp\""
+                "mcp-url: \"http://127.0.0.1:8642/mcp\""
         );
     }
 
@@ -89,7 +89,7 @@ class PromptPackContractTest {
                 "AgentBridge Web Access",
                 "AgentBridge MCP",
                 "AgentBridge Custom MCP",
-                "http://127.0.0.1:8643/mcp",
+                "http://127.0.0.1:8642/mcp",
                 "cmcp_db_database_execute_sql_query",
                 "GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
                 "DML、DDL、NoSQL 与未知工具均禁止调用",

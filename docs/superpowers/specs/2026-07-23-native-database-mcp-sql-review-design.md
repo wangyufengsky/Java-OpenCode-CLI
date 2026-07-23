@@ -11,7 +11,7 @@ The application and review agent connect only to the AgentBridge MCP endpoint. A
 The local endpoints are:
 
 - AgentBridge Web Access: `https://127.0.0.1:9642`
-- AgentBridge MCP: `http://127.0.0.1:8643/mcp`
+- AgentBridge MCP: `http://127.0.0.1:8642/mcp`
 - Database MCP remains an AgentBridge Custom MCP implementation detail.
 
 ## Native tool contract
@@ -58,7 +58,7 @@ The database configuration retains the user-facing fields `connection-name`, `da
 
 The workflow adds `scope`, defaulting to `ALL`. The absolute project path is derived from `project.repo`; it is not duplicated in configuration.
 
-The AgentBridge MCP URL is `http://127.0.0.1:8643/mcp`. Web Access remains required for prompt execution, task state, and tool-call history.
+The AgentBridge MCP URL is `http://127.0.0.1:8642/mcp`. Web Access remains required for prompt execution, task state, and tool-call history.
 
 ## Preflight and per-task checks
 
