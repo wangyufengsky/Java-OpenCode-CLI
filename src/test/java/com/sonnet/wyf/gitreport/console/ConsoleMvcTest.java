@@ -278,6 +278,8 @@ class ConsoleMvcTest {
                 "AgentBridge Custom MCP 注册的 Database MCP 数据源名称",
                 "database.database-name",
                 "database.schema-name",
+                "database.scope",
+                "GLOBAL、PROJECT 或 ALL",
                 "database.environment",
                 "database.non-owner-non-admin-read-only-account",
                 "database.row-level-security-disabled-for-safe-base-tables",
@@ -293,7 +295,6 @@ class ConsoleMvcTest {
                 "agentbridge.mcp-url",
                 "AgentBridge Custom MCP 注册的数据库工具",
                 "http://127.0.0.1:8643/mcp",
-                "GLOBAL、PROJECT 或 ALL，默认 ALL",
                 "agentbridge.concurrency",
                 "agentbridge.max-concurrency",
                 "agentbridge.timeout-minutes",
@@ -775,6 +776,7 @@ class ConsoleMvcTest {
                         .value("CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"))
                 .andExpect(jsonPath("$.defaults['database.database-name']").value("CHANGE_ME_DATABASE"))
                 .andExpect(jsonPath("$.defaults['database.schema-name']").value("CHANGE_ME_SCHEMA"))
+                .andExpect(jsonPath("$.defaults['database.scope']").value("ALL"))
                 .andExpect(jsonPath("$.defaults['database.environment']").value("read-replica"))
                 .andExpect(jsonPath("$.defaults['database.non-owner-non-admin-read-only-account']").value(false))
                 .andExpect(jsonPath("$.defaults['database.row-level-security-disabled-for-safe-base-tables']")

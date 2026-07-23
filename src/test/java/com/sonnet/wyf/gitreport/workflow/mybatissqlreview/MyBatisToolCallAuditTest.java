@@ -163,6 +163,33 @@ class MyBatisToolCallAuditTest {
                 .containsExactly("sources", "catalogs", "tables");
     }
 
+    @Test
+    void enforcesBoundaryCompletenessQueryLimitsAndDefensiveAuditFacts() {
+        AgentBridgeClient.ToolCallRecord old = new AgentBridgeClient.ToolCallRecord("old", "old",
+                DatabaseMcpContract.LIST_DATASOURCES, "mcp", "success", STARTED_AT.minusSeconds(1),
+                commonArguments(), objectMapper.createArrayNode(), 0L, objectMapper.createObjectNode());
+        assertThat(audit.audit(List.of(old), new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of("old")),
+                database, selectStatement()).facts()).isEmpty();
+        assertThatThrownBy(() -> audit.audit(List.of(), new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of("old")),
+                database, selectStatement())).hasMessageContaining("missing preexisting");
+        assertThatThrownBy(() -> audit.audit(List.of(call("dup", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM audit.orders LIMIT 1"), rows(1)), call("dup",
+                DatabaseMcpContract.EXECUTE_QUERY, nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1))),
+                boundary(), database, selectStatement())).hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> audit.audit(List.of(call("one", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1)), call("two",
+                DatabaseMcpContract.EXECUTE_QUERY, nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1)),
+                call("three", DatabaseMcpContract.EXECUTE_QUERY, nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1)),
+                call("four", DatabaseMcpContract.EXECUTE_QUERY, nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1))),
+                boundary(), database, selectStatement())).hasMessageContaining("at most 3");
+        MyBatisToolCallAudit.Result result = audit.audit(List.of(call("copy", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1))), boundary(), database, selectStatement());
+        ((ObjectNode) result.facts().getFirst().arguments()).put("sql", "mutated");
+        assertThat(result.facts().getFirst().arguments().path("sql").asText()).contains("SELECT");
+        assertThat(MyBatisToolCallAudit.AuditedCallFact.class.getDeclaredConstructors())
+                .allMatch(constructor -> java.lang.reflect.Modifier.isPrivate(constructor.getModifiers()));
+    }
+
     private MyBatisToolCallAudit.Boundary boundary() {
         return new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of());
     }

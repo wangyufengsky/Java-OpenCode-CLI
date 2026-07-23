@@ -345,6 +345,7 @@ test('MyBatis metadata renders every field, all summaries, and the three rerun m
     'database.connection-name': 'Gauss Review',
     'database.database-name': 'orders',
     'database.schema-name': 'audit',
+    'database.scope': 'PROJECT',
     'database.environment': 'test',
     'database.non-owner-non-admin-read-only-account': true,
     'database.row-level-security-disabled-for-safe-base-tables': true,
@@ -385,7 +386,7 @@ test('MyBatis metadata renders every field, all summaries, and the three rerun m
   );
   await initialize(harness);
 
-  assert.equal(harness.nodes.form.querySelectorAll('[data-config-key]').length, 29);
+  assert.equal(harness.nodes.form.querySelectorAll('[data-config-key]').length, 30);
   assert.ok(harness.nodes.form.querySelector('#config-database-connection-name'));
   assert.ok(harness.nodes.form.querySelector('#config-agentbridge-validation-max-corrections'));
   assert.equal(harness.nodes.summaryChain.textContent, 'MyBatis SQL 审查');
@@ -418,13 +419,15 @@ test('MyBatis console metadata describes the native Database MCP boundary', () =
   });
   const definition = harness.consoleCommon.chainConfigDefinitions['mybatis-sql-review'];
   const connectionName = definition.fields.find((field) => field.key === 'database.connection-name');
+  const databaseScope = definition.fields.find((field) => field.key === 'database.scope');
   const mcpUrl = definition.fields.find((field) => field.key === 'agentbridge.mcp-url');
 
   assert.match(definition.description, /AgentBridge Custom MCP/);
   assert.equal(connectionName.description, 'AgentBridge Custom MCP 注册的 Database MCP 数据源名称。');
   assert.doesNotMatch(connectionName.description, /AgentBridge Database Tools/);
+  assert.match(databaseScope.description, /GLOBAL、PROJECT 或 ALL/);
+  assert.doesNotMatch(mcpUrl.description, /GLOBAL、PROJECT 或 ALL/);
   assert.match(mcpUrl.description, /http:\/\/127\.0\.0\.1:8643\/mcp/);
-  assert.match(mcpUrl.description, /GLOBAL、PROJECT 或 ALL，默认 ALL/);
 });
 
 test('submit remains disabled when a newer chain configuration finishes loading', async () => {

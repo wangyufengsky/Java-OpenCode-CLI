@@ -373,6 +373,7 @@ database:
   connection-name: "CHANGE_ME_AGENTBRIDGE_CONNECTION_NAME"
   database-name: "CHANGE_ME_DATABASE"
   schema-name: "CHANGE_ME_SCHEMA"
+  scope: "ALL"
   environment: "read-replica"
   non-owner-non-admin-read-only-account: false
   row-level-security-disabled-for-safe-base-tables: false
@@ -404,7 +405,8 @@ agentbridge:
 | `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
 | `database.connection-name` | AgentBridge Custom MCP 注册的 Database MCP 数据源名，必须唯一匹配。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
-| `database.environment` | 固定为 `read-replica`；必须由 AgentBridge 连接元数据标记为 server-observed physical standby，并由数据库探针的 `pg_is_in_recovery()` 再次证明。每个 SQL task 提交前还会重验同一 AgentBridge、数据库主机/实例/拓扑指纹、physical standby 和连接可用性。测试库或其它自证环境标签均不接受。 |
+| `database.scope` | Database MCP 数据源范围：`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`。 |
+| `database.environment` | 固定为 `read-replica`；预检读取 Database MCP 数据源元数据，并用数据库安全探针的 `pg_is_in_recovery()` 证明 physical standby。每个 SQL task 提交前会重新检查数据源元数据和安全探针。测试库或其它自证环境标签均不接受。 |
 | `database.non-owner-non-admin-read-only-account` | 必须为 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
 | `database.row-level-security-disabled-for-safe-base-tables` | 必须为 `true`，确认所有可取证基础表均禁用 RLS。 |
 | `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 必须为 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
@@ -437,7 +439,7 @@ AgentBridge 版本门槛为 `>=1.202.0`。完成 MCP session negotiation 后，J
 
 每个 task 会向 AgentBridge `/prompt` 提交 prompt，等待 `/info.running=false`，然后校验预期输出文件。校验失败且仍有修正轮次时，Java 会发送修正 prompt 并再次校验。
 
-任务状态写入 `agent-status.json`，包含 `taskId`、`agentbridgeWebBaseUrl`、`state`、`timedOut`、`completedByOutput`、`agentState`、`finishedAt` 和 `error` 等字段。
+每个 SQL task 写入 `agent-status.json`，字段为 `schema_version`、`task_key`、`attempt`、`state`、`phase`、`candidate_directory`、`error` 和 `updated_at`。同级 `tool-call-boundary.json` 记录 schema version、开始时间及本 task 前已有的 tool-call ID 边界。
 
 ## 运行方式
 
@@ -448,5 +450,5 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--agentbridge-runner.enabled=tr
 重跑示例：
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.arguments="--agentbridge-runner.enabled=true --agentbridge-runner.mode=rerun --agentbridge-runner.rerun.type=synthesis"
+mvn spring-boot:run -Dspring-boot.run.arguments="--agentbridge-runner.enabled=true --agentbridge-runner.active-chain=mybatis-sql-review --agentbridge-runner.mode=rerun --agentbridge-runner.rerun.type=sql --agentbridge-runner.rerun.id=<statement-key>"
 ```

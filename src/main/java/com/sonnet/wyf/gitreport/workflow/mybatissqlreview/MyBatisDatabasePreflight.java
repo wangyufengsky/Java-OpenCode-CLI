@@ -160,9 +160,7 @@ public final class MyBatisDatabasePreflight {
         DatabaseMcpContract nativeContract = new DatabaseMcpContract(
                 new com.fasterxml.jackson.databind.ObjectMapper(), verified.binding());
         Map<String, AgentBridgeClient.ToolDefinition> tools = requireNativeTools(mcpUri);
-        requireInputSchema(tools.get(DatabaseMcpContract.LIST_DATASOURCES), Map.of("project", "string", "scope", "string"));
-        requireInputSchema(tools.get(DatabaseMcpContract.EXECUTE_QUERY), Map.of(
-                "project", "string", "scope", "string", "dataSource", "string", "sql", "string", "maxRows", "integer"));
+        requireNativeToolSchemas(tools);
         JsonNode dataSource = resolveDataSource(mcpUri, nativeContract, verified.binding().dataSource());
         String currentSystem = requiredText(dataSource, "databaseSystem", "data-source databaseSystem");
         if (!verified.databaseSystem().equals(currentSystem) || verifiedEnvironment(dataSource, verified.environment()) != verified.environment()) {
@@ -189,20 +187,29 @@ public final class MyBatisDatabasePreflight {
     }
 
     private void requireNativeToolSchemas(Map<String, AgentBridgeClient.ToolDefinition> tools) {
-        requireInputSchema(tools.get(DatabaseMcpContract.LIST_DATASOURCES), Map.of("project", "string", "scope", "string"));
+        requireInputSchema(tools.get(DatabaseMcpContract.LIST_DATASOURCES),
+                Map.of("project", "string", "scope", "string"), Set.of(), null);
         requireInputSchema(tools.get(DatabaseMcpContract.LIST_DATABASES), Map.of(
-                "project", "string", "scope", "string", "dataSource", "string"));
+                "project", "string", "scope", "string", "dataSource", "string"), Set.of("dataSource"), null);
         requireInputSchema(tools.get(DatabaseMcpContract.LIST_TABLE_SCHEMA), Map.of(
                 "project", "string", "scope", "string", "dataSource", "string", "catalog", "string", "schema", "string",
-                "includeColumns", "boolean", "includeIndexes", "boolean", "maxTables", "integer"));
+                "includeColumns", "boolean", "includeIndexes", "boolean", "maxTables", "integer"),
+                Set.of("dataSource"), new NumericArgument("maxTables", DatabaseMcpContract.MAX_TABLES));
         requireInputSchema(tools.get(DatabaseMcpContract.EXECUTE_QUERY), Map.of(
-                "project", "string", "scope", "string", "dataSource", "string", "sql", "string", "maxRows", "integer"));
+                "project", "string", "scope", "string", "dataSource", "string", "sql", "string", "maxRows", "integer"),
+                Set.of("dataSource", "sql"), new NumericArgument("maxRows", DatabaseMcpContract.MAX_ROWS));
     }
 
-    private void requireInputSchema(AgentBridgeClient.ToolDefinition tool, Map<String, String> requiredProperties) {
+    private void requireInputSchema(
+            AgentBridgeClient.ToolDefinition tool,
+            Map<String, String> passedProperties,
+            Set<String> coreRequired,
+            NumericArgument constrainedArgument
+    ) {
         JsonNode schema = tool == null ? null : tool.inputSchema();
         if (schema == null || !schema.isObject() || !"object".equals(schema.path("type").asText())
-                || !schema.path("properties").isObject() || !schema.path("required").isArray()) {
+                || !schema.path("properties").isObject()
+                || (schema.has("required") && !schema.path("required").isArray())) {
             throw new IllegalStateException("Database MCP " + (tool == null ? "tool" : tool.name())
                     + " input schema is unsupported or incomplete");
         }
@@ -212,13 +219,68 @@ public final class MyBatisDatabasePreflight {
                 throw new IllegalStateException("Database MCP " + tool.name() + " input schema has invalid required fields");
             }
         }
-        for (Map.Entry<String, String> property : requiredProperties.entrySet()) {
-            if (!required.contains(property.getKey())
-                    || !property.getValue().equals(schema.path("properties").path(property.getKey()).path("type").asText())) {
-                throw new IllegalStateException("Database MCP " + tool.name() + " input schema cannot prove required "
+        for (String requiredField : coreRequired) {
+            if (!required.contains(requiredField)) {
+                throw new IllegalStateException("Database MCP " + tool.name()
+                        + " input schema must require " + requiredField);
+            }
+        }
+        for (Map.Entry<String, String> property : passedProperties.entrySet()) {
+            if (!property.getValue().equals(schema.path("properties").path(property.getKey()).path("type").asText())) {
+                throw new IllegalStateException("Database MCP " + tool.name() + " input schema cannot accept "
                         + property.getKey() + " " + property.getValue() + " argument");
             }
         }
+        requireScopeValues(tool.name(), schema.path("properties").path("scope"));
+        if (constrainedArgument != null) {
+            requireNumericArgumentRange(tool.name(), schema.path("properties").path(constrainedArgument.name()),
+                    constrainedArgument);
+        }
+    }
+
+    private void requireScopeValues(String toolName, JsonNode scope) {
+        if (!scope.has("enum")) {
+            return;
+        }
+        if (!scope.path("enum").isArray()) {
+            throw new IllegalStateException("Database MCP " + toolName + " scope enum is invalid");
+        }
+        Set<String> values = new LinkedHashSet<>();
+        for (JsonNode value : scope.path("enum")) {
+            if (!value.isTextual() || !values.add(value.textValue())) {
+                throw new IllegalStateException("Database MCP " + toolName + " scope enum is invalid");
+            }
+        }
+        if (!values.containsAll(Set.of("GLOBAL", "PROJECT", "ALL"))) {
+            throw new IllegalStateException("Database MCP " + toolName
+                    + " scope enum must allow GLOBAL, PROJECT, and ALL");
+        }
+    }
+
+    private void requireNumericArgumentRange(String toolName, JsonNode schema, NumericArgument argument) {
+        if (schema.has("minimum") && (!schema.path("minimum").isNumber()
+                || schema.path("minimum").decimalValue().compareTo(java.math.BigDecimal.valueOf(argument.value())) > 0)) {
+            throw new IllegalStateException("Database MCP " + toolName + " " + argument.name()
+                    + " minimum does not allow " + argument.value());
+        }
+        if (schema.has("maximum") && (!schema.path("maximum").isNumber()
+                || schema.path("maximum").decimalValue().compareTo(java.math.BigDecimal.valueOf(argument.value())) < 0)) {
+            throw new IllegalStateException("Database MCP " + toolName + " " + argument.name()
+                    + " maximum does not allow " + argument.value());
+        }
+        if (schema.has("enum")) {
+            boolean allowed = false;
+            for (JsonNode value : schema.path("enum")) {
+                allowed |= value.isIntegralNumber() && value.intValue() == argument.value();
+            }
+            if (!allowed) {
+                throw new IllegalStateException("Database MCP " + toolName + " " + argument.name()
+                        + " enum does not allow " + argument.value());
+            }
+        }
+    }
+
+    private record NumericArgument(String name, int value) {
     }
 
     private JsonNode resolveDataSource(URI mcpUri, DatabaseMcpContract contract, String expected) throws Exception {

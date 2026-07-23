@@ -70,15 +70,43 @@ class MyBatisDatabasePreflightTest {
     }
 
     @Test
-    void rejectsNativeToolSchemasThatDoNotRequireTheBoundQueryArguments() {
+    void acceptsLiveOptionalSchemaButRejectsMissingPassedPropertiesAndCoreRequirements() throws Exception {
         NativeDatabaseBridge bridge = new NativeDatabaseBridge(objectMapper);
         bridge.installNativeDatabaseMcpTools();
-        bridge.removeRequiredField(DatabaseMcpContract.EXECUTE_QUERY, "maxRows");
+        new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
 
-        assertThatThrownBy(() -> new MyBatisDatabasePreflight(bridge).verify(
-                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL"))
+        NativeDatabaseBridge withoutMaxRows = nativeBridge();
+        withoutMaxRows.removeProperty(DatabaseMcpContract.EXECUTE_QUERY, "maxRows");
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(withoutMaxRows).verify(
+                withoutMaxRows.mcpUri(), withoutMaxRows.webUri(), contract(), Path.of("/workspace/example"), "ALL"))
                 .hasMessageContaining("input schema")
                 .hasMessageContaining("maxRows");
+
+        NativeDatabaseBridge withoutSqlRequirement = nativeBridge();
+        withoutSqlRequirement.removeRequiredField(DatabaseMcpContract.EXECUTE_QUERY, "sql");
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(withoutSqlRequirement).verify(
+                withoutSqlRequirement.mcpUri(), withoutSqlRequirement.webUri(), contract(), Path.of("/workspace/example"), "ALL"))
+                .hasMessageContaining("must require sql");
+    }
+
+    @Test
+    void rejectsSchemaTypesScopeAndBoundsThatCannotAcceptCurrentArguments() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.setPropertyType(DatabaseMcpContract.LIST_TABLE_SCHEMA, "includeColumns", "string");
+        assertRejected(bridge, contract(), "includeColumns boolean");
+
+        bridge = nativeBridge();
+        bridge.setScopeValues(DatabaseMcpContract.EXECUTE_QUERY, "PROJECT", "ALL");
+        assertRejected(bridge, contract(), "scope enum");
+
+        bridge = nativeBridge();
+        bridge.setMaximum(DatabaseMcpContract.EXECUTE_QUERY, "maxRows", 19);
+        assertRejected(bridge, contract(), "maxRows maximum does not allow 20");
+
+        bridge = nativeBridge();
+        bridge.setMaximum(DatabaseMcpContract.LIST_TABLE_SCHEMA, "maxTables", 199);
+        assertRejected(bridge, contract(), "maxTables maximum does not allow 200");
     }
 
     @Test
@@ -305,6 +333,26 @@ class MyBatisDatabasePreflightTest {
             }
         }
 
+        void removeProperty(String toolName, String field) {
+            schemas.get(toolName).withObject("properties").remove(field);
+        }
+
+        void setPropertyType(String toolName, String field, String type) {
+            ((ObjectNode) schemas.get(toolName).path("properties").path(field)).put("type", type);
+        }
+
+        void setScopeValues(String toolName, String... values) {
+            ArrayNode enumValues = ((ObjectNode) schemas.get(toolName).path("properties").path("scope"))
+                    .putArray("enum");
+            for (String value : values) {
+                enumValues.add(value);
+            }
+        }
+
+        void setMaximum(String toolName, String field, int maximum) {
+            ((ObjectNode) schemas.get(toolName).path("properties").path(field)).put("maximum", maximum);
+        }
+
         @Override
         public List<ToolDefinition> listTools(URI ignored) {
             return tools.stream().map(name -> new ToolDefinition(name, name, schemas.get(name))).toList();
@@ -365,29 +413,26 @@ class MyBatisDatabasePreflightTest {
         private ObjectNode schema(String toolName) {
             ObjectNode schema = objectMapper.createObjectNode().put("type", "object");
             ObjectNode properties = schema.putObject("properties");
-            ArrayNode required = schema.putArray("required");
             for (String field : List.of("project", "scope")) {
                 properties.putObject(field).put("type", "string");
-                required.add(field);
             }
+            ((ObjectNode) properties.get("scope")).putArray("enum").add("GLOBAL").add("PROJECT").add("ALL");
             if (!DatabaseMcpContract.LIST_DATASOURCES.equals(toolName)) {
                 properties.putObject("dataSource").put("type", "string");
-                required.add("dataSource");
+                schema.putArray("required").add("dataSource");
             }
             if (DatabaseMcpContract.LIST_TABLE_SCHEMA.equals(toolName)) {
                 for (String field : List.of("catalog", "schema")) {
                     properties.putObject(field).put("type", "string");
-                    required.add(field);
                 }
                 properties.putObject("includeColumns").put("type", "boolean");
                 properties.putObject("includeIndexes").put("type", "boolean");
-                properties.putObject("maxTables").put("type", "integer");
-                required.add("includeColumns").add("includeIndexes").add("maxTables");
+                properties.putObject("maxTables").put("type", "integer").put("maximum", 200);
             }
             if (DatabaseMcpContract.EXECUTE_QUERY.equals(toolName)) {
                 properties.putObject("sql").put("type", "string");
-                properties.putObject("maxRows").put("type", "integer");
-                required.add("sql").add("maxRows");
+                properties.putObject("maxRows").put("type", "integer").put("maximum", 10_000);
+                schema.withArray("required").add("sql");
             }
             return schema;
         }

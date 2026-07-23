@@ -63,11 +63,10 @@ final class VerifiedMyBatisDatabaseFixture {
         @Override
         public List<ToolDefinition> listTools(URI ignored) {
             return List.of(
-                    definition(DatabaseMcpContract.LIST_DATASOURCES, "project", "scope"),
-                    definition(DatabaseMcpContract.LIST_DATABASES, "project", "scope", "dataSource"),
-                    definition(DatabaseMcpContract.LIST_TABLE_SCHEMA, "project", "scope", "dataSource", "catalog", "schema",
-                            "includeColumns", "includeIndexes", "maxTables"),
-                    definition(DatabaseMcpContract.EXECUTE_QUERY, "project", "scope", "dataSource", "sql", "maxRows")
+                    definition(DatabaseMcpContract.LIST_DATASOURCES),
+                    definition(DatabaseMcpContract.LIST_DATABASES, "dataSource"),
+                    definition(DatabaseMcpContract.LIST_TABLE_SCHEMA, "dataSource"),
+                    definition(DatabaseMcpContract.EXECUTE_QUERY, "dataSource", "sql")
             );
         }
 
@@ -90,13 +89,19 @@ final class VerifiedMyBatisDatabaseFixture {
         private ToolDefinition definition(String name, String... fields) {
             ObjectNode inputSchema = objectMapper.createObjectNode().put("type", "object");
             ObjectNode properties = inputSchema.putObject("properties");
-            ArrayNode required = inputSchema.putArray("required");
-            for (String field : fields) {
+            for (String field : List.of("project", "scope", "dataSource", "catalog", "schema",
+                    "includeColumns", "includeIndexes", "maxRows", "maxTables", "sql")) {
                 properties.putObject(field).put("type", switch (field) {
                     case "includeColumns", "includeIndexes" -> "boolean";
                     case "maxRows", "maxTables" -> "integer";
                     default -> "string";
                 });
+            }
+            ((ObjectNode) properties.get("scope")).putArray("enum").add("GLOBAL").add("PROJECT").add("ALL");
+            ((ObjectNode) properties.get("maxRows")).put("maximum", 10_000);
+            ((ObjectNode) properties.get("maxTables")).put("maximum", 200);
+            ArrayNode required = inputSchema.putArray("required");
+            for (String field : fields) {
                 required.add(field);
             }
             return new ToolDefinition(name, name, inputSchema);
