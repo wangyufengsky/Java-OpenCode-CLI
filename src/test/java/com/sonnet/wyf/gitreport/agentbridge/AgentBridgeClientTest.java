@@ -394,7 +394,7 @@ class AgentBridgeClientTest {
         nativeInfo(server);
         server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
                 {"items":[{"id":"17","toolName":"cmcp_db_database_execute_sql_query",
-                "timestamp":"2026-07-23T00:00:00Z","arguments":"not-json","result":"[]"}]}
+                "status":"success","timestamp":"2026-07-23T00:00:00Z","arguments":"not-json","result":"[]"}]}
                 """));
         server.start();
 
@@ -420,14 +420,110 @@ class AgentBridgeClientTest {
     }
 
     @Test
-    void rejectsNonNativeToolCallHistoryShapes() throws Exception {
+    void rejectsHistoryWithoutItemsArray() throws Exception {
         HttpServer server = server();
         nativeInfo(server);
-        server.createContext("/tool-calls", exchange -> respond(exchange, 200, "{\"toolCalls\":[]}"));
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, "{}"));
         server.start();
 
         assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
                 .hasMessageContaining("items array");
+    }
+
+    @Test
+    void rejectsToolCallsFieldAlongsideCurrentItemsHistory() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                "{\"items\":[],\"toolCalls\":\"unexpected\"}"));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("must not contain toolCalls");
+    }
+
+    @Test
+    void rejectsDuplicateItemsJsonKeys() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                "{\"items\":[],\"items\":[]}"));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("unique JSON keys");
+    }
+
+    @Test
+    void toolCallRecordsDefensivelyCopyStructuredValues() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                objectMapper.createObjectNode().set(
+                        "items", objectMapper.createArrayNode().add(toolCall("call-1", "2026-07-22T09:15:30Z"))
+                ).toString()));
+        server.start();
+
+        AgentBridgeClient.ToolCallRecord call = client.getToolCalls(baseUri(server)).getFirst();
+        ((ObjectNode) call.arguments()).put("tampered", true);
+        ((ObjectNode) call.result()).put("tampered", true);
+        ((ObjectNode) call.hooks()).put("tampered", true);
+
+        assertThat(call.arguments().has("tampered")).isFalse();
+        assertThat(call.result().has("tampered")).isFalse();
+        assertThat(call.hooks().has("tampered")).isFalse();
+
+        ObjectNode sourceArguments = objectMapper.createObjectNode().put("sql", "SELECT 1");
+        ObjectNode sourceResult = objectMapper.createObjectNode().put("rows", 1);
+        ObjectNode sourceHooks = objectMapper.createObjectNode().put("post", true);
+        AgentBridgeClient.ToolCallRecord constructed = new AgentBridgeClient.ToolCallRecord(
+                "constructed", "Query", "cmcp_db_database_execute_sql_query", "execute", "success",
+                Instant.parse("2026-07-22T09:15:30Z"), sourceArguments, sourceResult, 1L, sourceHooks
+        );
+        sourceArguments.put("sourceMutation", true);
+        sourceResult.put("sourceMutation", true);
+        sourceHooks.put("sourceMutation", true);
+
+        assertThat(constructed.arguments().has("sourceMutation")).isFalse();
+        assertThat(constructed.result().has("sourceMutation")).isFalse();
+        assertThat(constructed.hooks().has("sourceMutation")).isFalse();
+    }
+
+    @Test
+    void structuredMcpOutputsDefensivelyCopyJsonValues() {
+        ObjectNode rawResult = objectMapper.createObjectNode();
+        rawResult.putObject("structuredContent").put("ok", true);
+        ObjectNode inputSchema = objectMapper.createObjectNode().put("type", "object");
+        AgentBridgeClient.ToolResponse response = new AgentBridgeClient.ToolResponse(
+                rawResult, "{\"ok\":true}", rawResult.path("structuredContent")
+        );
+        AgentBridgeClient.ToolDefinition tool = new AgentBridgeClient.ToolDefinition(
+                "cmcp_db_database_execute_sql_query", "query", inputSchema
+        );
+        rawResult.put("sourceMutation", true);
+        inputSchema.put("sourceMutation", true);
+
+        ((ObjectNode) response.rawResult()).put("tampered", true);
+        ((ObjectNode) response.structured()).put("tampered", true);
+        ((ObjectNode) tool.inputSchema()).put("tampered", true);
+
+        assertThat(response.rawResult().has("tampered")).isFalse();
+        assertThat(response.structured().has("tampered")).isFalse();
+        assertThat(tool.inputSchema().has("tampered")).isFalse();
+        assertThat(response.rawResult().has("sourceMutation")).isFalse();
+        assertThat(tool.inputSchema().has("sourceMutation")).isFalse();
+    }
+
+    @Test
+    void rejectsHistoryRecordsWithInvalidRequiredFields() throws Exception {
+        assertInvalidHistoryRecord("toolName", objectMapper.nullNode(), "toolName must not be blank");
+        assertInvalidHistoryRecord("status", objectMapper.getNodeFactory().textNode(" "), "status must not be blank");
+        assertInvalidHistoryRecord("timestamp", objectMapper.getNodeFactory().textNode("not-a-time"),
+                "timestamp must be a valid ISO-8601 instant");
+        assertInvalidHistoryRecord("durationMs", objectMapper.getNodeFactory().numberNode(-1),
+                "durationMs must be a non-negative integer");
+        assertInvalidHistoryRecord("durationMs", objectMapper.getNodeFactory().numberNode(2.5),
+                "durationMs must be a non-negative integer");
     }
 
     @Test
@@ -495,6 +591,19 @@ class AgentBridgeClientTest {
                 .set("rows", objectMapper.createArrayNode().addObject().put("id", 1)));
         call.set("hooks", objectMapper.createObjectNode().put("post", true));
         return call;
+    }
+
+    private void assertInvalidHistoryRecord(String field, JsonNode value, String message) throws Exception {
+        ObjectNode call = toolCall("invalid", "2026-07-22T09:15:30Z");
+        call.set(field, value);
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                objectMapper.createObjectNode().set("items", objectMapper.createArrayNode().add(call)).toString()));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server))).hasMessageContaining(message);
+        server.stop(0);
     }
 
     private HttpServer server() throws IOException {

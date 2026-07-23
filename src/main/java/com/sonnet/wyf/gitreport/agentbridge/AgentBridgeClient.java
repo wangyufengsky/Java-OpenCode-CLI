@@ -2,13 +2,13 @@ package com.sonnet.wyf.gitreport.agentbridge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -19,7 +19,6 @@ import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +42,6 @@ public class AgentBridgeClient {
     private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
     private static final int GENERAL_TOOL_RESPONSE_BYTES = 4 * 1024 * 1024;
     private static final int TOOL_CALL_PAGE_RESPONSE_BYTES = 1024 * 1024;
-    private static final int TOOL_CALL_HISTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
-    private static final int MAX_TOOL_CALL_PAGES = 1_000;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong requestIds = new AtomicLong();
@@ -118,7 +115,7 @@ public class AgentBridgeClient {
             myBatisMcpBindings.put(mcpUrl, binding);
             mcpSessions.remove(mcpUrl);
         }
-        McpSession session = mcpSession(mcpUrl);
+        mcpSession(mcpUrl);
         return binding;
     }
 
@@ -148,31 +145,6 @@ public class AgentBridgeClient {
             nativeDatabaseMcpBinding(info);
         }
         return info;
-    }
-
-    private BridgeIdentity requiredIdentity(JsonNode value, String label) {
-        String instanceId = value.path("instanceId").asText("").strip();
-        String projectId = value.path("projectId").asText("").strip();
-        String instanceNonce = value.path("instanceNonce").asText("").strip();
-        if (!isIdentityToken(instanceId, 3) || !isIdentityToken(projectId, 3)
-                || !isIdentityToken(instanceNonce, 16)) {
-            throw new IllegalStateException(label + " must provide non-reusable instanceId/projectId/instanceNonce identity");
-        }
-        return new BridgeIdentity(instanceId, projectId, instanceNonce);
-    }
-
-    private boolean isIdentityToken(String value, int minimumLength) {
-        return value.length() >= minimumLength
-                && value.length() <= 256
-                && value.matches("[A-Za-z0-9._:-]+");
-    }
-
-    private String requiredFingerprint(JsonNode node, String field, String label) {
-        String value = node.path(field).asText("").strip().toLowerCase(java.util.Locale.ROOT);
-        if (!value.matches("sha256:[0-9a-f]{64}")) {
-            throw new IllegalStateException(label + " must provide a SHA-256 " + field);
-        }
-        return value;
     }
 
     private IllegalStateException incompatibleNativeDatabaseProtocol(String version) {
@@ -237,7 +209,6 @@ public class AgentBridgeClient {
             throw new IllegalStateException("AgentBridge MCP tool failed: " + root.path("error"));
         }
         JsonNode result = root.path("result");
-        requireBoundPayload(mcpUrl, result, "AgentBridge MCP tools/call result");
         String text = contentText(result);
         return new ToolResponse(result, text, structured(text, result));
     }
@@ -272,7 +243,6 @@ public class AgentBridgeClient {
                 throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
             }
             JsonNode result = root.path("result");
-            requireBoundPayload(mcpUrl, result, "AgentBridge MCP tools/list result");
             if (!result.path("tools").isArray()) {
                 throw new IllegalStateException("AgentBridge MCP tools/list returned no tools array");
             }
@@ -307,8 +277,11 @@ public class AgentBridgeClient {
                 "AgentBridge GET /tool-calls response"
         );
         requireSuccess(response, "AgentBridge GET /tool-calls failed");
-        JsonNode root = objectMapper.readTree(response.body());
-        if (!root.isObject() || !root.path("items").isArray()) {
+        JsonNode root = uniqueKeyHistoryResponse(response.body());
+        if (!root.isObject() || root.has("toolCalls") || !root.path("items").isArray()) {
+            if (root.isObject() && root.has("toolCalls")) {
+                throw new IllegalStateException("AgentBridge GET /tool-calls must not contain toolCalls");
+            }
             throw new IllegalStateException("AgentBridge GET /tool-calls must return an items array");
         }
         List<ToolCallRecord> calls = new ArrayList<>();
@@ -324,16 +297,18 @@ public class AgentBridgeClient {
             if (!ids.add(id)) {
                 throw new IllegalStateException("AgentBridge GET /tool-calls returned duplicate id: " + id);
             }
+            String toolName = requiredHistoryText(item, "toolName");
+            String status = requiredHistoryText(item, "status");
             calls.add(new ToolCallRecord(
                     id,
                     item.path("title").asText(""),
-                    item.path("toolName").asText(),
+                    toolName,
                     item.path("kind").asText(""),
-                    item.path("status").asText(""),
-                    Instant.parse(item.path("timestamp").asText()),
+                    status,
+                    requiredHistoryTimestamp(item),
                     structuredHistoryField(item.path("arguments"), "arguments"),
                     structuredHistoryField(item.path("result"), "result"),
-                    item.hasNonNull("durationMs") ? item.path("durationMs").longValue() : null,
+                    requiredHistoryDuration(item),
                     item.path("hooks"),
                     item.path("identity").path("instanceId").asText(""),
                     item.path("identity").path("projectId").asText(""),
@@ -345,6 +320,43 @@ public class AgentBridgeClient {
             ));
         }
         return List.copyOf(calls);
+    }
+
+    private JsonNode uniqueKeyHistoryResponse(String responseBody) {
+        try (JsonParser parser = objectMapper.getFactory().createParser(responseBody)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            return objectMapper.readTree(parser);
+        } catch (IOException exception) {
+            throw new IllegalStateException("AgentBridge GET /tool-calls must contain unique JSON keys", exception);
+        }
+    }
+
+    private String requiredHistoryText(JsonNode item, String field) {
+        JsonNode value = item.path(field);
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalStateException(field + " must not be blank");
+        }
+        return value.textValue().strip();
+    }
+
+    private Instant requiredHistoryTimestamp(JsonNode item) {
+        String timestamp = requiredHistoryText(item, "timestamp");
+        try {
+            return Instant.parse(timestamp);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("timestamp must be a valid ISO-8601 instant", exception);
+        }
+    }
+
+    private Long requiredHistoryDuration(JsonNode item) {
+        if (!item.has("durationMs") || item.path("durationMs").isNull()) {
+            return null;
+        }
+        JsonNode duration = item.path("durationMs");
+        if (!duration.isIntegralNumber() || !duration.canConvertToLong() || duration.longValue() < 0) {
+            throw new IllegalStateException("durationMs must be a non-negative integer");
+        }
+        return duration.longValue();
     }
 
     private JsonNode structuredHistoryField(JsonNode value, String label) {
@@ -447,7 +459,7 @@ public class AgentBridgeClient {
                 .orElseThrow(() -> new IllegalStateException("AgentBridge MCP initialize did not return Mcp-Session-Id"));
         JsonNode initializeResult = objectMapper.readTree(response.body()).path("result");
         String protocolVersion = initializeResult.path("protocolVersion").asText(MCP_CLIENT_PROTOCOL_VERSION);
-        McpSession session = new McpSession(sessionId, protocolVersion, myBatisMcpBindings.get(mcpUrl));
+        McpSession session = new McpSession(sessionId, protocolVersion);
 
         ObjectNode initialized = objectMapper.createObjectNode();
         initialized.put("jsonrpc", "2.0");
@@ -477,15 +489,6 @@ public class AgentBridgeClient {
 
     private boolean isNativeDatabaseEvidenceTool(String name) {
         return "cmcp_db_database_execute_sql_query".equals(name);
-    }
-
-    private MyBatisAuditBinding requireBoundPayload(URI mcpUrl, JsonNode payload, String label) {
-        return myBatisMcpBindings.get(mcpUrl);
-    }
-
-    private URI continuationUri(URI endpoint, String parameter, String token) {
-        String query = parameter + "=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
-        return URI.create(endpoint.toString() + "?" + query);
     }
 
     private HttpResponse<String> sendBounded(
@@ -566,9 +569,31 @@ public class AgentBridgeClient {
     }
 
     public record ToolResponse(JsonNode rawResult, String text, JsonNode structured) {
+        public ToolResponse {
+            rawResult = copyJson(rawResult);
+            structured = copyJson(structured);
+        }
+
+        @Override
+        public JsonNode rawResult() {
+            return copyJson(rawResult);
+        }
+
+        @Override
+        public JsonNode structured() {
+            return copyJson(structured);
+        }
     }
 
     public record ToolDefinition(String name, String description, JsonNode inputSchema) {
+        public ToolDefinition {
+            inputSchema = copyJson(inputSchema);
+        }
+
+        @Override
+        public JsonNode inputSchema() {
+            return copyJson(inputSchema);
+        }
     }
 
     public record ToolCallRecord(
@@ -589,6 +614,12 @@ public class AgentBridgeClient {
             String databaseHostFingerprint,
             String databaseInstanceFingerprint,
             String topologyFingerprint) {
+        public ToolCallRecord {
+            arguments = copyJson(arguments);
+            result = copyJson(result);
+            hooks = copyJson(hooks);
+        }
+
         public ToolCallRecord(
                 String id,
                 String title,
@@ -604,6 +635,21 @@ public class AgentBridgeClient {
             this(id, title, toolName, kind, status, timestamp, arguments, result, durationMs, hooks,
                     "", "", "", "", "", "", "");
         }
+
+        @Override
+        public JsonNode arguments() {
+            return copyJson(arguments);
+        }
+
+        @Override
+        public JsonNode result() {
+            return copyJson(result);
+        }
+
+        @Override
+        public JsonNode hooks() {
+            return copyJson(hooks);
+        }
     }
 
     public record BridgeIdentity(String instanceId, String projectId, String instanceNonce) {
@@ -612,7 +658,11 @@ public class AgentBridgeClient {
     public record MyBatisAuditBinding(BridgeIdentity identity, String policyFingerprint) {
     }
 
-    private record McpSession(String id, String protocolVersion, MyBatisAuditBinding auditBinding) {
+    private static JsonNode copyJson(JsonNode value) {
+        return value == null ? null : value.deepCopy();
+    }
+
+    private record McpSession(String id, String protocolVersion) {
     }
 
     private static final class LimitedStringBodySubscriber implements HttpResponse.BodySubscriber<String> {
