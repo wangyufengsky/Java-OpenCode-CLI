@@ -275,6 +275,7 @@ class ConsoleMvcTest {
                 "source.include",
                 "source.exclude",
                 "database.connection-name",
+                "AgentBridge Custom MCP 注册的 Database MCP 数据源名称",
                 "database.database-name",
                 "database.schema-name",
                 "database.environment",
@@ -303,7 +304,7 @@ class ConsoleMvcTest {
                 "{ value: 'sql', label: 'SQL 语句', requiresId: true",
                 "{ value: 'xml', label: 'Mapper XML', requiresId: true",
                 "{ value: 'index', label: '总报告', requiresId: false"
-        );
+        ).doesNotContain("AgentBridge Database Tools");
         String runFormJs = mockMvc.perform(get("/js/run-form.js"))
                 .andExpect(status().isOk())
                 .andReturn()

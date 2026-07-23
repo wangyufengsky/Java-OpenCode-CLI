@@ -15,6 +15,8 @@ class PromptPackContractTest {
         String prompt = Files.readString(Path.of(
                 "src/main/resources/mybatis-sql-review-prompt-pack/prompts/review-sql.md"));
         String readme = Files.readString(Path.of("README.md"));
+        String application = Files.readString(Path.of("src/main/resources/application.yml"));
+        String applicationExample = Files.readString(Path.of("src/main/resources/application-example.yml"));
 
         assertThat(prompt).contains(
                 "cmcp_db_database_list_datasources",
@@ -30,6 +32,17 @@ class PromptPackContractTest {
                 "`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
                 "`cmcp_db_database_execute_sql_query`",
                 "`dataSource`、`sql`、`maxRows: 20`、`project` 和 `scope`"
+        ).contains(
+                "AgentBridge 版本门槛为 `>=1.202.0`",
+                "MCP session negotiation",
+                "`/tool-calls` 的 `items`",
+                "Java 审计 SQL grammar、safe relations 和 scenario count",
+                "数据库 `statement_timeout` 提供执行超时"
+        ).doesNotContain("policyFingerprint", "同一实例", "服务端强制每个场景");
+        assertThat(application).contains("mcp-url: \"http://127.0.0.1:8643/mcp\"");
+        assertThat(applicationExample).contains(
+                "mybatis-sql-review",
+                "mcp-url: \"http://127.0.0.1:8643/mcp\""
         );
     }
 

@@ -417,9 +417,12 @@ test('MyBatis console metadata describes the native Database MCP boundary', () =
     selectedChain: 'mybatis-sql-review'
   });
   const definition = harness.consoleCommon.chainConfigDefinitions['mybatis-sql-review'];
+  const connectionName = definition.fields.find((field) => field.key === 'database.connection-name');
   const mcpUrl = definition.fields.find((field) => field.key === 'agentbridge.mcp-url');
 
   assert.match(definition.description, /AgentBridge Custom MCP/);
+  assert.equal(connectionName.description, 'AgentBridge Custom MCP 注册的 Database MCP 数据源名称。');
+  assert.doesNotMatch(connectionName.description, /AgentBridge Database Tools/);
   assert.match(mcpUrl.description, /http:\/\/127\.0\.0\.1:8643\/mcp/);
   assert.match(mcpUrl.description, /GLOBAL、PROJECT 或 ALL，默认 ALL/);
 });

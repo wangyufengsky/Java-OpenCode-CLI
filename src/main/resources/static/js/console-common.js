@@ -126,7 +126,7 @@
         field('project.repo', '项目仓库路径', '包含 MyBatis XML mapper 的本地项目仓库。', 'text', 'scope', true, true),
         field('source.include', 'Mapper 包含路径', '每行一个 XML include glob；至少保留一个 mapper 范围。', 'list', 'scope', true, true),
         field('source.exclude', 'Mapper 排除路径', '每行一个 exclude glob，用于过滤构建输出。', 'list', 'scope'),
-        field('database.connection-name', '数据库连接名', 'AgentBridge Database Tools 中唯一匹配的连接名称。', 'text', 'validation', true),
+        field('database.connection-name', '数据库连接名', 'AgentBridge Custom MCP 注册的 Database MCP 数据源名称。', 'text', 'validation', true),
         field('database.database-name', '数据库名', '集中式 GaussDB 物理只读副本中的数据库名。', 'text', 'validation', true),
         field('database.schema-name', 'Schema 名', '数据库证据只允许绑定到该 schema。', 'text', 'validation', true),
         field('database.environment', '数据库环境', '固定为 read-replica，并要求服务端证明 physical standby。', 'text', 'validation', true),

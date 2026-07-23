@@ -431,7 +431,7 @@ Database MCP 作为 AgentBridge Custom MCP 注册工具运行。应用预检与 
 
 数据库连接指向集中式 GaussDB 物理只读副本，使用非 owner、非管理员、无角色继承的独立只读账号。安全预检确认可取证基础表的 RLS 状态、函数执行权限、有效 `statement_timeout` 以及账号没有写入或危险对象权限；任一安全事实无法证明时停止运行。数据库凭证隔离、权限与超时构成调用前的安全边界。
 
-AgentBridge `/info`、MCP `initialize`、`tools/list`、`tools/call` 与工具调用记录绑定同一实例和 `policyFingerprint`。服务端执行简单只读 SELECT，只访问预检得到的安全基础表，并强制每个场景最多 20 行、每条 SQL 最多 3 个场景与最多 30 秒超时。
+AgentBridge 版本门槛为 `>=1.202.0`。完成 MCP session negotiation 后，Java 通过 MCP `tools/list` 与 `/tool-calls` 的 `items` 获取工具和调用证据。Java 审计 SQL grammar、safe relations 和 scenario count；`cmcp_db_database_execute_sql_query` 的 query 传 `maxRows: 20`。数据库 `statement_timeout` 提供执行超时。
 
 ## 运行时行为
 
