@@ -195,6 +195,8 @@ class ConsoleMvcTest {
                 .contains("@layer pages {")
                 .doesNotContain("html {\n  min-width: 1280px;")
                 .doesNotContain("body {\n  min-width: 1280px;")
+                .doesNotContain(".app-main {\n    max-width: none;")
+                .contains(".app-main {\n    max-width: 1216px;\n    margin: 0 auto;")
                 .contains(":focus-visible {\n  outline: 3px solid var(--color-primary);")
                 .contains("@media (max-width: 1439px)")
                 .contains("grid-template-columns: minmax(0, 1fr) 300px;")

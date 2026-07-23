@@ -1158,8 +1158,8 @@ textarea {
   }
 
   .app-main {
-    max-width: none;
-    margin: 0;
+    max-width: 1216px;
+    margin: 0 auto;
     padding: 32px;
   }
 
