@@ -34,4 +34,4 @@ Write only the three exact absolute output paths in the runtime task context:
 2. `summary.json`
 3. `database-evidence.json`
 
-Do not write any other file. `report.md` uses the complete embedded template. Its Database Evidence section contains exactly `[database-evidence.json](database-evidence.json)`. `summary.json` satisfies the complete embedded schema. All artifacts repeat the exact mapper and statement fields from the runtime context. Use the runtime binding fields `data_source`, `catalog`, `schema`, `project`, and `scope`; do not add placeholder content.
+Do not write any other file. `report.md` uses the complete embedded template. Its Database Evidence section contains exactly `[database-evidence.json](database-evidence.json)`. Fill the five labeled report lines with the exact runtime `data_source`, `catalog`, `schema`, `project`, and `scope` values. `summary.json` satisfies the complete embedded schema and repeats those same values. All artifacts repeat the exact mapper and statement fields from the runtime context; do not add placeholder content.

@@ -101,8 +101,9 @@ public final class MyBatisSqlOutputValidator {
 
         requireAuditedContext(expectedTask, database, auditedFacts);
         requireTaskBinding(summary, expectedTask, "summary expected task");
+        requireSummaryDatabaseBinding(summary, database.binding());
         int scenarioCount = validateEvidence(evidence, summary, expectedTask, database, auditedFacts);
-        requireReportBinding(report, expectedTask);
+        requireReportBinding(report, expectedTask, database.binding());
         return new Result(
                 expectedTask.statementKey(),
                 scenarioCount,
@@ -139,8 +140,9 @@ public final class MyBatisSqlOutputValidator {
             throw new IllegalStateException("summary schema validation failed: " + String.join("; ", schemaErrors));
         }
         requireTaskBinding(summary, expectedTask, "summary expected task");
+        requireSummaryDatabaseBinding(summary, evidence);
         int scenarioCount = validateEvidenceOffline(evidence, summary, expectedTask);
-        requireReportBinding(report, expectedTask);
+        requireReportBinding(report, expectedTask, evidence);
         return new Result(expectedTask.statementKey(), scenarioCount, evidenceBytes.length, List.of());
     }
 
@@ -376,7 +378,49 @@ public final class MyBatisSqlOutputValidator {
         }
     }
 
-    private void requireReportBinding(String report, ExpectedTaskContext expected) {
+    private void requireSummaryDatabaseBinding(
+            JsonNode summary,
+            DatabaseMcpContract.Binding binding
+    ) {
+        requireExactText(summary, "data_source", binding.dataSource(), "summary database binding");
+        requireExactText(summary, "catalog", binding.catalog(), "summary database binding");
+        requireExactText(summary, "schema", binding.schema(), "summary database binding");
+        requireExactText(summary, "project", binding.project().toString(), "summary database binding");
+        requireExactText(summary, "scope", binding.scope().name(), "summary database binding");
+    }
+
+    private void requireSummaryDatabaseBinding(JsonNode summary, JsonNode evidence) {
+        for (String field : List.of("data_source", "catalog", "schema", "project", "scope")) {
+            requireExactText(summary, field, requireText(evidence, field, "database evidence"),
+                    "summary database binding");
+        }
+    }
+
+    private void requireReportBinding(
+            String report,
+            ExpectedTaskContext expected,
+            DatabaseMcpContract.Binding binding
+    ) {
+        requireReportTaskBinding(report, expected);
+        requireReportDatabaseBinding(report, Map.of(
+                "data_source", binding.dataSource(),
+                "catalog", binding.catalog(),
+                "schema", binding.schema(),
+                "project", binding.project().toString(),
+                "scope", binding.scope().name()
+        ));
+    }
+
+    private void requireReportBinding(String report, ExpectedTaskContext expected, JsonNode evidence) {
+        requireReportTaskBinding(report, expected);
+        Map<String, String> binding = new java.util.LinkedHashMap<>();
+        for (String field : List.of("data_source", "catalog", "schema", "project", "scope")) {
+            binding.put(field, requireText(evidence, field, "database evidence"));
+        }
+        requireReportDatabaseBinding(report, binding);
+    }
+
+    private void requireReportTaskBinding(String report, ExpectedTaskContext expected) {
         Map<String, String> expectedValues = Map.of(
                 "statement_key", expected.statementKey(),
                 "mapper_relative_path", expected.mapperRelativePath(),
@@ -390,6 +434,23 @@ public final class MyBatisSqlOutputValidator {
                 throw new IllegalStateException(
                         "report.md does not identify expected task " + entry.getKey() + " " + entry.getValue()
                 );
+            }
+        }
+    }
+
+    private void requireReportDatabaseBinding(String report, Map<String, String> binding) {
+        Map<String, String> labels = Map.of(
+                "data_source", "Data source",
+                "catalog", "Catalog",
+                "schema", "Schema",
+                "project", "Project",
+                "scope", "Scope"
+        );
+        for (String field : List.of("data_source", "catalog", "schema", "project", "scope")) {
+            String line = "- " + labels.get(field) + ": `" + binding.get(field) + "`";
+            if (!Pattern.compile("(?m)^" + Pattern.quote(line) + "$").matcher(report).find()) {
+                throw new IllegalStateException("report.md database binding " + field
+                        + " does not match the required labeled line");
             }
         }
     }

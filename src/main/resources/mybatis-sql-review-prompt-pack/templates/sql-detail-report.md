@@ -6,6 +6,12 @@ This candidate report reviews exactly one inventory statement and distinguishes 
 
 Identify the mapper, statement key, command type, selectKey flag, source line range, dynamic SQL branches, parameters, raw mapper XML, and normalized SQL being reviewed.
 
+- Data source: `exact runtime data_source value`
+- Catalog: `exact runtime catalog value`
+- Schema: `exact runtime schema value`
+- Project: `exact runtime project value`
+- Scope: `exact runtime scope value`
+
 ## Static Analysis
 
 Describe correctness, maintainability, performance, concurrency, and data-volume risks visible from the mapper source. Mark claims that require runtime confirmation.

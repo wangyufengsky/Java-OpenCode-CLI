@@ -31,6 +31,46 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void rejectsEverySummaryBindingFieldThatDoesNotMatchOnlineDatabaseOrOfflineEvidence() throws Exception {
+        for (String field : bindingFields()) {
+            Path onlineCandidates = candidates();
+            ObjectNode onlineSummary = summary(onlineCandidates);
+            onlineSummary.put(field, mismatchedBindingValue(field));
+            writeSummary(onlineCandidates, onlineSummary);
+            assertThatThrownBy(() -> validate(onlineCandidates))
+                    .hasMessageContaining("summary database binding")
+                    .hasMessageContaining(field);
+
+            Path offlineCandidates = candidates();
+            ObjectNode offlineSummary = summary(offlineCandidates);
+            offlineSummary.put(field, mismatchedBindingValue(field));
+            writeSummary(offlineCandidates, offlineSummary);
+            assertThatThrownBy(() -> validator.validatePublishedOffline(offlineCandidates, expected()))
+                    .hasMessageContaining("summary database binding")
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void rejectsEveryMissingOrTamperedLabeledReportBindingOnlineAndOffline() throws Exception {
+        for (String field : bindingFields()) {
+            Path onlineCandidates = candidates();
+            Files.writeString(onlineCandidates.resolve("report.md"), report(onlineCandidates)
+                    .replace(reportBindingLine(field, database().binding()), ""));
+            assertThatThrownBy(() -> validate(onlineCandidates))
+                    .hasMessageContaining("report.md database binding")
+                    .hasMessageContaining(field);
+
+            Path offlineCandidates = candidates();
+            Files.writeString(offlineCandidates.resolve("report.md"), report(offlineCandidates)
+                    .replace(reportBindingLine(field, database().binding()), "- " + reportLabel(field) + ": `wrong`"));
+            assertThatThrownBy(() -> validator.validatePublishedOffline(offlineCandidates, expected()))
+                    .hasMessageContaining("report.md database binding")
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
     void rejectsUnboundDatabaseEvidenceFields() throws Exception {
         Path candidates = candidates();
         ObjectNode evidence = (ObjectNode) objectMapper.readTree(candidates.resolve("database-evidence.json").toFile());
@@ -180,6 +220,13 @@ class MyBatisSqlOutputValidatorTest {
     private AgentBridgeClient.ToolCallRecord call(String id, String tool, JsonNode arguments, JsonNode result, Instant timestamp, long duration) { return new AgentBridgeClient.ToolCallRecord(id, tool, tool, "mcp", "success", timestamp, arguments, result, duration, objectMapper.createObjectNode()); }
     private ObjectNode evidence(Path candidates) throws IOException { return (ObjectNode) objectMapper.readTree(candidates.resolve("database-evidence.json").toFile()); }
     private void write(Path candidates, JsonNode evidence) throws IOException { objectMapper.writeValue(candidates.resolve("database-evidence.json").toFile(), evidence); }
+    private ObjectNode summary(Path candidates) throws IOException { return (ObjectNode) objectMapper.readTree(candidates.resolve("summary.json").toFile()); }
+    private void writeSummary(Path candidates, JsonNode summary) throws IOException { objectMapper.writeValue(candidates.resolve("summary.json").toFile(), summary); }
+    private String report(Path candidates) throws IOException { return Files.readString(candidates.resolve("report.md")); }
+    private List<String> bindingFields() { return List.of("data_source", "catalog", "schema", "project", "scope"); }
+    private String mismatchedBindingValue(String field) { return "scope".equals(field) ? "GLOBAL" : "wrong-" + field; }
+    private String reportLabel(String field) { return switch (field) { case "data_source" -> "Data source"; case "catalog" -> "Catalog"; case "schema" -> "Schema"; case "project" -> "Project"; case "scope" -> "Scope"; default -> throw new IllegalArgumentException(field); }; }
+    private String reportBindingLine(String field, DatabaseMcpContract.Binding binding) { String value = switch (field) { case "data_source" -> binding.dataSource(); case "catalog" -> binding.catalog(); case "schema" -> binding.schema(); case "project" -> binding.project().toString(); case "scope" -> binding.scope().name(); default -> throw new IllegalArgumentException(field); }; return "- " + reportLabel(field) + ": `" + value + "`"; }
 
     private Path candidates() throws IOException {
         Path directory = Files.createDirectory(tempDir.resolve("candidates-" + System.nanoTime()));

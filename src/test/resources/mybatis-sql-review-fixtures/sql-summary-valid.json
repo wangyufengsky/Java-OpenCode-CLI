@@ -9,6 +9,11 @@
   "select_key": false,
   "risk_level": "medium",
   "scenario_count": 1,
+  "data_source": "GaussDB-ReadOnly",
+  "catalog": "orders",
+  "schema": "audit",
+  "project": "/workspace/example",
+  "scope": "ALL",
   "evidence_file": "database-evidence.json",
   "report_file": "report.md",
   "findings": [

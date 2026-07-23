@@ -770,6 +770,12 @@ class MyBatisSqlReviewWorkflowChainTest {
 
                     Statement `%s` from `%s`, namespace `%s`, id `%s`, command `%s`, selectKey `%s`.
 
+                    - Data source: `%s`
+                    - Catalog: `%s`
+                    - Schema: `%s`
+                    - Project: `%s`
+                    - Scope: `%s`
+
                     ## Statement
 
                     Reviewed statically.
@@ -793,7 +799,12 @@ class MyBatisSqlReviewWorkflowChainTest {
                     ## Limitations
 
                     No database calls were required.
-                    """.formatted(statementKey, mapperPath, namespace, statementId, commandType, selectKey));
+                    """.formatted(
+                    statementKey, mapperPath, namespace, statementId, commandType, selectKey,
+                    runtime.path("data_source").asText(), runtime.path("catalog").asText(),
+                    runtime.path("schema").asText(), runtime.path("project").asText(),
+                    runtime.path("scope").asText()
+            ));
             ObjectNode summary = objectMapper.createObjectNode()
                     .put("schema_version", "mybatis-sql-review-summary/v1")
                     .put("statement_key", statementKey)

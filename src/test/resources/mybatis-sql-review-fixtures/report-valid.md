@@ -4,6 +4,12 @@ This report reviews `mapper-order-find-open` without executing the original mapp
 
 Source: `mappers/OrderMapper.xml`, namespace `com.example.OrderMapper`, statement `findOpen`, command `select`, selectKey `false`.
 
+- Data source: `GaussDB-ReadOnly`
+- Catalog: `orders`
+- Schema: `audit`
+- Project: `/workspace/example`
+- Scope: `ALL`
+
 ## Statement
 
 The statement is a read-only lookup of open orders.
