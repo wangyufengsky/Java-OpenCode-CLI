@@ -239,10 +239,7 @@ public final class MyBatisDatabasePreflight {
     }
 
     private void requireScopeValues(String toolName, JsonNode scope) {
-        if (!scope.has("enum")) {
-            return;
-        }
-        if (!scope.path("enum").isArray()) {
+        if (!scope.isObject() || !scope.path("enum").isArray()) {
             throw new IllegalStateException("Database MCP " + toolName + " scope enum is invalid");
         }
         Set<String> values = new LinkedHashSet<>();
@@ -251,9 +248,9 @@ public final class MyBatisDatabasePreflight {
                 throw new IllegalStateException("Database MCP " + toolName + " scope enum is invalid");
             }
         }
-        if (!values.containsAll(Set.of("GLOBAL", "PROJECT", "ALL"))) {
+        if (!values.equals(Set.of("GLOBAL", "PROJECT", "ALL"))) {
             throw new IllegalStateException("Database MCP " + toolName
-                    + " scope enum must allow GLOBAL, PROJECT, and ALL");
+                    + " scope enum must be exactly GLOBAL, PROJECT, and ALL");
         }
     }
 

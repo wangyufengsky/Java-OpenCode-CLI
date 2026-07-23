@@ -703,6 +703,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                 });
                 required.add(field);
             }
+            ((ObjectNode) properties.get("scope")).putArray("enum")
+                    .add("GLOBAL").add("PROJECT").add("ALL");
             return schema;
         }
 

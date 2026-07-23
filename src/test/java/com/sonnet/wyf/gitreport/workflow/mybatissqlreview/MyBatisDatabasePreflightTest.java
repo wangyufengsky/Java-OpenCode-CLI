@@ -101,6 +101,14 @@ class MyBatisDatabasePreflightTest {
         assertRejected(bridge, contract(), "scope enum");
 
         bridge = nativeBridge();
+        bridge.removeScopeEnum(DatabaseMcpContract.LIST_DATASOURCES);
+        assertRejected(bridge, contract(), "scope enum");
+
+        bridge = nativeBridge();
+        bridge.setScopeValues(DatabaseMcpContract.LIST_DATABASES, "GLOBAL", "PROJECT", "ALL", "EXTRA");
+        assertRejected(bridge, contract(), "scope enum");
+
+        bridge = nativeBridge();
         bridge.setMaximum(DatabaseMcpContract.EXECUTE_QUERY, "maxRows", 19);
         assertRejected(bridge, contract(), "maxRows maximum does not allow 20");
 
@@ -347,6 +355,10 @@ class MyBatisDatabasePreflightTest {
             for (String value : values) {
                 enumValues.add(value);
             }
+        }
+
+        void removeScopeEnum(String toolName) {
+            ((ObjectNode) schemas.get(toolName).path("properties").path("scope")).remove("enum");
         }
 
         void setMaximum(String toolName, String field, int maximum) {
