@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.lang.reflect.Modifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -87,6 +88,145 @@ class MyBatisDatabasePreflightTest {
         );
         assertThat(bridge.argumentsFor(DatabaseMcpContract.EXECUTE_QUERY).path("dataSource").asText())
                 .isEqualTo(result.binding().dataSource());
+        assertThat(bridge.compatibilityChecks()).isEqualTo(2);
+    }
+
+    @Test
+    void rejectsUnsupportedAgentBridgeBeforeListingToolsInVerifyAndRecheck() throws Exception {
+        NativeDatabaseBridge bridge = new NativeDatabaseBridge(objectMapper);
+        bridge.installNativeDatabaseMcpTools();
+        bridge.setCompatible(false);
+        MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(bridge);
+
+        assertThatThrownBy(() -> preflight.verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL"))
+                .hasMessageContaining("requires AgentBridge >= 1.202.0");
+        assertThat(bridge.calledTools()).isEmpty();
+
+        bridge.setCompatible(true);
+        MyBatisDatabasePreflight.Result verified = preflight.verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
+        bridge.clearCalls();
+        bridge.setCompatible(false);
+
+        assertThatThrownBy(() -> preflight.recheck(bridge.mcpUri(), bridge.webUri(), verified))
+                .hasMessageContaining("requires AgentBridge >= 1.202.0");
+        assertThat(bridge.calledTools()).isEmpty();
+    }
+
+    @Test
+    void rejectsDuplicateAndMissingNativeDataSources() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.dataSources().addObject().put("name", "GaussDB-ReadOnly").put("databaseSystem", "GaussDB")
+                .put("environment", "read-replica");
+        assertRejected(bridge, contract(), "exactly one data source");
+
+        bridge = nativeBridge();
+        bridge.dataSources().removeAll();
+        assertRejected(bridge, contract(), "exactly one data source");
+    }
+
+    @Test
+    void rejectsCatalogSchemaAndTableInventoryMismatch() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.catalogs().removeAll();
+        assertRejected(bridge, contract(), "catalog");
+
+        bridge = nativeBridge();
+        bridge.tableSchema().put("schema", "public");
+        assertRejected(bridge, contract(), "catalog/schema");
+
+        bridge = nativeBridge();
+        ((ObjectNode) bridge.tableSchema().withArray("tables").get(0)).put("type", "VIEW");
+        assertRejected(bridge, contract(), "type TABLE");
+
+        bridge = nativeBridge();
+        bridge.tableSchema().withArray("tables").addObject().put("name", "orders").put("type", "TABLE");
+        assertRejected(bridge, contract(), "invalid or duplicate");
+    }
+
+    @Test
+    void rejectsUnsafePrivilegesRlsAndFunctionExecution() {
+        for (String field : List.of("superuser", "systemAdmin", "auditAdmin", "roleAdmin", "databaseOwner",
+                "schemaOwner", "databaseCreate", "databaseTemporary", "schemaCreate", "dangerousAnyPrivilege",
+                "rolbypassrls")) {
+            NativeDatabaseBridge bridge = nativeBridge();
+            bridge.probeRow().put(field, true);
+            assertRejected(bridge, contract(), field);
+        }
+        for (String field : List.of("roleMembershipCount", "ownedNonSystemSchemaCount", "ownedBaseTableCount",
+                "unsafeNonSystemSchemaCreateCount", "unsafeTablePrivilegeCount", "unsafeColumnPrivilegeCount",
+                "unsafeSequencePrivilegeCount", "rlsEnabledBaseTableCount", "forceRlsEnabledBaseTableCount",
+                "executableFunctionCount", "executablePackageCount", "unsafeForeignServerPrivilegeCount",
+                "unsafeDirectoryPrivilegeCount")) {
+            NativeDatabaseBridge bridge = nativeBridge();
+            bridge.probeRow().put(field, 1);
+            assertRejected(bridge, contract(), field);
+        }
+    }
+
+    @Test
+    void rejectsNonPhysicalReadOnlyTargetAndInvalidTimeoutContracts() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        ((ObjectNode) bridge.dataSources().get(0)).put("environment", "production-primary");
+        assertRejected(bridge, contract(), "read-replica");
+
+        bridge = nativeBridge();
+        bridge.probeRow().put("readReplica", false);
+        assertRejected(bridge, contract(), "read-replica");
+
+        bridge = nativeBridge();
+        bridge.probeRow().put("statementTimeoutMs", 30_001);
+        assertRejected(bridge, contract(), "statementTimeoutMs");
+
+        assertRejected(nativeBridge(), new MyBatisDatabasePreflight.DatabaseContract(
+                "GaussDB-ReadOnly", "orders", "audit", MyBatisDatabasePreflight.Environment.READ_REPLICA,
+                true, true, true, new MyBatisDatabasePreflight.StatementTimeoutContract(
+                        Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.EFFECTIVE_SESSION, true)),
+                "statement_timeout scope");
+    }
+
+    @Test
+    void acceptsArrayAndPositionalColumnsRowsSafetyProbeResults() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        ArrayNode array = objectMapper.createArrayNode().add(bridge.probeRow().deepCopy());
+        bridge.setSafetyProbe(array);
+        new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
+
+        bridge = nativeBridge();
+        ObjectNode positional = bridge.safetyProbe().deepCopy();
+        ArrayNode values = positional.putArray("rows").addArray();
+        ObjectNode row = bridge.probeRow();
+        positional.withArray("columns").forEach(column -> values.add(row.path(column.asText())));
+        bridge.setSafetyProbe(positional);
+        new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
+    }
+
+    @Test
+    void resultIsImmutableAndHasNoPublicConstructor() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        MyBatisDatabasePreflight.Result result = new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL");
+
+        assertThatThrownBy(() -> result.safeBaseRelations().add("audit.other"))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(MyBatisDatabasePreflight.Result.class.getDeclaredConstructors())
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
+    }
+
+    private NativeDatabaseBridge nativeBridge() {
+        NativeDatabaseBridge bridge = new NativeDatabaseBridge(objectMapper);
+        bridge.installNativeDatabaseMcpTools();
+        return bridge;
+    }
+
+    private void assertRejected(NativeDatabaseBridge bridge, MyBatisDatabasePreflight.DatabaseContract contract,
+                                String message) {
+        assertThatThrownBy(() -> new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract, Path.of("/workspace/example"), "ALL"))
+                .hasMessageContaining(message);
     }
 
     private MyBatisDatabasePreflight.DatabaseContract contract() {
@@ -106,10 +246,20 @@ class MyBatisDatabasePreflightTest {
         private final List<String> calledTools = new ArrayList<>();
         private final Map<String, JsonNode> arguments = new LinkedHashMap<>();
         private final Map<String, ObjectNode> schemas = new LinkedHashMap<>();
+        private ArrayNode dataSources;
+        private ArrayNode catalogs;
+        private ObjectNode tableSchema;
+        private JsonNode safetyProbe;
+        private boolean compatible = true;
+        private int compatibilityChecks;
 
         private NativeDatabaseBridge(ObjectMapper objectMapper) {
             super(objectMapper);
             this.objectMapper = objectMapper;
+            dataSources = createDataSources();
+            catalogs = createCatalogs();
+            tableSchema = createTableSchema();
+            safetyProbe = createSafetyProbe();
         }
 
         void installNativeDatabaseMcpTools() {
@@ -146,14 +296,22 @@ class MyBatisDatabasePreflightTest {
         }
 
         @Override
+        public void requireMyBatisSqlReviewCapabilities(URI ignoredWeb) {
+            compatibilityChecks++;
+            if (!compatible) {
+                throw new IllegalStateException("requires AgentBridge >= 1.202.0");
+            }
+        }
+
+        @Override
         public ToolResponse callTool(URI ignored, String name, JsonNode requestArguments) {
             calledTools.add(name);
             arguments.put(name, requestArguments.deepCopy());
             JsonNode response = switch (name) {
-                case DatabaseMcpContract.LIST_DATASOURCES -> dataSources();
-                case DatabaseMcpContract.LIST_DATABASES -> catalogs();
-                case DatabaseMcpContract.LIST_TABLE_SCHEMA -> tableSchema();
-                case DatabaseMcpContract.EXECUTE_QUERY -> safetyProbe();
+                case DatabaseMcpContract.LIST_DATASOURCES -> dataSources;
+                case DatabaseMcpContract.LIST_DATABASES -> catalogs;
+                case DatabaseMcpContract.LIST_TABLE_SCHEMA -> tableSchema;
+                case DatabaseMcpContract.EXECUTE_QUERY -> safetyProbe;
                 default -> throw new IllegalArgumentException("unexpected tool " + name);
             };
             return new ToolResponse(response, "", response);
@@ -171,6 +329,15 @@ class MyBatisDatabasePreflightTest {
             calledTools.clear();
             arguments.clear();
         }
+
+        void setCompatible(boolean compatible) { this.compatible = compatible; }
+        int compatibilityChecks() { return compatibilityChecks; }
+        ArrayNode dataSources() { return dataSources; }
+        ArrayNode catalogs() { return catalogs; }
+        ObjectNode tableSchema() { return tableSchema; }
+        ObjectNode safetyProbe() { return (ObjectNode) safetyProbe; }
+        ObjectNode probeRow() { return (ObjectNode) safetyProbe().at("/rows/0"); }
+        void setSafetyProbe(JsonNode safetyProbe) { this.safetyProbe = safetyProbe; }
 
         URI mcpUri() {
             return URI.create("http://127.0.0.1:1/mcp");
@@ -210,7 +377,7 @@ class MyBatisDatabasePreflightTest {
             return schema;
         }
 
-        private ObjectNode tableSchema() {
+        private ObjectNode createTableSchema() {
             ObjectNode result = objectMapper.createObjectNode();
             result.put("catalog", "orders").put("schema", "audit");
             ArrayNode tables = result.putArray("tables");
@@ -219,25 +386,25 @@ class MyBatisDatabasePreflightTest {
             return result;
         }
 
-        private ArrayNode dataSources() {
+        private ArrayNode createDataSources() {
             ArrayNode result = objectMapper.createArrayNode();
             result.addObject().put("name", "GaussDB-ReadOnly").put("databaseSystem", "GaussDB")
                     .put("environment", "read-replica");
             return result;
         }
 
-        private ArrayNode catalogs() {
+        private ArrayNode createCatalogs() {
             ArrayNode result = objectMapper.createArrayNode();
             result.addObject().put("name", "orders");
             return result;
         }
 
-        private ObjectNode safetyProbe() {
+        private ObjectNode createSafetyProbe() {
             ObjectNode row = objectMapper.createObjectNode()
                     .put("probeContractVersion", "mybatis-sql-review-db-safety-v2")
                     .put("currentDatabase", "orders").put("currentSchema", "audit")
                     .put("currentUser", "sql_auditor")
-                    .put("superuser", false).put("systemAdmin", false).put("auditAdmin", false)
+                    .put("superuser", false).put("rolbypassrls", false).put("systemAdmin", false).put("auditAdmin", false)
                     .put("roleAdmin", false).put("roleMembershipCount", 0)
                     .put("databaseOwner", false).put("schemaOwner", false)
                     .put("ownedNonSystemSchemaCount", 0).put("ownedBaseTableCount", 0)

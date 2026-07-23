@@ -90,6 +90,10 @@ final class VerifiedMyBatisDatabaseFixture {
         }
 
         @Override
+        public void requireMyBatisSqlReviewCapabilities(URI ignoredWeb) {
+        }
+
+        @Override
         public ToolResponse callTool(URI ignored, String name, JsonNode arguments) {
             JsonNode response = switch (name) {
                 case DatabaseMcpContract.LIST_DATASOURCES -> dataSources();
@@ -140,7 +144,8 @@ final class VerifiedMyBatisDatabaseFixture {
             ObjectNode row = objectMapper.createObjectNode()
                     .put("probeContractVersion", "mybatis-sql-review-db-safety-v2")
                     .put("currentDatabase", catalog).put("currentSchema", schema).put("currentUser", "sql_auditor")
-                    .put("superuser", false).put("systemAdmin", false).put("auditAdmin", false).put("roleAdmin", false)
+                    .put("superuser", false).put("rolbypassrls", false).put("systemAdmin", false)
+                    .put("auditAdmin", false).put("roleAdmin", false)
                     .put("roleMembershipCount", 0).put("databaseOwner", false).put("schemaOwner", false)
                     .put("ownedNonSystemSchemaCount", 0).put("ownedBaseTableCount", 0).put("databaseCreate", false)
                     .put("databaseTemporary", false).put("schemaCreate", false).put("unsafeNonSystemSchemaCreateCount", 0)

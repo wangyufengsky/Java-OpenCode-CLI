@@ -20,7 +20,7 @@ public final class MyBatisDatabasePreflight {
     private static final String SAFETY_PROBE_CONTRACT_VERSION = "mybatis-sql-review-db-safety-v2";
     private static final List<String> SAFETY_PROBE_COLUMNS = List.of(
             "probeContractVersion", "currentDatabase", "currentSchema", "currentUser",
-            "superuser", "systemAdmin", "auditAdmin", "roleAdmin", "roleMembershipCount",
+            "superuser", "rolbypassrls", "systemAdmin", "auditAdmin", "roleAdmin", "roleMembershipCount",
             "databaseOwner", "schemaOwner", "ownedNonSystemSchemaCount", "ownedBaseTableCount",
             "databaseCreate", "databaseTemporary", "schemaCreate", "unsafeNonSystemSchemaCreateCount",
             "dangerousAnyPrivilege", "sessionReadOnly", "transactionReadOnly", "unsafeTablePrivilegeCount",
@@ -45,7 +45,8 @@ public final class MyBatisDatabasePreflight {
             )
             SELECT 'mybatis-sql-review-db-safety-v2' AS "probeContractVersion",
                 pg_catalog.current_database() AS "currentDatabase", pg_catalog.current_schema() AS "currentSchema",
-                CURRENT_USER AS "currentUser", r.rolsuper AS "superuser", r.rolsystemadmin AS "systemAdmin",
+                CURRENT_USER AS "currentUser", r.rolsuper AS "superuser", r.rolbypassrls AS "rolbypassrls",
+                r.rolsystemadmin AS "systemAdmin",
                 r.rolauditadmin AS "auditAdmin",
                 (r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.roluseft
                     OR r.rolmonitoradmin OR r.roloperatoradmin OR r.rolpolicyadmin) AS "roleAdmin",
@@ -123,6 +124,7 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(mcpUri, "mcpUri");
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(contract, "contract");
+        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
         verifyCredentialContract(contract);
         DatabaseMcpContract.Binding binding = new DatabaseMcpContract.Binding(
                 contract.connectionName(), contract.databaseName(), contract.schemaName(), projectPath,
@@ -154,6 +156,7 @@ public final class MyBatisDatabasePreflight {
         Objects.requireNonNull(mcpUri, "mcpUri");
         Objects.requireNonNull(webBaseUri, "webBaseUri");
         Objects.requireNonNull(verified, "verified");
+        client.requireMyBatisSqlReviewCapabilities(webBaseUri);
         DatabaseMcpContract nativeContract = new DatabaseMcpContract(
                 new com.fasterxml.jackson.databind.ObjectMapper(), verified.binding());
         Map<String, AgentBridgeClient.ToolDefinition> tools = requireNativeTools(mcpUri);
@@ -323,7 +326,7 @@ public final class MyBatisDatabasePreflight {
         requireProbeText(row, "currentDatabase", binding.catalog());
         requireProbeText(row, "currentSchema", binding.schema());
         requiredProbeText(row, "currentUser");
-        for (String field : List.of("superuser", "systemAdmin", "auditAdmin", "roleAdmin", "databaseOwner", "schemaOwner",
+        for (String field : List.of("superuser", "rolbypassrls", "systemAdmin", "auditAdmin", "roleAdmin", "databaseOwner", "schemaOwner",
                 "databaseCreate", "databaseTemporary", "schemaCreate", "dangerousAnyPrivilege")) {
             if (requiredProbeBoolean(row, field)) {
                 throw new IllegalStateException("database safety probe rejected unsafe " + field);
@@ -410,6 +413,11 @@ public final class MyBatisDatabasePreflight {
         if (!timeout.confirmed() || timeout.maximum().isZero() || timeout.maximum().isNegative()
                 || timeout.maximum().compareTo(Duration.ofSeconds(30)) > 0) {
             throw new IllegalStateException("confirmed database/server/role statement_timeout must be positive and <= 30 seconds");
+        }
+        if (timeout.scope() != StatementTimeoutScope.DATABASE
+                && timeout.scope() != StatementTimeoutScope.SERVER
+                && timeout.scope() != StatementTimeoutScope.ROLE) {
+            throw new IllegalStateException("statement_timeout scope must be DATABASE, SERVER, or ROLE");
         }
     }
 
