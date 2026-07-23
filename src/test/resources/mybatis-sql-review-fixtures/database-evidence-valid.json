@@ -6,65 +6,25 @@
   "statement_id": "findOpen",
   "command_type": "select",
   "select_key": false,
-  "connection_id": "gauss-readonly",
-  "database_name": "orders",
-  "schema_name": "audit",
-  "audit": {
-    "post_hoc": true,
-    "permission_to_execute_original_dml": false,
-    "tool_call_ids": ["call-1", "call-2"]
-  },
-  "metadata": [
-    {
-      "evidence_id": "E-1",
-      "tool_call_id": "call-1",
-      "tool_name": "get_database_object_description",
-      "timestamp": "2026-07-22T09:05:00Z",
-      "duration_ms": 10,
-      "arguments": {
-        "connectionId": "gauss-readonly",
-        "databaseName": "orders",
-        "schemaName": "audit"
-      },
-      "result": {
-        "objectType": "TABLE",
-        "name": "orders",
-        "columns": ["id", "status"]
-      },
-      "observation": "The table description contains the status column."
-    }
-  ],
-  "scenarios": [
-    {
-      "evidence_id": "E-2",
-      "scenario_id": "S-1",
-      "purpose": "Representative open-order lookup",
-      "query_text": "SELECT id, status FROM orders LIMIT 20",
-      "tool_call_id": "call-2",
-      "timestamp": "2026-07-22T09:05:01Z",
-      "duration_ms": 42,
-      "arguments": {
-        "connectionId": "gauss-readonly",
-        "databaseName": "orders",
-        "schemaName": "audit",
-        "queryText": "SELECT id, status FROM orders LIMIT 20"
-      },
-      "row_count": 2,
-      "columns": ["id", "status"],
-      "rows": [
-        {"id": 101, "status": "OPEN"},
-        {"id": 102, "status": "OPEN"}
-      ],
-      "result": {
-        "columns": ["id", "status"],
-        "rows": [
-          {"id": 101, "status": "OPEN"},
-          {"id": 102, "status": "OPEN"}
-        ]
-      }
-    }
-  ],
-  "limitations": [
-    "Representative rows do not prove production cardinality or plan stability."
-  ]
+  "data_source": "GaussDB-ReadOnly",
+  "catalog": "orders",
+  "schema": "audit",
+  "project": "/workspace/example",
+  "scope": "ALL",
+  "audit": { "post_hoc": true, "permission_to_execute_original_dml": false, "tool_call_ids": ["call-1", "call-2"] },
+  "metadata": [{
+    "evidence_id": "E-1", "tool_call_id": "call-1", "tool_name": "cmcp_db_database_list_table_schema",
+    "timestamp": "2026-07-22T09:05:00Z", "duration_ms": 10,
+    "arguments": { "project": "/workspace/example", "scope": "ALL", "dataSource": "GaussDB-ReadOnly", "catalog": "orders", "schema": "audit", "includeColumns": true, "includeIndexes": true, "maxTables": 200 },
+    "result": { "catalog": "orders", "schema": "audit", "tables": [{"name": "orders", "type": "TABLE"}] },
+    "observation": "The current table metadata includes the status column."
+  }],
+  "scenarios": [{
+    "evidence_id": "E-2", "scenario_id": "S-1", "purpose": "Representative current open-order lookup",
+    "query_text": "SELECT id, status FROM orders LIMIT 20", "tool_call_id": "call-2", "timestamp": "2026-07-22T09:05:01Z", "duration_ms": 42,
+    "arguments": { "project": "/workspace/example", "scope": "ALL", "dataSource": "GaussDB-ReadOnly", "sql": "SELECT id, status FROM orders LIMIT 20", "maxRows": 20 },
+    "row_count": 2, "columns": ["id", "status"], "rows": [{"id": 101, "status": "OPEN"}, {"id": 102, "status": "OPEN"}],
+    "result": { "columns": ["id", "status"], "rows": [{"id": 101, "status": "OPEN"}, {"id": 102, "status": "OPEN"}] }
+  }],
+  "limitations": ["Current representative rows do not prove production cardinality or plan stability."]
 }

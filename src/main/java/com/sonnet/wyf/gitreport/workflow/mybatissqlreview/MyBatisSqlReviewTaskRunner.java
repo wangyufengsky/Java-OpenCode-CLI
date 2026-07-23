@@ -106,9 +106,9 @@ public final class MyBatisSqlReviewTaskRunner {
                 statement.normalizedSql(),
                 statement.dynamicNodeNames(),
                 statement.parameterPlaceholders(),
-                database.connectionId(),
-                database.databaseName(),
-                database.schemaName(),
+                database.binding().dataSource(),
+                database.binding().catalog(),
+                database.binding().schema(),
                 layout.candidate()
         ));
         Files.writeString(layout.workerPrompt(), prompt, StandardCharsets.UTF_8);
@@ -323,9 +323,9 @@ public final class MyBatisSqlReviewTaskRunner {
         task.put("command_type", commandType(statement));
         task.put("select_key", statement.selectKey());
         task.put("candidate_directory", layout.candidate().toAbsolutePath().normalize().toString());
-        task.put("connection_id", database.connectionId());
-        task.put("database_name", database.databaseName());
-        task.put("schema_name", database.schemaName());
+        task.put("connection_id", database.binding().dataSource());
+        task.put("database_name", database.binding().catalog());
+        task.put("schema_name", database.binding().schema());
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(layout.taskJson().toFile(), task);
     }
 

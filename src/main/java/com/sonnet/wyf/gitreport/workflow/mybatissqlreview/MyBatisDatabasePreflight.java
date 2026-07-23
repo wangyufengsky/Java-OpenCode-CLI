@@ -490,8 +490,6 @@ public final class MyBatisDatabasePreflight {
 
     private record SafetyProbe(long statementTimeoutMs) { }
 
-    public record DatabaseFingerprints(String hostFingerprint, String instanceFingerprint, String topologyFingerprint) { }
-
     public static final class Result {
         private final DatabaseMcpContract.Binding binding;
         private final String databaseSystem;
@@ -514,17 +512,5 @@ public final class MyBatisDatabasePreflight {
         public StatementTimeoutContract statementTimeout() { return statementTimeout; }
         public Set<String> safeBaseRelations() { return safeBaseRelations; }
 
-        public String connectionId() { return binding.dataSource(); }
-        public String databaseName() { return binding.catalog(); }
-        public String schemaName() { return binding.schema(); }
-        public AgentBridgeClient.MyBatisAuditBinding bridgeBinding() {
-            return new AgentBridgeClient.MyBatisAuditBinding(
-                    new AgentBridgeClient.BridgeIdentity(
-                            binding.dataSource(), binding.project().toString(), binding.scope().name()),
-                    "native-database-mcp");
-        }
-        public DatabaseFingerprints databaseFingerprints() {
-            return new DatabaseFingerprints(binding.dataSource(), binding.catalog(), binding.schema());
-        }
     }
 }

@@ -152,7 +152,7 @@ public final class MyBatisSqlOutputValidator {
         requireExactText(evidence, "schema_version", "mybatis-sql-review-database-evidence/v1",
                 "database evidence");
         requireTaskBinding(evidence, expectedTask, "database evidence expected task");
-        for (String field : List.of("connection_id", "database_name", "schema_name")) {
+        for (String field : List.of("data_source", "catalog", "schema", "project", "scope")) {
             requireText(evidence, field, "database evidence");
         }
         JsonNode audit = requireObject(evidence, "audit", "database evidence");
@@ -202,12 +202,12 @@ public final class MyBatisSqlOutputValidator {
             requireText(scenario, "timestamp", "scenario");
             String queryText = requireText(scenario, "query_text", "scenario");
             JsonNode arguments = requireObject(scenario, "arguments", "scenario");
-            requireOfflineDatabaseArguments("execute_sql_query", arguments, evidence, callId);
-            requireExactText(arguments, "queryText", queryText,
+            requireOfflineDatabaseArguments(DatabaseMcpContract.EXECUTE_QUERY, arguments, evidence, callId);
+            requireExactText(arguments, "sql", queryText,
                     "scenario arguments");
             long durationMs = requireNonNegativeLong(scenario, "duration_ms", "scenario");
             MyBatisToolCallAudit.validateDeterminableScenario(
-                    queryText, callId, evidence.path("schema_name").asText(), durationMs
+                    queryText, callId, evidence.path("schema").asText(), durationMs
             );
             JsonNode result = requireObject(scenario, "result", "scenario");
             JsonNode columns = requireArray(scenario, "columns", "scenario");
@@ -255,14 +255,38 @@ public final class MyBatisSqlOutputValidator {
             JsonNode evidence,
             String callId
     ) {
-        MyBatisToolCallAudit.validateDatabaseBinding(
-                toolName,
-                arguments,
-                evidence.path("connection_id").asText(),
-                evidence.path("database_name").asText(),
-                evidence.path("schema_name").asText(),
-                callId
-        );
+        Set<String> allowed = switch (toolName) {
+            case DatabaseMcpContract.LIST_DATASOURCES -> Set.of("project", "scope");
+            case DatabaseMcpContract.LIST_DATABASES -> Set.of("project", "scope", "dataSource");
+            case DatabaseMcpContract.LIST_TABLE_SCHEMA -> Set.of("project", "scope", "dataSource", "catalog", "schema", "includeColumns", "includeIndexes", "maxTables");
+            case DatabaseMcpContract.EXECUTE_QUERY -> Set.of("project", "scope", "dataSource", "sql", "maxRows");
+            default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
+        };
+        arguments.fieldNames().forEachRemaining(field -> {
+            if (!allowed.contains(field)) {
+                throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field);
+            }
+        });
+        for (String field : allowed) {
+            if (arguments.path(field).isMissingNode()) {
+                throw new IllegalStateException("tool call " + callId + " is missing required argument: " + field);
+            }
+        }
+        requireExactText(arguments, "project", evidence.path("project").asText(), "tool call " + callId);
+        requireExactText(arguments, "scope", evidence.path("scope").asText(), "tool call " + callId);
+        if (!DatabaseMcpContract.LIST_DATASOURCES.equals(toolName)) {
+            requireExactText(arguments, "dataSource", evidence.path("data_source").asText(), "tool call " + callId);
+        }
+        if (DatabaseMcpContract.LIST_TABLE_SCHEMA.equals(toolName)) {
+            requireExactText(arguments, "catalog", evidence.path("catalog").asText(), "tool call " + callId);
+            requireExactText(arguments, "schema", evidence.path("schema").asText(), "tool call " + callId);
+        }
+        if (DatabaseMcpContract.EXECUTE_QUERY.equals(toolName)) {
+            JsonNode maxRows = arguments.path("maxRows");
+            if (!maxRows.isIntegralNumber() || maxRows.intValue() != DatabaseMcpContract.MAX_ROWS) {
+                throw new IllegalStateException("tool call " + callId + " maxRows must equal 20");
+            }
+        }
     }
 
     private long requireNonNegativeLong(JsonNode parent, String field, String label) {
@@ -275,9 +299,9 @@ public final class MyBatisSqlOutputValidator {
 
     private String requireMetadataToolName(JsonNode item, String label) {
         String toolName = requireText(item, "tool_name", label);
-        if ("execute_sql_query".equals(toolName)) {
+        if (DatabaseMcpContract.EXECUTE_QUERY.equals(toolName)) {
             throw new IllegalStateException(
-                    "execute_sql_query evidence must be represented as a scenario"
+                    "native database query evidence must be represented as a scenario"
             );
         }
         return toolName;
@@ -388,9 +412,11 @@ public final class MyBatisSqlOutputValidator {
         requireExactText(evidence, "schema_version", "mybatis-sql-review-database-evidence/v1",
                 "database evidence");
         requireTaskBinding(evidence, expectedTask, "database evidence expected task");
-        requireExactText(evidence, "connection_id", database.connectionId(), "preflight database binding");
-        requireExactText(evidence, "database_name", database.databaseName(), "preflight database binding");
-        requireExactText(evidence, "schema_name", database.schemaName(), "preflight database binding");
+        requireExactText(evidence, "data_source", database.binding().dataSource(), "preflight database binding");
+        requireExactText(evidence, "catalog", database.binding().catalog(), "preflight database binding");
+        requireExactText(evidence, "schema", database.binding().schema(), "preflight database binding");
+        requireExactText(evidence, "project", database.binding().project().toString(), "preflight database binding");
+        requireExactText(evidence, "scope", database.binding().scope().name(), "preflight database binding");
 
         JsonNode audit = requireObject(evidence, "audit", "database evidence");
         if (!audit.path("post_hoc").isBoolean() || !audit.path("post_hoc").asBoolean()) {
@@ -439,8 +465,8 @@ public final class MyBatisSqlOutputValidator {
             MyBatisToolCallAudit.AuditedCallFact fact = requireAuditedFact(factsById, callId);
             requireUniqueCallEvidence(representedCallIds, callId);
             requireMetadataToolName(item, "metadata item");
-            if ("execute_sql_query".equals(fact.toolName())) {
-                throw new IllegalStateException("execute_sql_query audited call must be represented as a scenario: " + callId);
+            if (DatabaseMcpContract.EXECUTE_QUERY.equals(fact.toolName())) {
+                throw new IllegalStateException("native database query audited call must be represented as a scenario: " + callId);
             }
             requireExactText(item, "tool_name", fact.toolName(), "metadata for audited call " + callId);
             requireExactText(item, "timestamp", fact.timestamp().toString(), "metadata for audited call " + callId);
@@ -459,18 +485,18 @@ public final class MyBatisSqlOutputValidator {
             String callId = requireText(scenario, "tool_call_id", "scenario");
             MyBatisToolCallAudit.AuditedCallFact fact = requireAuditedFact(factsById, callId);
             requireUniqueCallEvidence(representedCallIds, callId);
-            if (!"execute_sql_query".equals(fact.toolName())) {
-                throw new IllegalStateException("scenario must bind to an audited execute_sql_query call: " + callId);
+            if (!DatabaseMcpContract.EXECUTE_QUERY.equals(fact.toolName())) {
+                throw new IllegalStateException("scenario must bind to an audited native database query call: " + callId);
             }
             requireExactText(scenario, "timestamp", fact.timestamp().toString(), "scenario for audited call " + callId);
             requireExactLong(scenario, "duration_ms", fact.durationMs(), "scenario for audited call " + callId);
-            requireExactText(scenario, "query_text", fact.queryText(), "scenario for audited call " + callId);
+            requireExactText(scenario, "query_text", fact.sql(), "scenario for audited call " + callId);
             requireExactJson(scenario, "arguments", fact.arguments(), "scenario for audited call " + callId);
             requireExactJson(scenario, "result", fact.resultData(), "scenario for audited call " + callId);
             MyBatisToolCallAudit.validateDeterminableScenario(
                     scenario.path("query_text").asText(),
                     callId,
-                    evidence.path("schema_name").asText(),
+                    evidence.path("schema").asText(),
                     scenario.path("duration_ms").asLong(-1)
             );
 

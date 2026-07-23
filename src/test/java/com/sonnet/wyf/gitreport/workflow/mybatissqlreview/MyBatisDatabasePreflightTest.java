@@ -23,6 +23,16 @@ class MyBatisDatabasePreflightTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void exposesOnlyTheVerifiedNativeBindingAndNeverSynthesizesBridgeOrFingerprintFacts() {
+        assertThat(MyBatisDatabasePreflight.Result.class.getDeclaredMethods())
+                .extracting(java.lang.reflect.Method::getName)
+                .doesNotContain("bridgeBinding", "databaseFingerprints", "connectionId", "databaseName", "schemaName");
+        assertThat(MyBatisDatabasePreflight.class.getDeclaredClasses())
+                .extracting(Class::getSimpleName)
+                .doesNotContain("DatabaseFingerprints");
+    }
+
+    @Test
     void verifiesConfiguredDataSourceAndUsesNativeQueryArguments() throws Exception {
         NativeDatabaseBridge bridge = new NativeDatabaseBridge(objectMapper);
         bridge.installNativeDatabaseMcpTools();

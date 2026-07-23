@@ -17,12 +17,15 @@ final class VerifiedMyBatisDatabaseFixture {
     static final AgentBridgeClient.BridgeIdentity BRIDGE_IDENTITY =
             new AgentBridgeClient.BridgeIdentity("instance-a", "project-a", "nonce-a-0123456789");
     static final String POLICY_FINGERPRINT = "sha256:" + "a".repeat(64);
-    static final MyBatisDatabasePreflight.DatabaseFingerprints DATABASE_FINGERPRINTS =
-            new MyBatisDatabasePreflight.DatabaseFingerprints(
+    // Retained only for the not-yet-migrated WorkflowChainTest; Task 4 audit and validator never consume it.
+    static final LegacyDatabaseFingerprints DATABASE_FINGERPRINTS =
+            new LegacyDatabaseFingerprints(
                     "sha256:" + "b".repeat(64), "sha256:" + "c".repeat(64), "sha256:" + "d".repeat(64));
 
     private VerifiedMyBatisDatabaseFixture() {
     }
+
+    record LegacyDatabaseFingerprints(String hostFingerprint, String instanceFingerprint, String topologyFingerprint) { }
 
     static MyBatisDatabasePreflight.Result verified(ObjectMapper objectMapper) {
         return verified(objectMapper, "GaussDB-ReadOnly", "orders", "audit", Set.of("orders", "line_items"));

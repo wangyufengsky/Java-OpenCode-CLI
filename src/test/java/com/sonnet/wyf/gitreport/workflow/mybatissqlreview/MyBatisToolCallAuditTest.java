@@ -7,536 +7,155 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Modifier;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MyBatisToolCallAuditTest {
-    private static final Instant STARTED_AT = Instant.parse("2026-07-22T09:00:00Z");
+    private static final Instant STARTED_AT = Instant.parse("2026-07-23T09:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisToolCallAudit audit = new MyBatisToolCallAudit(objectMapper);
-    private final MyBatisDatabasePreflight.Result database =
-            VerifiedMyBatisDatabaseFixture.verified(objectMapper);
+    private final MyBatisDatabasePreflight.Result database = VerifiedMyBatisDatabaseFixture.verified(objectMapper);
 
     @Test
-    void auditsOnlyCompletePostTaskHistoryDifferenceAndReturnsImmutableFacts() {
-        AgentBridgeClient.ToolCallRecord oldCall = callAt(
-                "old-call", "list_database_connections", objectMapper.createObjectNode(),
-                objectMapper.createObjectNode().put("count", 1), STARTED_AT.minusSeconds(5), 5L);
-        AgentBridgeClient.ToolCallRecord newCall = sqlCall(
-                "new-call", "SELECT id FROM orders LIMIT 2", 2);
-
+    void acceptsBoundedNativeQueryCall() {
         MyBatisToolCallAudit.Result result = audit.audit(
-                List.of(oldCall, newCall),
-                new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of("old-call")),
-                database,
-                selectStatement()
-        );
+                List.of(call("query-1", DatabaseMcpContract.EXECUTE_QUERY,
+                        nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2"), rows(2))),
+                boundary(), database, selectStatement());
 
-        assertThat(result.auditedCallIds()).containsExactly("new-call");
-        assertThat(result.queryScenarioCount()).isEqualTo(1);
-        assertThat(result.calls()).singleElement().satisfies(fact -> {
-            assertThat(fact.toolName()).isEqualTo("execute_sql_query");
-            assertThat(fact.connectionId()).isEqualTo("gauss-readonly");
-            assertThat(fact.queryText()).isEqualTo("SELECT id FROM orders LIMIT 2");
-            assertThat(fact.columns()).containsExactly("id");
+        assertThat(result.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.toolName()).isEqualTo(DatabaseMcpContract.EXECUTE_QUERY);
+            assertThat(fact.dataSource()).isEqualTo("GaussDB-ReadOnly");
+            assertThat(fact.catalog()).isEqualTo("orders");
+            assertThat(fact.schema()).isEqualTo("audit");
+            assertThat(fact.project()).isEqualTo(database.binding().project().toString());
+            assertThat(fact.scope()).isEqualTo(database.binding().scope().name());
+            assertThat(fact.sql()).isEqualTo("SELECT id FROM audit.orders LIMIT 2");
+            assertThat(fact.maxRows()).isEqualTo(20);
             assertThat(fact.rows()).hasSize(2);
         });
     }
 
-    @Test
-    void hidesFactAndResultConstructionAndDerivesScenarioCountFromCalls() {
-        assertThat(MyBatisToolCallAudit.AuditedCallFact.class.getDeclaredConstructors())
-                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
-        assertThat(MyBatisToolCallAudit.Result.class.getDeclaredConstructors())
-                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()))
-                .allMatch(constructor -> Arrays.stream(constructor.getParameterTypes())
-                        .noneMatch(type -> type == int.class || type == Integer.class));
-
-        MyBatisToolCallAudit.Result result = audit.audit(
-                List.of(
-                        call("metadata", "list_schema_objects", databaseArguments(),
-                                objectMapper.createObjectNode()),
-                        sqlCall("query", "SELECT id FROM orders LIMIT 1", 1)
-                ),
-                boundary(), database, selectStatement()
-        );
-
-        assertThat(result.queryScenarioCount()).isEqualTo(1);
-    }
-
-    @Test
-    void returnsDefensiveCopiesOfEveryMutableAuditNodeAndRow() {
-        ObjectNode arguments = databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1");
-        ObjectNode toolResult = rows(1);
-        MyBatisToolCallAudit.Result result = audit.audit(
-                List.of(call("immutable", "execute_sql_query", arguments, toolResult)),
-                boundary(), database, selectStatement()
-        );
-        MyBatisToolCallAudit.AuditedCallFact fact = result.calls().getFirst();
-
-        arguments.put("schemaName", "mutated-original");
-        ((ObjectNode) toolResult.at("/rows/0")).put("id", 700);
-        ((ObjectNode) fact.arguments()).put("schemaName", "mutated-accessor");
-        ((ObjectNode) fact.resultData()).put("invented", true);
-        ((ObjectNode) fact.rows().getFirst()).put("id", 900);
-
-        assertThat(fact.arguments().path("schemaName").asText()).isEqualTo("audit");
-        assertThat(fact.resultData().has("invented")).isFalse();
-        assertThat(fact.resultData().at("/rows/0/id").asInt()).isEqualTo(1);
-        assertThat(fact.rows().getFirst().path("id").asInt()).isEqualTo(1);
-        assertThatThrownBy(() -> result.calls().add(fact)).isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    @Test
-    void rejectsIncompleteHistoryDuplicateNewIdsAndMissingIdentityFields() {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            DatabaseMcpContract.EXECUTE_DML,
+            DatabaseMcpContract.EXECUTE_DDL,
+            DatabaseMcpContract.EXECUTE_NOSQL_WRITE_DELETE,
+            DatabaseMcpContract.EXECUTE_NOSQL_QUERY,
+            "unknown_database_tool"
+    })
+    void rejectsEveryWriteOrNosqlTool(String toolName) {
         assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("new-call", "SELECT id FROM orders LIMIT 1", 1)),
-                new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of("missing-old-call")),
-                database,
-                selectStatement()
-        )).hasMessageContaining("incomplete tool-call history");
-
-        AgentBridgeClient.ToolCallRecord duplicate = sqlCall("duplicate", "SELECT id FROM orders LIMIT 1", 1);
-        assertThatThrownBy(() -> audit.audit(
-                List.of(duplicate, duplicate), boundary(), database, selectStatement()))
-                .hasMessageContaining("duplicate tool-call id");
-
-        AgentBridgeClient.ToolCallRecord missingTimestamp = new AgentBridgeClient.ToolCallRecord(
-                "missing-time", "SQL", "execute_sql_query", "mcp", "completed", null,
-                databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1"), rows(1), 1L,
-                objectMapper.createObjectNode());
-        assertThatThrownBy(() -> audit.audit(
-                List.of(missingTimestamp), boundary(), database, selectStatement()))
-                .hasMessageContaining("missing id or timestamp");
-    }
-
-    @Test
-    void rejectsHistoryFromAnotherBridgePolicyDatabaseOrTopology() {
-        AgentBridgeClient.ToolCallRecord valid = sqlCall(
-                "bound", "SELECT id FROM orders LIMIT 1", 1);
-        assertThatThrownBy(() -> audit.audit(
-                List.of(withBinding(valid, "other-instance", valid.policyFingerprint(),
-                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
-                        valid.topologyFingerprint())),
+                List.of(call("unsafe", toolName, objectMapper.createObjectNode(), rows(0))),
                 boundary(), database, selectStatement()))
-                .hasMessageContaining("AgentBridge identity");
-
-        assertThatThrownBy(() -> audit.audit(
-                List.of(withBinding(valid, valid.bridgeInstanceId(), "sha256:" + "e".repeat(64),
-                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
-                        valid.topologyFingerprint())),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("policy fingerprint");
-
-        assertThatThrownBy(() -> audit.audit(
-                List.of(withBinding(valid, valid.bridgeInstanceId(), valid.policyFingerprint(),
-                        valid.databaseHostFingerprint(), valid.databaseInstanceFingerprint(),
-                        "sha256:" + "f".repeat(64))),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("host/instance/topology fingerprint");
+                .hasMessageContaining("unapproved tool");
     }
 
     @Test
-    void acceptsBoundMetadataPreviewAndThreeReadOnlyScenarios() {
-        List<AgentBridgeClient.ToolCallRecord> calls = List.of(
-                call("call-1", "list_schema_objects", databaseArguments(), objectMapper.createObjectNode()),
-                call("call-2", "preview_table_data", previewArguments("orders"), rows(2)),
-                sqlCall("call-3", "SELECT id FROM orders LIMIT 20", 20),
-                sqlCall("call-4", "SELECT id, status FROM orders LIMIT 10", 10),
-                sqlCall("call-5", "SELECT * FROM audit.orders AS orders LIMIT 1", 1)
-        );
+    void requiresExactNativeQueryArgumentsAndReadOnlySelectContext() {
+        ObjectNode wrongMaxRows = nativeQueryArguments("SELECT id FROM orders LIMIT 2").put("maxRows", 2);
+        assertThatThrownBy(() -> audit.audit(List.of(call("wrong-limit", DatabaseMcpContract.EXECUTE_QUERY,
+                wrongMaxRows, rows(1))), boundary(), database, selectStatement()))
+                .hasMessageContaining("maxRows");
 
-        MyBatisToolCallAudit.Result result = audit.audit(calls, boundary(), database, selectStatement());
+        ObjectNode extra = nativeQueryArguments("SELECT id FROM orders LIMIT 2").put("catalog", "orders");
+        assertThatThrownBy(() -> audit.audit(List.of(call("extra", DatabaseMcpContract.EXECUTE_QUERY,
+                extra, rows(1))), boundary(), database, selectStatement()))
+                .hasMessageContaining("unsupported argument");
 
-        assertThat(result.auditedCallIds()).containsExactly("call-1", "call-2", "call-3", "call-4", "call-5");
-        assertThat(result.queryScenarioCount()).isEqualTo(3);
-    }
-
-    @Test
-    void resolvesUnqualifiedAndQualifiedConfiguredSchemaBaseTables() {
-        MyBatisToolCallAudit.Result result = audit.audit(
-                List.of(
-                        sqlCall("unqualified", "SELECT id FROM orders LIMIT 1", 1),
-                        sqlCall("qualified", "SELECT id FROM audit.line_items LIMIT 1", 1),
-                        call("preview", "preview_table_data", previewArguments("line_items"), rows(1))
-                ),
-                boundary(), database, selectStatement()
-        );
-
-        assertThat(result.auditedCallIds()).containsExactly("unqualified", "qualified", "preview");
-    }
-
-    @ParameterizedTest(name = "rejects non-base relation: {0}")
-    @MethodSource("unsafeRelations")
-    void rejectsViewsMaterializedForeignUnknownAndOtherSchemaRelations(String label, String relation) {
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("unsafe-relation", "SELECT id FROM " + relation + " LIMIT 1", 1)),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("safe base relation")
-                .hasMessageContaining(label);
-    }
-
-    private static Stream<Arguments> unsafeRelations() {
-        return Stream.of(
-                Arguments.of("orders_view", "orders_view"),
-                Arguments.of("orders_materialized", "orders_materialized"),
-                Arguments.of("orders_foreign", "orders_foreign"),
-                Arguments.of("orders_unknown", "orders_unknown"),
-                Arguments.of("public.orders", "public.orders")
-        );
-    }
-
-    @Test
-    void rejectsPreviewOfViewAndMissingPreviewRelation() {
-        assertThatThrownBy(() -> audit.audit(
-                List.of(call(
-                        "preview-view", "preview_table_data", previewArguments("orders_view"), rows(1))),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("safe base relation")
-                .hasMessageContaining("orders_view");
-
-        assertThatThrownBy(() -> audit.audit(
-                List.of(call("preview-missing", "preview_table_data", databaseArguments(), rows(1))),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("tableName");
-    }
-
-    @Test
-    void requiresExactlyOneSupportedIntegralPreviewLimitFromOneThroughTwenty() {
-        ObjectNode missing = databaseArguments().put("tableName", "orders");
-        assertThatThrownBy(() -> audit.audit(
-                List.of(call("preview-missing-limit", "preview_table_data", missing, rows(1))),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("maxRowCount");
-
-        for (JsonNode invalid : List.of(
-                objectMapper.getNodeFactory().numberNode(0),
-                objectMapper.getNodeFactory().numberNode(21),
-                objectMapper.getNodeFactory().numberNode(1.5),
-                objectMapper.getNodeFactory().textNode("20"),
-                objectMapper.getNodeFactory().booleanNode(true)
-        )) {
-            ObjectNode arguments = previewArguments("orders").set("maxRowCount", invalid);
-            assertThatThrownBy(() -> audit.audit(
-                    List.of(call("preview-invalid-limit", "preview_table_data", arguments, rows(1))),
-                    boundary(), database, selectStatement()))
-                    .hasMessageContaining("maxRowCount")
-                    .hasMessageContaining("1..20");
-        }
-
-        for (String unsupportedField : List.of("limit", "rowLimit", "pageSize", "maxRows")) {
-            ObjectNode arguments = previewArguments("orders").put(unsupportedField, 10);
-            assertThatThrownBy(() -> audit.audit(
-                    List.of(call("preview-unknown-limit", "preview_table_data", arguments, rows(1))),
-                    boundary(), database, selectStatement()))
-                    .hasMessageContaining("unsupported preview argument")
-                    .hasMessageContaining(unsupportedField);
-        }
-
-        assertThat(audit.audit(
-                List.of(
-                        call("preview-one", "preview_table_data",
-                                previewArguments("orders").put("maxRowCount", 1), rows(1)),
-                        call("preview-twenty", "preview_table_data",
-                                previewArguments("orders").put("maxRowCount", 20), rows(20))
-                ), boundary(), database, selectStatement()).auditedCallIds())
-                .containsExactly("preview-one", "preview-twenty");
-    }
-
-    @ParameterizedTest(name = "rejects SQL: {0}")
-    @MethodSource("forbiddenSql")
-    void rejectsUnsafeOrAmbiguousPostgresqlGaussSql(String label, String sql) {
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("call-unsafe", sql, 1)), boundary(), database, selectStatement()))
-                .hasMessageContaining("rejected");
-    }
-
-    private static Stream<Arguments> forbiddenSql() {
-        return Stream.of(
-                Arguments.of("read-only SELECT", "INSERT INTO orders(id) VALUES (1)"),
-                Arguments.of("read-only SELECT", "UPDATE orders SET status = 'DONE'"),
-                Arguments.of("read-only SELECT", "DELETE FROM orders"),
-                Arguments.of("multiple statements", "SELECT 1 LIMIT 1; SELECT 2 LIMIT 1"),
-                Arguments.of("locking clause", "SELECT id FROM orders LIMIT 1 FOR UPDATE"),
-                Arguments.of("locking clause", "SELECT id FROM orders LIMIT 1 FOR NO KEY UPDATE"),
-                Arguments.of("locking clause", "SELECT id FROM orders LIMIT 1 FOR KEY SHARE"),
-                Arguments.of("SELECT INTO", "SELECT id INTO archived_orders FROM orders LIMIT 1"),
-                Arguments.of("COPY", "COPY orders TO '/tmp/orders.csv'"),
-                Arguments.of("CALL", "CALL refresh_orders()"),
-                Arguments.of("DDL", "CREATE TABLE unsafe(id int)"),
-                Arguments.of("DML CTE", "WITH changed AS (DELETE FROM orders RETURNING id) SELECT id FROM changed LIMIT 1"),
-                Arguments.of("main statement", "WITH found AS (SELECT id FROM orders) UPDATE orders SET status='X'"),
-                Arguments.of("dollar-quoted", "SELECT $$x; DELETE FROM orders$$ LIMIT 1"),
-                Arguments.of("dollar-quoted", "SELECT $tag$x$tag$ LIMIT 1"),
-                Arguments.of("unsupported string prefix", "SELECT E'\\x41' LIMIT 1"),
-                Arguments.of("unsupported string prefix", "SELECT B'1010' LIMIT 1"),
-                Arguments.of("unsupported string prefix", "SELECT X'FF' LIMIT 1"),
-                Arguments.of("unsupported string prefix", "SELECT U&'d\\0061t' LIMIT 1"),
-                Arguments.of("nested block comment", "SELECT 1 /* outer /* inner */ end */ LIMIT 1"),
-                Arguments.of("quoted function", "SELECT \"count\"(*) FROM orders LIMIT 1"),
-                Arguments.of("schema-qualified function", "SELECT pg_catalog.count(*) FROM orders LIMIT 1"),
-                Arguments.of("schema-qualified function", "SELECT \"pg_catalog\".\"count\"(*) FROM orders LIMIT 1"),
-                Arguments.of("schema-qualified function", "SELECT pg_catalog./*review*/pg_sleep(1) LIMIT 1"),
-                Arguments.of("function is not allowlisted", "SELECT mystery(id) FROM orders LIMIT 1"),
-                Arguments.of("function is not allowlisted", "SELECT nextval('orders_seq') LIMIT 1"),
-                Arguments.of("function is not allowlisted", "SELECT pg_terminate_backend(42) LIMIT 1"),
-                Arguments.of("literal top-level LIMIT", "SELECT id FROM orders LIMIT 20 + 100")
-        );
-    }
-
-    @ParameterizedTest(name = "rejects catalog-resolved expression: {0}")
-    @MethodSource("catalogResolvedExpressions")
-    void rejectsCastsOperatorsFunctionsAndWhereInsteadOfPreservingConvenience(String label, String sql) {
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("catalog-expression", sql, 1)), boundary(), database, selectStatement()))
-                .hasMessageContaining("simple-read grammar").hasMessageContaining(label);
-    }
-
-    private static Stream<Arguments> catalogResolvedExpressions() {
-        return Stream.of(
-                Arguments.of("CAST", "SELECT CAST('x' AS public.evil_type) FROM orders LIMIT 1"),
-                Arguments.of("cast", "SELECT payload::public.evil_type FROM orders LIMIT 1"),
-                Arguments.of("operator", "SELECT 1 !! 2 FROM orders LIMIT 1"),
-                Arguments.of("operator", "SELECT left_value + right_value FROM custom_values LIMIT 1"),
-                Arguments.of("operator", "SELECT left_value = right_value FROM custom_values LIMIT 1"),
-                Arguments.of("operator", "SELECT left_value || right_value FROM custom_values LIMIT 1"),
-                Arguments.of("function", "SELECT COUNT(*) FROM orders LIMIT 1"),
-                Arguments.of("WHERE", "SELECT id FROM orders WHERE id = 1 LIMIT 1")
-        );
-    }
-
-    @Test
-    void allowsOnlyPlainColumnsFromAndLiteralLimitWhileIgnoringComments() {
-        AgentBridgeClient.ToolCallRecord safe = sqlCall("call-simple-read", """
-                SELECT orders.id, orders.status
-                FROM audit.orders AS orders
-                /* DELETE FROM orders; SELECT nextval('unsafe') */
-                -- CALL unsafe();
-                LIMIT 1
-                """, 1);
-
-        assertThat(audit.audit(List.of(safe), boundary(), database, selectStatement()).queryScenarioCount())
-                .isEqualTo(1);
-    }
-
-    @Test
-    void rejectsMissingOrOversizedLimitMoreThanThreeScenariosAndWrongBinding() {
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("call-no-limit", "SELECT id FROM orders", 1)),
-                boundary(), database, selectStatement())).hasMessageContaining("top-level LIMIT");
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("call-big-limit", "SELECT id FROM orders LIMIT 21", 1)),
-                boundary(), database, selectStatement())).hasMessageContaining("LIMIT <= 20");
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("call-inner-only", """
-                        WITH recent AS (SELECT id FROM orders LIMIT 20)
-                        SELECT id FROM recent
-                        """, 1)), boundary(), database, selectStatement()))
-                .hasMessageContaining("simple-read grammar");
-
-        List<AgentBridgeClient.ToolCallRecord> fourScenarios = new ArrayList<>();
-        for (int index = 1; index <= 4; index++) {
-            fourScenarios.add(sqlCall("call-" + index, "SELECT id FROM orders LIMIT 1", 1));
-        }
-        assertThatThrownBy(() -> audit.audit(fourScenarios, boundary(), database, selectStatement()))
-                .hasMessageContaining("at most 3");
-
-        ObjectNode wrongSchema = databaseArguments().put("schemaName", "public");
-        assertThatThrownBy(() -> audit.audit(List.of(call(
-                "call-wrong-schema", "execute_sql_query",
-                wrongSchema.put("queryText", "SELECT 1 LIMIT 1"), rows(1))),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("bound database target");
-    }
-
-    @Test
-    void enforcesThirtySecondActualDurationAndRejectsAllSelectKeyQueries() {
-        AgentBridgeClient.ToolCallRecord slow = callAt(
-                "slow", "execute_sql_query",
-                databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1"),
-                rows(1), STARTED_AT.plusSeconds(1), 30_001L);
-        assertThatThrownBy(() -> audit.audit(
-                List.of(slow), boundary(), database, selectStatement()))
-                .hasMessageContaining("30000 ms");
-
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("select-key", "SELECT id FROM orders LIMIT 1", 1)),
-                boundary(), database,
-                new MyBatisToolCallAudit.StatementContext("key-generator", "select", true)))
+        assertThatThrownBy(() -> audit.audit(List.of(call("dml-context", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 2"), rows(1))), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext("update-orders", "update", false)))
+                .hasMessageContaining("DML tasks");
+        assertThatThrownBy(() -> audit.audit(List.of(call("select-key", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 2"), rows(1))), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext("select-key", "select", true)))
                 .hasMessageContaining("selectKey");
+    }
 
-        MyBatisToolCallAudit.Result dmlAuxiliarySelect = audit.audit(
-                List.of(sqlCall("dml-evidence", "SELECT id FROM orders LIMIT 1", 1)),
-                boundary(), database,
-                new MyBatisToolCallAudit.StatementContext("update-order", "update", false));
-        assertThat(dmlAuxiliarySelect.queryScenarioCount()).isEqualTo(1);
+    @Test
+    void acceptsArrayResultAndRejectsRowsBeyondTheBound() {
+        ArrayNode array = objectMapper.createArrayNode();
+        array.addObject().put("id", 1);
+        assertThat(audit.audit(List.of(call("array", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 1"), array)), boundary(), database,
+                selectStatement()).facts().getFirst().rows()).hasSize(1);
+
+        assertThatThrownBy(() -> audit.audit(List.of(call("too-many", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments("SELECT id FROM orders LIMIT 20"), rows(21))), boundary(), database,
+                selectStatement())).hasMessageContaining("at most 20 rows");
     }
 
     @ParameterizedTest
-    @MethodSource("supportedResultWrappers")
-    void parsesOnlyExplicitlySupportedExecuteAndPreviewResultWrappers(String fixture) throws Exception {
-        JsonNode result = fixture(fixture);
-        AgentBridgeClient.ToolCallRecord call = call(
-                "wrapped", "execute_sql_query",
-                databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 2"), result);
-
-        MyBatisToolCallAudit.AuditedCallFact fact = audit.audit(
-                List.of(call), boundary(), database, selectStatement()).calls().getFirst();
-
-        assertThat(fact.columns()).containsExactly("id");
-        assertThat(fact.rows()).hasSize(2);
-    }
-
-    private static Stream<String> supportedResultWrappers() {
-        return Stream.of(
-                "tool-result-direct.json",
-                "tool-result-structured.json",
-                "tool-result-content-text.json",
-                "tool-result-json-string.json"
-        );
+    @ValueSource(strings = {
+            "INSERT INTO orders(id) VALUES (1)",
+            "UPDATE orders SET status = 'DONE'",
+            "DELETE FROM orders",
+            "SELECT id FROM orders LIMIT 1 FOR UPDATE",
+            "SELECT id INTO archived_orders FROM orders LIMIT 1",
+            "COPY orders TO '/tmp/orders.csv'",
+            "CALL refresh_orders()",
+            "CREATE TABLE unsafe(id int)",
+            "WITH changed AS (DELETE FROM orders RETURNING id) SELECT id FROM changed LIMIT 1",
+            "SELECT id FROM public.orders LIMIT 1",
+            "SELECT id FROM orders LIMIT 21",
+            "SELECT id FROM orders"
+    })
+    void rejectsDmlDdlLocksAndUnsafeOrUnboundedRelations(String sql) {
+        assertThatThrownBy(() -> audit.audit(List.of(call("unsafe-sql", DatabaseMcpContract.EXECUTE_QUERY,
+                nativeQueryArguments(sql), rows(1))), boundary(), database, selectStatement()))
+                .hasMessageContaining("rejected");
     }
 
     @Test
-    void rejectsUnknownResultWrappersAndMoreThanTwentyActualRows() {
-        ObjectNode unknown = objectMapper.createObjectNode();
-        unknown.putObject("data").set("items", rows(1).path("rows"));
-        assertThatThrownBy(() -> audit.audit(List.of(call(
-                "unknown", "execute_sql_query",
-                databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1"), unknown)),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("unsupported result wrapper");
+    void acceptsOnlyStrictlyBoundMetadataArguments() {
+        ObjectNode metadata = commonArguments();
+        assertThat(audit.audit(List.of(call("sources", DatabaseMcpContract.LIST_DATASOURCES, metadata,
+                objectMapper.createArrayNode())), boundary(), database, selectStatement()).facts())
+                .singleElement().extracting(MyBatisToolCallAudit.AuditedCallFact::toolName)
+                .isEqualTo(DatabaseMcpContract.LIST_DATASOURCES);
 
-        assertThatThrownBy(() -> audit.audit(
-                List.of(sqlCall("too-many", "SELECT id FROM orders LIMIT 20", 21)),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("at most 20 rows");
-    }
-
-    @Test
-    void rejectsSerializedSqlToolResultEvidenceAbove262144Bytes() {
-        ObjectNode oversized = rows(1);
-        oversized.put("padding", "x".repeat(262_144));
-
-        assertThatThrownBy(() -> audit.audit(
-                List.of(call(
-                        "oversized-result",
-                        "execute_sql_query",
-                        databaseArguments().put("queryText", "SELECT id FROM orders LIMIT 1"),
-                        oversized
-                )), boundary(), database, selectStatement()))
-                .hasMessageContaining("262144 bytes");
-    }
-
-    @Test
-    void rejectsUnapprovedToolsAndNonCompletedOrIncompleteNewCalls() {
-        assertThatThrownBy(() -> audit.audit(List.of(call(
-                "shell", "run_command", objectMapper.createObjectNode(), objectMapper.createObjectNode())),
-                boundary(), database, selectStatement()))
-                .hasMessageContaining("unapproved tool");
-
-        AgentBridgeClient.ToolCallRecord missingDuration = callAt(
-                "no-duration", "list_database_connections", objectMapper.createObjectNode(),
-                objectMapper.createObjectNode(), STARTED_AT.plusSeconds(1), null);
-        assertThatThrownBy(() -> audit.audit(
-                List.of(missingDuration), boundary(), database, selectStatement()))
-                .hasMessageContaining("durationMs");
-    }
-
-    private MyBatisToolCallAudit.StatementContext selectStatement() {
-        return new MyBatisToolCallAudit.StatementContext("mapper-order-find", "select", false);
+        ObjectNode badMetadata = commonArguments().put("dataSource", database.binding().dataSource());
+        assertThatThrownBy(() -> audit.audit(List.of(call("bad-sources", DatabaseMcpContract.LIST_DATASOURCES,
+                badMetadata, objectMapper.createArrayNode())), boundary(), database, selectStatement()))
+                .hasMessageContaining("unsupported argument");
     }
 
     private MyBatisToolCallAudit.Boundary boundary() {
         return new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of());
     }
 
-    private AgentBridgeClient.ToolCallRecord sqlCall(String id, String sql, int rowCount) {
-        return call(id, "execute_sql_query", databaseArguments().put("queryText", sql), rows(rowCount));
+    private MyBatisToolCallAudit.StatementContext selectStatement() {
+        return new MyBatisToolCallAudit.StatementContext("mapper-order-find", "select", false);
     }
 
-    private AgentBridgeClient.ToolCallRecord call(String id, String name, JsonNode arguments, JsonNode result) {
-        return callAt(id, name, arguments, result, STARTED_AT.plusSeconds(30), 12L);
-    }
-
-    private AgentBridgeClient.ToolCallRecord callAt(
-            String id,
-            String name,
-            JsonNode arguments,
-            JsonNode result,
-            Instant timestamp,
-            Long durationMs
-    ) {
-        AgentBridgeClient.MyBatisAuditBinding binding = database.bridgeBinding();
-        MyBatisDatabasePreflight.DatabaseFingerprints fingerprints = database.databaseFingerprints();
-        return new AgentBridgeClient.ToolCallRecord(
-                id, name, name, "mcp", "completed", timestamp,
-                arguments, result, durationMs, objectMapper.createObjectNode(),
-                binding.identity().instanceId(),
-                binding.identity().projectId(),
-                binding.identity().instanceNonce(),
-                binding.policyFingerprint(),
-                fingerprints.hostFingerprint(),
-                fingerprints.instanceFingerprint(),
-                fingerprints.topologyFingerprint());
-    }
-
-    private AgentBridgeClient.ToolCallRecord withBinding(
-            AgentBridgeClient.ToolCallRecord source,
-            String instanceId,
-            String policyFingerprint,
-            String hostFingerprint,
-            String instanceFingerprint,
-            String topologyFingerprint
-    ) {
-        return new AgentBridgeClient.ToolCallRecord(
-                source.id(), source.title(), source.toolName(), source.kind(), source.status(),
-                source.timestamp(), source.arguments(), source.result(), source.durationMs(), source.hooks(),
-                instanceId, source.bridgeProjectId(), source.bridgeInstanceNonce(), policyFingerprint,
-                hostFingerprint, instanceFingerprint, topologyFingerprint);
-    }
-
-    private ObjectNode databaseArguments() {
+    private ObjectNode commonArguments() {
         return objectMapper.createObjectNode()
-                .put("connectionId", "gauss-readonly")
-                .put("databaseName", "orders")
-                .put("schemaName", "audit");
+                .put("project", database.binding().project().toString())
+                .put("scope", database.binding().scope().name());
     }
 
-    private ObjectNode previewArguments(String tableName) {
-        return databaseArguments()
-                .put("tableName", tableName)
-                .put("maxRowCount", 20);
+    private ObjectNode nativeQueryArguments(String sql) {
+        return commonArguments().put("dataSource", database.binding().dataSource())
+                .put("sql", sql).put("maxRows", DatabaseMcpContract.MAX_ROWS);
     }
 
     private ObjectNode rows(int count) {
         ObjectNode result = objectMapper.createObjectNode();
         result.putArray("columns").add("id");
         ArrayNode rows = result.putArray("rows");
-        for (int index = 0; index < count; index++) {
-            rows.addObject().put("id", index + 1);
-        }
+        for (int index = 1; index <= count; index++) rows.addObject().put("id", index);
         return result;
     }
 
-    private JsonNode fixture(String name) throws IOException {
-        try (InputStream input = getClass().getResourceAsStream("/mybatis-sql-review-fixtures/" + name)) {
-            if (input == null) {
-                throw new IllegalStateException("missing fixture " + name);
-            }
-            return objectMapper.readTree(input);
-        }
+    private AgentBridgeClient.ToolCallRecord call(String id, String toolName, JsonNode arguments, JsonNode result) {
+        return new AgentBridgeClient.ToolCallRecord(id, toolName, toolName, "mcp", "completed",
+                STARTED_AT.plusSeconds(1), arguments, result, 10L, objectMapper.createObjectNode());
     }
 }
