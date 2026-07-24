@@ -36,6 +36,8 @@ Database credentials, permissions, and timeout enforcement are the hard safety b
 
 Treat returned rows as representative evidence, not proof of production cardinality, selectivity, or plan stability. Record actual native tool names, normalized arguments, audited tool-call ids, results, and limitations. The UTF-8 encoded `database-evidence.json` must not exceed 262144 bytes.
 
+Use `write_file` only for the three exact candidate output paths.
+
 Write only the three exact absolute output paths in the runtime task context:
 
 1. `report.md`

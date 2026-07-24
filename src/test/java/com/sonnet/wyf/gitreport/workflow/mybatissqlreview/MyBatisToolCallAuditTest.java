@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -50,6 +51,48 @@ class MyBatisToolCallAuditTest {
 
         assertThatThrownBy(() -> audit.audit(List.of(callWithStatus("failed", "failed", rows(1))),
                 boundary(), database, selectStatement())).hasMessageContaining("not successful");
+    }
+
+    @Test
+    void allowsSuccessfulReportWritesWithoutTreatingThemAsDatabaseEvidence() {
+        Path candidateDirectory = Path.of("/workspace/out");
+        AgentBridgeClient.ToolCallRecord reportWrite = call(
+                "write-report",
+                "write_file",
+                objectMapper.createObjectNode()
+                        .put("path", candidateDirectory.resolve("report.md").toString())
+                        .put("content", "review"),
+                objectMapper.getNodeFactory().textNode("Created /workspace/out/report.md")
+        );
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(reportWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, candidateDirectory
+                )
+        );
+
+        assertThat(result.facts()).isEmpty();
+        assertThat(result.auditedCallIds()).isEmpty();
+    }
+
+    @Test
+    void rejectsReportWritesOutsideTheCurrentCandidateDirectory() {
+        AgentBridgeClient.ToolCallRecord wrongWrite = call(
+                "write-elsewhere",
+                "write_file",
+                objectMapper.createObjectNode()
+                        .put("path", "/workspace/elsewhere/report.md")
+                        .put("content", "review"),
+                objectMapper.getNodeFactory().textNode("Created /workspace/elsewhere/report.md")
+        );
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(wrongWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, Path.of("/workspace/out")
+                )
+        )).hasMessageContaining("candidate output path");
     }
 
     @Test

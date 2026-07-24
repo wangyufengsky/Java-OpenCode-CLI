@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -20,6 +21,7 @@ public final class MyBatisToolCallAudit {
     public static final int MAX_ROWS_PER_CALL = DatabaseMcpContract.MAX_ROWS;
     public static final long MAX_QUERY_DURATION_MS = 30_000L;
     public static final int MAX_TOOL_RESULT_BYTES = 262_144;
+    private static final String REPORT_WRITE_TOOL = String.join("", "write", "_file");
 
     private final ObjectMapper objectMapper;
     private final ReadOnlySqlPolicy sqlPolicy = new ReadOnlySqlPolicy(MAX_ROWS_PER_CALL);
@@ -68,6 +70,10 @@ public final class MyBatisToolCallAudit {
             }
             if (call.timestamp().isBefore(boundary.startedAt())) throw violation(call, "incomplete pre-task id snapshot contains an unknown old call");
             requireSuccessful(call);
+            if (REPORT_WRITE_TOOL.equals(call.toolName())) {
+                requireCandidateReportWrite(call, statement);
+                continue;
+            }
             if (!DatabaseMcpContract.readTools().contains(call.toolName())) {
                 throw violation(call, "unapproved tool: " + call.toolName());
             }
@@ -95,6 +101,40 @@ public final class MyBatisToolCallAudit {
             throw new IllegalStateException("incomplete tool-call history; missing preexisting call ids: " + missing);
         }
         return new Result(facts, statement, database);
+    }
+
+    private static void requireCandidateReportWrite(
+            AgentBridgeClient.ToolCallRecord call,
+            StatementContext statement
+    ) {
+        JsonNode arguments = call.arguments();
+        if (arguments == null || !arguments.isObject()
+                || !arguments.path("content").isTextual()) {
+            throw violation(call, "report write must contain structured path and content arguments");
+        }
+        String path = arguments.path("path").asText("").strip();
+        if (path.isEmpty()) {
+            path = arguments.path("file").asText("").strip();
+        }
+        Path candidateDirectory = statement.candidateDirectory();
+        Path target;
+        try {
+            target = Path.of(path);
+        } catch (RuntimeException exception) {
+            throw violation(call, "report write must target a candidate output path");
+        }
+        if (candidateDirectory == null || path.isEmpty() || !target.isAbsolute()) {
+            throw violation(call, "report write must target a candidate output path");
+        }
+        Path candidate = candidateDirectory.toAbsolutePath().normalize();
+        Set<Path> allowed = Set.of(
+                candidate.resolve("report.md"),
+                candidate.resolve("summary.json"),
+                candidate.resolve("database-evidence.json")
+        );
+        if (!allowed.contains(target.normalize())) {
+            throw violation(call, "report write must target a candidate output path");
+        }
     }
 
     private static void requireReadTool(String toolName, String callId) {
@@ -205,7 +245,26 @@ public final class MyBatisToolCallAudit {
     private static IllegalStateException violation(AgentBridgeClient.ToolCallRecord call, String message) { return new IllegalStateException("tool call " + call.id() + " rejected: " + message); }
 
     public record Boundary(Instant startedAt, Set<String> preexistingCallIds) { public Boundary { Objects.requireNonNull(startedAt, "startedAt"); preexistingCallIds = Set.copyOf(preexistingCallIds == null ? Set.of() : preexistingCallIds); } }
-    public record StatementContext(String statementKey, String commandType, boolean selectKey) { public StatementContext { if (statementKey == null || statementKey.isBlank() || commandType == null || commandType.isBlank()) throw new IllegalArgumentException("statement context fields must be non-blank"); } }
+    public record StatementContext(
+            String statementKey,
+            String commandType,
+            boolean selectKey,
+            Path candidateDirectory
+    ) {
+        public StatementContext(String statementKey, String commandType, boolean selectKey) {
+            this(statementKey, commandType, selectKey, null);
+        }
+
+        public StatementContext {
+            if (statementKey == null || statementKey.isBlank()
+                    || commandType == null || commandType.isBlank()) {
+                throw new IllegalArgumentException("statement context fields must be non-blank");
+            }
+            candidateDirectory = candidateDirectory == null
+                    ? null
+                    : candidateDirectory.toAbsolutePath().normalize();
+        }
+    }
     public static final class AuditedCallFact {
         private final String id, toolName, dataSource, catalog, schema, project, scope, sql; private final Instant timestamp; private final long durationMs; private final Integer maxRows; private final JsonNode arguments, resultData; private final List<String> columns; private final List<JsonNode> rows;
         private AuditedCallFact(String id, String toolName, Instant timestamp, long durationMs, String dataSource, String catalog, String schema, String project, String scope, String sql, Integer maxRows, JsonNode arguments, JsonNode resultData, List<String> columns, List<JsonNode> rows) { this.id=id; this.toolName=toolName; this.timestamp=timestamp; this.durationMs=durationMs; this.dataSource=dataSource; this.catalog=catalog; this.schema=schema; this.project=project; this.scope=scope; this.sql=sql; this.maxRows=maxRows; this.arguments=arguments.deepCopy(); this.resultData=resultData.deepCopy(); this.columns=List.copyOf(columns); List<JsonNode> copy=new ArrayList<>(); for(JsonNode row: rows) copy.add(row.deepCopy()); this.rows=List.copyOf(copy); }

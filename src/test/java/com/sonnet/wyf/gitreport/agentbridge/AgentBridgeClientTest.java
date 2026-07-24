@@ -451,6 +451,24 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void toolCallsPreserveSuccessfulPlainTextResults() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200, """
+                {"items":[{"id":"18","title":"Write File","toolName":"write_file",
+                "kind":"edit","status":"success","timestamp":"2026-07-23T00:00:01Z",
+                "arguments":"{\\"path\\":\\"/workspace/out/report.md\\",\\"content\\":\\"report\\"}",
+                "result":"Created /workspace/out/report.md","durationMs":12}]}
+                """));
+        server.start();
+
+        AgentBridgeClient.ToolCallRecord call = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(call.result().isTextual()).isTrue();
+        assertThat(call.result().asText()).isEqualTo("Created /workspace/out/report.md");
+    }
+
+    @Test
     void malformedToolCallJsonFailsClosed() throws Exception {
         HttpServer server = server();
         nativeInfo(server);

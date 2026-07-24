@@ -284,7 +284,7 @@ public class AgentBridgeClient {
                     status,
                     requiredHistoryTimestamp(item),
                     structuredHistoryField(item.path("arguments"), "arguments"),
-                    structuredHistoryField(item.path("result"), "result"),
+                    historyResultField(item.path("result")),
                     requiredHistoryDuration(item),
                     item.path("hooks")
             ));
@@ -345,6 +345,24 @@ public class AgentBridgeClient {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException(label + " must contain JSON", exception);
         }
+    }
+
+    private JsonNode historyResultField(JsonNode value) {
+        if (value.isObject() || value.isArray()) {
+            return value.deepCopy();
+        }
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalStateException("result must not be blank");
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(value.textValue());
+            if (parsed.isObject() || parsed.isArray()) {
+                return parsed;
+            }
+        } catch (JsonProcessingException ignored) {
+            // AgentBridge records plain-text outputs for successful non-data tools.
+        }
+        return value.deepCopy();
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body) throws IOException, InterruptedException {

@@ -24,6 +24,7 @@ class PromptPackContractTest {
                 "cmcp_db_database_list_table_schema",
                 "cmcp_db_database_execute_sql_query",
                 "{\"dataSource\":\"configured data source\",\"sql\":\"SELECT columns FROM safe_table LIMIT 1\",\"maxRows\":20,\"project\":\"absolute project path\",\"scope\":\"ALL\"}",
+                "Use `write_file` only for the three exact candidate output paths.",
                 "Do not call DML, DDL, NoSQL, or unknown tools."
         );
         assertThat(readme).contains(

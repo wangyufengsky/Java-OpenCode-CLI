@@ -205,7 +205,8 @@ public final class MyBatisSqlReviewTaskRunner {
                         boundary,
                         database,
                         new MyBatisToolCallAudit.StatementContext(
-                                statement.statementKey(), commandType, statement.selectKey()
+                                statement.statementKey(), commandType, statement.selectKey(),
+                                layout.candidate()
                         )
                 );
                 MyBatisSqlOutputValidator.Result validation = outputValidator.validate(
