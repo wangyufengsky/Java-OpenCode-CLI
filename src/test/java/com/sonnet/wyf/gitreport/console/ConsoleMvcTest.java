@@ -252,7 +252,7 @@ class ConsoleMvcTest {
                 .andExpect(content().string(containsString("MyBatis SQL 审查")))
                 .andExpect(content().string(containsString("mybatis-sql-review")))
                 .andExpect(content().string(containsString(
-                        "src=\"/js/console-common.js?v=20260722-mybatis-sql-review\"")))
+                        "src=\"/js/console-common.js?v=20260724-mybatis-path-scope\"")))
                 .andExpect(content().string(containsString("<option value=\"sql\">SQL 语句</option>")))
                 .andExpect(content().string(containsString("<option value=\"xml\">Mapper XML</option>")))
                 .andExpect(content().string(containsString("<option value=\"index\">总报告</option>")))
@@ -695,8 +695,8 @@ class ConsoleMvcTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
                 .contains("<title>新建运行</title>")
                 .contains("<h1>新建运行</h1>")
-                .contains("<script src=\"/js/console-common.js?v=20260722-mybatis-sql-review\"></script>")
-                .contains("<script src=\"/js/run-form.js?v=20260720-figma-summary\"></script>")
+                .contains("<script src=\"/js/console-common.js?v=20260724-mybatis-path-scope\"></script>")
+                .contains("<script src=\"/js/run-form.js?v=20260724-mybatis-path-scope\"></script>")
                 .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js");
         assertThat(mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())

@@ -38,11 +38,23 @@ final class MyBatisSqlSourceScope {
         Map<String, Path> resolvedByConfiguredPath = new LinkedHashMap<>();
         for (String configuredPath : configuredPaths) {
             String normalized = normalizeConfiguredPath(configuredPath);
-            Path configuredRelative = Path.of(normalized);
+            Path configuredRelative;
+            try {
+                configuredRelative = Path.of(normalized);
+            } catch (RuntimeException ex) {
+                throw new IllegalArgumentException(
+                        "invalid source.paths entry '" + configuredPath + "': invalid path syntax",
+                        ex
+                );
+            }
             if (configuredRelative.isAbsolute() || containsParentTraversal(configuredRelative)) {
                 throw invalidPath(configuredPath, "must stay relative to project.repo");
             }
             Path relative = configuredRelative.normalize();
+            String canonicalPath = relative.toString().replace('\\', '/');
+            if (canonicalPath.isEmpty()) {
+                canonicalPath = ".";
+            }
 
             Path resolved = root.resolve(relative).normalize();
             if (!resolved.startsWith(root)) {
@@ -60,7 +72,7 @@ final class MyBatisSqlSourceScope {
                 throw new IllegalArgumentException(
                         "unable to resolve source.paths entry '" + configuredPath + "'", ex);
             }
-            resolvedByConfiguredPath.putIfAbsent(normalized, resolved);
+            resolvedByConfiguredPath.putIfAbsent(canonicalPath, resolved);
         }
 
         List<Path> candidates = resolvedByConfiguredPath.values().stream()

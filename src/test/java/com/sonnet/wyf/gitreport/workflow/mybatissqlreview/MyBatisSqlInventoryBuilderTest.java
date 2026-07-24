@@ -131,6 +131,18 @@ class MyBatisSqlInventoryBuilderTest {
     }
 
     @Test
+    void normalizesConfiguredSourcePathsForStableRerunContracts() throws Exception {
+        Files.createDirectories(repository.resolve("module/mappers/nested"));
+
+        MyBatisSqlSourceScope scope = MyBatisSqlSourceScope.resolve(
+                repository,
+                List.of("./module/mappers/", "module//mappers", "module/mappers/nested/./"));
+
+        assertThat(scope.configuredPaths())
+                .containsExactly("module/mappers", "module/mappers/nested");
+    }
+
+    @Test
     void defaultDiscoveryInventoriesMapperRootsRegardlessOfFilenameAndSkipsKnownNonMapperXml() throws Exception {
         write("pom.xml", """
                 <project xmlns="http://maven.apache.org/POM/4.0.0">
