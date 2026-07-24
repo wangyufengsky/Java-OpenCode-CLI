@@ -35,12 +35,13 @@ import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
-    public static final String DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION = "1.202.0";
+    public static final String DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION = "1.202.1";
     private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
     private static final int MCP_METADATA_RESPONSE_BYTES = 1024 * 1024;
     private static final int SQL_TOOL_RESPONSE_BYTES = 262_144 + 8 * 1024;
     private static final int GENERAL_TOOL_RESPONSE_BYTES = 4 * 1024 * 1024;
     private static final int TOOL_CALL_PAGE_RESPONSE_BYTES = 1024 * 1024;
+    private static final int TOOL_CALL_DETAIL_RESPONSE_BYTES = 8 * 1024 * 1024;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong requestIds = new AtomicLong();

@@ -72,30 +72,32 @@ class AgentBridgeClientTest {
     @Test
     void acceptsNativeAgentBridgeVersionWithoutInventedCapabilityFields() throws Exception {
         HttpServer server = server();
-        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.1\"}"));
         server.start();
 
         client.requireDatabaseMcpSupport(baseUri(server));
     }
 
     @Test
-    void acceptsDatabaseMcpSupportFromLoopbackInfo() throws Exception {
+    void rejectsAgentBridgeVersionWithoutFullToolHistory() throws Exception {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
         server.start();
 
-        client.requireDatabaseMcpSupport(baseUri(server));
+        assertThatThrownBy(() -> client.requireDatabaseMcpSupport(baseUri(server)))
+                .hasMessageContaining("1.202.0")
+                .hasMessageContaining("1.202.1");
     }
 
     @Test
-    void rejectsAgentBridgeVersionsBefore12020() throws Exception {
+    void rejectsAgentBridgeVersionsBefore12021() throws Exception {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.201.9\"}"));
         server.start();
 
         assertThatThrownBy(() -> client.requireDatabaseMcpSupport(baseUri(server)))
                 .hasMessageContaining("1.201.9")
-                .hasMessageContaining("1.202.0");
+                .hasMessageContaining("1.202.1");
     }
 
     @Test
@@ -697,7 +699,7 @@ class AgentBridgeClientTest {
     }
 
     private void nativeInfo(HttpServer server) {
-        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.0\"}"));
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.1\"}"));
     }
 
     private URI baseUri(HttpServer server) {
@@ -707,7 +709,7 @@ class AgentBridgeClientTest {
     private HttpServer nativeBindingServer() throws IOException {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(
-                exchange, 200, "{\"version\":\"1.202.0\"}"
+                exchange, 200, "{\"version\":\"1.202.1\"}"
         ));
         server.createContext("/mcp", exchange -> {
             JsonNode request = objectMapper.readTree(body(exchange));
