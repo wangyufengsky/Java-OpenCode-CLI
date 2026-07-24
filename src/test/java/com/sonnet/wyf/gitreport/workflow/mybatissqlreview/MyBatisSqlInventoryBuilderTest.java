@@ -27,6 +27,110 @@ class MyBatisSqlInventoryBuilderTest {
     private final MyBatisSqlInventoryBuilder builder = new MyBatisSqlInventoryBuilder();
 
     @Test
+    void discoversOnlyMapperXmlUnderConfiguredProjectRelativeDirectories() throws Exception {
+        write("module-a/src/main/resources/mapper/UserMapper.xml", """
+                <mapper namespace="demo.UserMapper">
+                  <select id="findUser">SELECT 1</select>
+                </mapper>
+                """);
+        write("module-b/src/main/resources/mapper/OrderMapper.xml", """
+                <mapper namespace="demo.OrderMapper">
+                  <select id="findOrder">SELECT 2</select>
+                </mapper>
+                """);
+        write("unrelated/HiddenMapper.xml", """
+                <mapper namespace="demo.HiddenMapper">
+                  <select id="hidden">SELECT 3</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(
+                repository,
+                List.of(
+                        "module-a/src/main/resources/mapper",
+                        "module-b/src/main/resources/mapper"),
+                List.of("**/*Mapper.xml"),
+                List.of());
+
+        assertThat(inventory.mappers())
+                .extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly(
+                        "module-a/src/main/resources/mapper/UserMapper.xml",
+                        "module-b/src/main/resources/mapper/OrderMapper.xml");
+    }
+
+    @Test
+    void appliesIncludeAndExcludeGlobsRelativeToEachConfiguredDirectory() throws Exception {
+        write("module-a/mappers/public/UserMapper.xml", """
+                <mapper namespace="demo.UserMapper">
+                  <select id="find">SELECT 1</select>
+                </mapper>
+                """);
+        write("module-a/mappers/internal/SecretMapper.xml", """
+                <mapper namespace="demo.SecretMapper">
+                  <select id="find">SELECT 2</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(
+                repository,
+                List.of("module-a/mappers"),
+                List.of("**/*Mapper.xml"),
+                List.of("internal/**"));
+
+        assertThat(inventory.mappers())
+                .extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly("module-a/mappers/public/UserMapper.xml");
+    }
+
+    @Test
+    void rejectsBlankAbsoluteAndParentTraversingSourcePaths() {
+        assertThatThrownBy(() -> MyBatisSqlSourceScope.resolve(repository, List.of(" ")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source.paths")
+                .hasMessageContaining("must not be blank");
+        assertThatThrownBy(() -> MyBatisSqlSourceScope.resolve(repository, List.of(repository.toString())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source.paths")
+                .hasMessageContaining("must be relative");
+        assertThatThrownBy(() -> MyBatisSqlSourceScope.resolve(repository, List.of("module/../other")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source.paths")
+                .hasMessageContaining("must stay relative");
+    }
+
+    @Test
+    void rejectsSourceDirectoriesContainingSymbolicLinks() throws Exception {
+        Path realDirectory = Files.createDirectories(repository.resolve("real-mappers"));
+        Path linkedDirectory = repository.resolve("linked-mappers");
+        createSymlinkOrSkip(linkedDirectory, realDirectory);
+
+        assertThatThrownBy(() -> MyBatisSqlSourceScope.resolve(repository, List.of("linked-mappers")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source.paths")
+                .hasMessageContaining("symbolic links");
+    }
+
+    @Test
+    void overlappingSourceDirectoriesDoNotDuplicateMapperInventory() throws Exception {
+        write("module/mappers/nested/UserMapper.xml", """
+                <mapper namespace="demo.UserMapper">
+                  <select id="find">SELECT 1</select>
+                </mapper>
+                """);
+
+        MyBatisSqlInventory inventory = builder.build(
+                repository,
+                List.of("module/mappers", "module/mappers/nested", "module/mappers"),
+                List.of("**/*.xml"),
+                List.of());
+
+        assertThat(inventory.mappers())
+                .extracting(MyBatisMapperInventory::mapperRelativePath)
+                .containsExactly("module/mappers/nested/UserMapper.xml");
+    }
+
+    @Test
     void defaultDiscoveryInventoriesMapperRootsRegardlessOfFilenameAndSkipsKnownNonMapperXml() throws Exception {
         write("pom.xml", """
                 <project xmlns="http://maven.apache.org/POM/4.0.0">

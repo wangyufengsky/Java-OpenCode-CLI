@@ -48,13 +48,19 @@ public final class MyBatisSqlInventoryBuilder {
             .thenComparing(MyBatisSqlStatement::id)
             .thenComparingInt(MyBatisSqlStatement::selectKeyOrdinal);
 
-    public MyBatisSqlInventory build(Path repository, List<String> includes, List<String> excludes) {
-        Path root = validateRepository(repository);
+    public MyBatisSqlInventory build(
+            Path repository,
+            List<String> sourcePaths,
+            List<String> includes,
+            List<String> excludes) {
+        MyBatisSqlSourceScope sourceScope = MyBatisSqlSourceScope.resolve(repository, sourcePaths);
+        Path root = sourceScope.repository();
         List<PathMatcher> includeMatchers = matchers(defaultIncludes(includes));
         List<PathMatcher> excludeMatchers = matchers(excludes == null ? List.of() : excludes);
-        List<Path> mapperPaths = discoverMappers(root, includeMatchers, excludeMatchers);
+        List<Path> mapperPaths = discoverMappers(sourceScope, includeMatchers, excludeMatchers);
         if (mapperPaths.isEmpty()) {
-            throw new IllegalArgumentException("no MyBatis mapper XML files matched under " + root);
+            throw new IllegalArgumentException(
+                    "no MyBatis mapper XML files matched under source.paths " + sourceScope.configuredPaths());
         }
 
         List<ParsedMapper> parsedMappers = mapperPaths.stream()
@@ -63,7 +69,8 @@ public final class MyBatisSqlInventoryBuilder {
                 .sorted(MAPPER_ORDER)
                 .toList();
         if (parsedMappers.isEmpty()) {
-            throw new IllegalArgumentException("no MyBatis mapper XML files matched under " + root);
+            throw new IllegalArgumentException(
+                    "no MyBatis mapper XML files matched under source.paths " + sourceScope.configuredPaths());
         }
         Map<String, Fragment> fragments = collectFragments(parsedMappers);
         validateFragments(fragments);
@@ -87,13 +94,8 @@ public final class MyBatisSqlInventoryBuilder {
         return new MyBatisSqlInventory(mappers, allStatements);
     }
 
-    private Path validateRepository(Path repository) {
-        Objects.requireNonNull(repository, "repository");
-        Path root = repository.toAbsolutePath().normalize();
-        if (!Files.isDirectory(root) || !Files.isReadable(root)) {
-            throw new IllegalArgumentException("repository must be a readable directory: " + root);
-        }
-        return root;
+    public MyBatisSqlInventory build(Path repository, List<String> includes, List<String> excludes) {
+        return build(repository, List.of("."), includes, excludes);
     }
 
     private List<String> defaultIncludes(List<String> includes) {
@@ -124,18 +126,29 @@ public final class MyBatisSqlInventoryBuilder {
         expandDoubleStarDirectories(pattern.substring(0, marker) + pattern.substring(marker + 3), marker, expandedPatterns);
     }
 
-    private List<Path> discoverMappers(Path root, List<PathMatcher> includes, List<PathMatcher> excludes) {
-        try (Stream<Path> paths = Files.walk(root)) {
-            return paths
-                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xml"))
-                    .filter(path -> matches(root.relativize(path), includes))
-                    .filter(path -> !matches(root.relativize(path), excludes))
-                    .filter(path -> requireRegularMapperFile(root, path))
-                    .sorted(Comparator.comparing(path -> logicalPath(root.relativize(path))))
-                    .toList();
-        } catch (IOException ex) {
-            throw new IllegalArgumentException("unable to discover MyBatis mapper XML files under " + root, ex);
+    private List<Path> discoverMappers(
+            MyBatisSqlSourceScope sourceScope,
+            List<PathMatcher> includes,
+            List<PathMatcher> excludes) {
+        Map<String, Path> discoveredByRepositoryPath = new LinkedHashMap<>();
+        for (Path discoveryRoot : sourceScope.discoveryRoots()) {
+            try (Stream<Path> paths = Files.walk(discoveryRoot)) {
+                paths.filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xml"))
+                        .filter(path -> matches(discoveryRoot.relativize(path), includes))
+                        .filter(path -> !matches(discoveryRoot.relativize(path), excludes))
+                        .filter(path -> requireRegularMapperFile(sourceScope.repository(), path))
+                        .forEach(path -> discoveredByRepositoryPath.putIfAbsent(
+                                logicalPath(sourceScope.repository().relativize(path)),
+                                path));
+            } catch (IOException ex) {
+                throw new IllegalArgumentException(
+                        "unable to discover MyBatis mapper XML files under " + discoveryRoot, ex);
+            }
         }
+        return discoveredByRepositoryPath.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(Map.Entry::getValue)
+                .toList();
     }
 
     private boolean requireRegularMapperFile(Path root, Path path) {
