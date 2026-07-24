@@ -77,6 +77,50 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
+    void auditsCompleteLongReportWriteAtTheExactCandidatePath() {
+        Path candidateDirectory = Path.of("/workspace/out");
+        String reportBody = "审".repeat(9_000);
+        AgentBridgeClient.ToolCallRecord reportWrite = call(
+                "write-long-report",
+                "write_file",
+                objectMapper.createObjectNode()
+                        .put("path", candidateDirectory.resolve("report.md").toString())
+                        .put("content", reportBody),
+                objectMapper.getNodeFactory().textNode("Created /workspace/out/report.md")
+        );
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(reportWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, candidateDirectory
+                )
+        );
+
+        assertThat(reportWrite.arguments().path("content").asText()).hasSize(9_000);
+        assertThat(result.facts()).isEmpty();
+        assertThat(result.auditedCallIds()).isEmpty();
+    }
+
+    @Test
+    void rejectsCompleteLongReportWriteOutsideTheCandidateDirectory() {
+        AgentBridgeClient.ToolCallRecord wrongWrite = call(
+                "write-long-elsewhere",
+                "write_file",
+                objectMapper.createObjectNode()
+                        .put("path", "/workspace/elsewhere/report.md")
+                        .put("content", "审".repeat(9_000)),
+                objectMapper.getNodeFactory().textNode("Created /workspace/elsewhere/report.md")
+        );
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(wrongWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, Path.of("/workspace/out")
+                )
+        )).hasMessageContaining("candidate output path");
+    }
+
+    @Test
     void rejectsReportWritesOutsideTheCurrentCandidateDirectory() {
         AgentBridgeClient.ToolCallRecord wrongWrite = call(
                 "write-elsewhere",
@@ -178,6 +222,37 @@ class MyBatisToolCallAuditTest {
             assertThat(fact.rows()).singleElement().satisfies(row ->
                     assertThat(row.path("id").asInt()).isEqualTo(7));
             assertThat(fact.resultData().path("columns").get(0).asText()).isEqualTo("id");
+        });
+    }
+
+    @Test
+    void auditsCompleteDatabaseResultAboveLegacySummaryLength() throws Exception {
+        ObjectNode actual = objectMapper.createObjectNode()
+                .put("mode", "QUERY")
+                .put("updateCount", -1)
+                .put("hasResultSet", true)
+                .put("rowCount", 1)
+                .put("dataSource", database.binding().dataSource());
+        actual.putArray("columns").add("id").add("evidence");
+        actual.putArray("rows").addObject()
+                .put("id", 7)
+                .put("evidence", "数".repeat(9_000));
+
+        assertThat(objectMapper.writeValueAsBytes(actual).length)
+                .isGreaterThan(8_000)
+                .isLessThan(MyBatisToolCallAudit.MAX_TOOL_RESULT_BYTES);
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("long-query", DatabaseMcpContract.EXECUTE_QUERY,
+                        nativeQueryArguments("SELECT id FROM orders LIMIT 1"), actual)),
+                boundary(), database, selectStatement()
+        );
+
+        assertThat(result.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.rows()).singleElement().satisfies(row ->
+                    assertThat(row.path("evidence").asText()).hasSize(9_000));
+            assertThat(fact.resultData().path("rows").get(0).path("evidence").asText())
+                    .hasSize(9_000);
         });
     }
 
