@@ -312,7 +312,7 @@ public class AgentBridgeClient {
         boolean argumentsTruncated = requiredHistoryBoolean(item, "argumentsTruncated");
         boolean resultTruncated = requiredHistoryBoolean(item, "resultTruncated");
         if (!argumentsTruncated && !resultTruncated) {
-            return legacyHistoryPayload(item);
+            return verifiedUntruncatedHistoryPayload(item);
         }
         if (!requiredHistoryBoolean(item, "fullPayloadAvailable")) {
             String reason = item.path("fullPayloadUnavailableReason").asText("unknown").strip();
@@ -333,6 +333,32 @@ public class AgentBridgeClient {
                 structuredHistoryField(item.path("arguments"), "arguments"),
                 historyResultField(item.path("result"))
         );
+    }
+
+    private HistoryPayload verifiedUntruncatedHistoryPayload(JsonNode item) {
+        String arguments = verifiedUntruncatedSummaryText(item, "arguments");
+        String result = verifiedUntruncatedSummaryText(item, "result");
+        return new HistoryPayload(
+                structuredHistoryField(objectMapper.getNodeFactory().textNode(arguments), "arguments"),
+                historyResultField(objectMapper.getNodeFactory().textNode(result))
+        );
+    }
+
+    private String verifiedUntruncatedSummaryText(JsonNode item, String field) {
+        JsonNode value = item.path(field);
+        if (!value.isTextual()) {
+            throw new IllegalStateException(field + " summary must be a string");
+        }
+        long expectedBytes = requiredHistoryBytes(item, field + "Bytes");
+        long actualBytes = value.textValue().getBytes(StandardCharsets.UTF_8).length;
+        if (expectedBytes != actualBytes) {
+            throw new IllegalStateException(field + " byte length mismatch");
+        }
+        String expectedSha256 = requiredHistorySha256(item, field + "Sha256");
+        if (!expectedSha256.equals(sha256Utf8(value.textValue()))) {
+            throw new IllegalStateException(field + " SHA-256 mismatch");
+        }
+        return value.textValue();
     }
 
     private boolean requiredHistoryBoolean(JsonNode item, String field) {

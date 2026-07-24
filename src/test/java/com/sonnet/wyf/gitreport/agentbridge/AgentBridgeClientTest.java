@@ -477,26 +477,66 @@ class AgentBridgeClientTest {
 
     @Test
     void untruncatedToolCallDoesNotFetchAvailableDetail() throws Exception {
+        String arguments = "{\"sql\":\"SELECT 1\"}";
+        String result = "{\"rows\":[]}";
+        HistoryFixture fixture = historyFixture("41", "read_file", arguments, result);
         AtomicInteger detailRequests = new AtomicInteger();
-        ObjectNode call = toolCall("41", "2026-07-24T04:00:00Z");
-        call.put("argumentsTruncated", false);
-        call.put("resultTruncated", false);
-        call.put("fullPayloadAvailable", true);
-        call.put("detailUrl", "/tool-calls/41");
+        HttpServer server = historyServer(fixture, 500, detailRequests);
 
+        AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(record.arguments().path("sql").asText()).isEqualTo("SELECT 1");
+        assertThat(record.result().path("rows").isArray()).isTrue();
+        assertThat(detailRequests).hasValue(0);
+    }
+
+    @Test
+    void legacyUntruncatedHistoryWithoutPayloadMetadataRemainsCompatible() throws Exception {
+        AtomicInteger detailRequests = new AtomicInteger();
+        ObjectNode call = toolCall("legacy-41", "2026-07-24T04:00:00Z");
         HttpServer server = server();
         nativeInfo(server);
         historyList(server, call);
-        server.createContext("/tool-calls/41", exchange -> {
+        server.createContext("/tool-calls/legacy-41", exchange -> {
             detailRequests.incrementAndGet();
-            respond(exchange, 500, "{\"error\":\"detail must not be requested\"}");
+            respond(exchange, 500, "{\"error\":\"legacy detail must not be requested\"}");
         });
         server.start();
 
         AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
 
         assertThat(record.arguments().path("sql").asText()).contains("SELECT");
+        assertThat(record.result().isObject()).isTrue();
+        assertThat(record.result().path("rows").path("id").asInt()).isEqualTo(1);
         assertThat(detailRequests).hasValue(0);
+    }
+
+    @Test
+    void rejectsMissingOrInconsistentUntruncatedSummaryIntegrityMetadata() throws Exception {
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.remove("argumentsBytes"),
+                "argumentsBytes"
+        );
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.put("argumentsBytes", summary.path("argumentsBytes").longValue() + 1),
+                "arguments byte length mismatch"
+        );
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.put("argumentsSha256", "0".repeat(64)),
+                "arguments SHA-256 mismatch"
+        );
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.remove("resultSha256"),
+                "resultSha256"
+        );
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.put("resultBytes", summary.path("resultBytes").longValue() + 1),
+                "result byte length mismatch"
+        );
+        assertRejectedUntruncatedSummaryMutation(
+                summary -> summary.put("resultSha256", "0".repeat(64)),
+                "result SHA-256 mismatch"
+        );
     }
 
     @Test
@@ -517,6 +557,46 @@ class AgentBridgeClientTest {
 
         assertThat(record.arguments().path("content").asText()).hasSize(9_000);
         assertThat(record.result().path("evidence").asText()).hasSize(9_000);
+        assertThat(detailRequests).hasValue(1);
+    }
+
+    @Test
+    void fetchesCompleteLongJsonResultWhenArgumentsAreNotTruncated() throws Exception {
+        String arguments = objectMapper.createObjectNode()
+                .put("project", "/workspace/example")
+                .put("scope", "ALL")
+                .put("dataSource", "gaussdb")
+                .put("sql", "SELECT id FROM audit.orders LIMIT 1")
+                .put("maxRows", 20)
+                .toString();
+        ObjectNode resultNode = objectMapper.createObjectNode()
+                .put("mode", "QUERY")
+                .put("hasResultSet", true)
+                .put("rowCount", 1);
+        var resultRows = objectMapper.createArrayNode();
+        resultRows.addObject()
+                .put("id", 1)
+                .put("evidence", "数".repeat(9_000));
+        resultNode.set("rows", resultRows);
+        String result = resultNode.toString();
+        HistoryFixture fixture = historyFixture(
+                "79",
+                "cmcp_db_database_execute_sql_query",
+                arguments,
+                result
+        );
+        assertThat(fixture.summary().path("argumentsTruncated").asBoolean()).isFalse();
+        assertThat(fixture.summary().path("resultTruncated").asBoolean()).isTrue();
+        assertThat(fixture.summary().path("result").asText()).endsWith("[…truncated]");
+        AtomicInteger detailRequests = new AtomicInteger();
+        HttpServer server = historyServer(fixture, 200, detailRequests);
+
+        AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(record.arguments().path("sql").asText())
+                .isEqualTo("SELECT id FROM audit.orders LIMIT 1");
+        assertThat(record.result().isObject()).isTrue();
+        assertThat(record.result().path("rows").get(0).path("evidence").asText()).hasSize(9_000);
         assertThat(detailRequests).hasValue(1);
     }
 
@@ -933,6 +1013,22 @@ class AgentBridgeClientTest {
         HistoryFixture fixture = longHistoryFixture();
         mutation.accept(fixture.detail());
         HttpServer server = historyServer(fixture, 200, new AtomicInteger());
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server))).hasMessageContaining(message);
+    }
+
+    private void assertRejectedUntruncatedSummaryMutation(
+            Consumer<ObjectNode> mutation,
+            String message
+    ) throws Exception {
+        HistoryFixture fixture = historyFixture(
+                "80",
+                "read_file",
+                "{\"path\":\"/workspace/input.json\"}",
+                "{\"rows\":[]}"
+        );
+        mutation.accept(fixture.summary());
+        HttpServer server = historyServer(fixture, 500, new AtomicInteger());
 
         assertThatThrownBy(() -> client.getToolCalls(baseUri(server))).hasMessageContaining(message);
     }
