@@ -190,7 +190,7 @@ class MyBatisSqlReportRendererTest {
                   <select id="find[bad](https://bad.example)">SELECT 1</select>
                 </mapper>
                 """);
-        MyBatisSqlInventory inventory = new MyBatisSqlInventoryBuilder().build(repository, List.of("**/*.xml"), List.of());
+        MyBatisSqlInventory inventory = new MyBatisSqlInventoryBuilder().build(repository, List.of("."), List.of("**/*.xml"), List.of());
         writeTaskArtifacts(inventory.statements().getFirst(), List.of());
 
         new MyBatisSqlReportRenderer(objectMapper).render(
@@ -257,7 +257,7 @@ class MyBatisSqlReportRendererTest {
             }
             xml.append("</mapper>\n");
             Files.writeString(repository.resolve("src/main/resources/OrderMapper.xml"), xml);
-            return new MyBatisSqlInventoryBuilder().build(repository, List.of("**/*.xml"), List.of());
+            return new MyBatisSqlInventoryBuilder().build(repository, List.of("."), List.of("**/*.xml"), List.of());
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }

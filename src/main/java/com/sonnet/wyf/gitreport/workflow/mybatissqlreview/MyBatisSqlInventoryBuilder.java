@@ -94,10 +94,6 @@ public final class MyBatisSqlInventoryBuilder {
         return new MyBatisSqlInventory(mappers, allStatements);
     }
 
-    public MyBatisSqlInventory build(Path repository, List<String> includes, List<String> excludes) {
-        return build(repository, List.of("."), includes, excludes);
-    }
-
     private List<String> defaultIncludes(List<String> includes) {
         return includes == null || includes.isEmpty() ? List.of("**/*.xml") : List.copyOf(includes);
     }

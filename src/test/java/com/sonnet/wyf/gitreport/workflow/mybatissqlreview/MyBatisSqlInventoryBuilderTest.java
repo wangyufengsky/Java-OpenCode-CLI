@@ -158,7 +158,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of(), List.of());
+        MyBatisSqlInventory inventory = build(List.of(), List.of());
 
         assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
                 .containsExactly(
@@ -176,7 +176,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+        assertThatThrownBy(() -> build(List.of(), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("failed to parse MyBatis mapper XML")
                 .hasMessageContaining("src/main/resources/sql/queries.xml");
@@ -191,7 +191,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+        assertThatThrownBy(() -> build(List.of(), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("external entities are forbidden")
                 .hasMessageContaining("pom.xml");
@@ -209,7 +209,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of(), List.of());
+        MyBatisSqlInventory inventory = build(List.of(), List.of());
 
         assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
                 .containsExactly("queries.xml");
@@ -224,7 +224,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThat(builder.build(repository, List.of(), List.of()).statements()).singleElement()
+        assertThat(build(List.of(), List.of()).statements()).singleElement()
                 .extracting(MyBatisSqlStatement::normalizedSql)
                 .isEqualTo("SELECT 1");
     }
@@ -237,7 +237,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mb:mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of(), List.of()))
+        assertThatThrownBy(() -> build(List.of(), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("mapper root must be unprefixed and have no namespace")
                 .hasMessageContaining("prefixed.xml");
@@ -256,7 +256,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*Mapper.xml"), List.of());
+        MyBatisSqlInventory inventory = build(List.of("**/*Mapper.xml"), List.of());
 
         assertThat(inventory.mappers()).extracting(MyBatisMapperInventory::mapperRelativePath)
                 .containsExactly("RootMapper.xml", "nested/NestedMapper.xml");
@@ -264,7 +264,7 @@ class MyBatisSqlInventoryBuilderTest {
 
     @Test
     void rejectsRepositoriesWithNoMatchingMapperXml() {
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*Mapper.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*Mapper.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("no MyBatis mapper XML files matched");
     }
@@ -277,7 +277,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*Mapper.xml"), List.of());
+        MyBatisSqlInventory inventory = build(List.of("**/*Mapper.xml"), List.of());
 
         assertThat(inventory.mappers()).singleElement()
                 .extracting(MyBatisMapperInventory::mapperRelativePath)
@@ -302,7 +302,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*.xml"), List.of());
+        MyBatisSqlInventory inventory = build(List.of("**/*.xml"), List.of());
 
         assertThat(inventory.mappers())
                 .extracting(MyBatisMapperInventory::mapperRelativePath)
@@ -341,7 +341,7 @@ class MyBatisSqlInventoryBuilderTest {
                 .findFirst()
                 .orElseThrow();
         assertThat(semicolonStatement.normalizedSql()).isEqualTo("SELECT 1; SELECT 2");
-        assertThat(builder.build(repository, List.of("**/*.xml"), List.of())).isEqualTo(inventory);
+        assertThat(build(List.of("**/*.xml"), List.of())).isEqualTo(inventory);
         assertThatThrownBy(() -> inventory.mappers().add(inventory.mappers().getFirst()))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> inventory.statements().add(statement))
@@ -365,7 +365,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+        MyBatisSqlStatement statement = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst();
 
         assertThat(statement.normalizedSql())
@@ -393,7 +393,7 @@ class MyBatisSqlInventoryBuilderTest {
                 "</mapper>",
                 ""));
 
-        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+        MyBatisSqlStatement statement = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst();
 
         assertThat(statement.startLine()).isEqualTo(2);
@@ -415,7 +415,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        String sql = builder.build(repository, List.of("**/*.xml"), List.of())
+        String sql = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst().normalizedSql();
 
         assertThat(sql)
@@ -439,7 +439,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*.xml"), List.of());
+        MyBatisSqlInventory inventory = build(List.of("**/*.xml"), List.of());
 
         assertThat(inventory.statements()).singleElement()
                 .extracting(MyBatisSqlStatement::normalizedSql)
@@ -463,7 +463,7 @@ class MyBatisSqlInventoryBuilderTest {
         System.arraycopy(suffix, 0, invalid, prefix.length + 2, suffix.length);
         writeBytes("mapper/InvalidUtf8Mapper.xml", invalid);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("invalid UTF-8")
                 .hasMessageContaining("mapper/InvalidUtf8Mapper.xml");
@@ -478,7 +478,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("requires UTF-8")
                 .hasMessageContaining("mapper/LatinMapper.xml");
@@ -496,7 +496,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(repository, List.of("**/*.xml"), List.of());
+        MyBatisSqlInventory inventory = build(List.of("**/*.xml"), List.of());
 
         assertThat(inventory.statements()).hasSize(1);
         MyBatisSqlStatement statement = inventory.statements().getFirst();
@@ -515,7 +515,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+        MyBatisSqlStatement statement = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst();
 
         assertThat(statement.normalizedSql())
@@ -538,9 +538,9 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatCode(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatCode(() -> build(List.of("**/*.xml"), List.of()))
                 .doesNotThrowAnyException();
-        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+        MyBatisSqlStatement statement = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst();
 
         assertThat(statement.normalizedSql()).isEqualTo("SELECT a.id FROM accounts a");
@@ -558,7 +558,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate include property 'alias'")
                 .hasMessageContaining("mapper/DuplicatePropertyMapper.xml");
@@ -573,9 +573,9 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatCode(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatCode(() -> build(List.of("**/*.xml"), List.of()))
                 .doesNotThrowAnyException();
-        MyBatisSqlStatement statement = builder.build(repository, List.of("**/*.xml"), List.of())
+        MyBatisSqlStatement statement = build(List.of("**/*.xml"), List.of())
                 .statements().getFirst();
 
         assertThat(statement.normalizedSql()).isEqualTo("SELECT * FROM users WHERE ${column}=#{value}");
@@ -591,7 +591,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unresolved include property 'fragment'")
                 .hasMessageContaining("mapper/UnresolvedRefidMapper.xml");
@@ -606,7 +606,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unresolved include property 'missing'")
                 .hasMessageContaining("mapper/UnresolvedPropertyValueMapper.xml");
@@ -622,7 +622,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("include cycle")
                 .hasMessageContaining("demo.CycleMapper.a")
@@ -637,7 +637,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("missing include")
                 .hasMessageContaining("demo.MissingMapper.doesNotExist")
@@ -654,7 +654,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("missing include")
                 .hasMessageContaining("demo.UnusedMissingMapper.doesNotExist")
@@ -671,7 +671,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("include cycle")
                 .hasMessageContaining("demo.UnusedCycleMapper.a")
@@ -691,7 +691,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate statement identity")
                 .hasMessageContaining("demo.DuplicateMapper.same")
@@ -711,7 +711,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        List<MyBatisSqlStatement> statements = builder.build(repository, List.of("**/*.xml"), List.of()).statements();
+        List<MyBatisSqlStatement> statements = build(List.of("**/*.xml"), List.of()).statements();
 
         assertThat(statements).hasSize(3);
         assertThat(statements).extracting(MyBatisSqlStatement::id)
@@ -744,8 +744,7 @@ class MyBatisSqlInventoryBuilderTest {
                 interface AnnotationSql { String SQL = "SELECT 3"; }
                 """);
 
-        MyBatisSqlInventory inventory = builder.build(
-                repository,
+        MyBatisSqlInventory inventory = build(
                 List.of("**/*Mapper.xml"),
                 List.of("**/generated/**"));
 
@@ -764,7 +763,7 @@ class MyBatisSqlInventoryBuilderTest {
         Path link = repository.resolve("LinkedMapper.xml");
         createSymlinkOrSkip(link, target);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/LinkedMapper.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/LinkedMapper.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("symbolic links are forbidden")
                 .hasMessageContaining("LinkedMapper.xml");
@@ -782,7 +781,7 @@ class MyBatisSqlInventoryBuilderTest {
         Path link = repository.resolve("EscapeMapper.xml");
         try {
             createSymlinkOrSkip(link, outsideMapper);
-            assertThatThrownBy(() -> builder.build(repository, List.of("**/EscapeMapper.xml"), List.of()))
+            assertThatThrownBy(() -> build(List.of("**/EscapeMapper.xml"), List.of()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("symbolic links are forbidden")
                     .hasMessageContaining("EscapeMapper.xml");
@@ -800,7 +799,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("failed to parse MyBatis mapper XML")
                 .hasMessageContaining("mapper/BrokenMapper.xml");
@@ -817,7 +816,7 @@ class MyBatisSqlInventoryBuilderTest {
         Files.setPosixFilePermissions(mapper, Set.of());
         try {
             assumeFalse(Files.isReadable(mapper), "filesystem still reports a mode-000 file as readable");
-            assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+            assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("unable to read MyBatis mapper XML")
                     .hasMessageContaining("mapper/UnreadableMapper.xml");
@@ -838,7 +837,7 @@ class MyBatisSqlInventoryBuilderTest {
                 </mapper>
                 """);
 
-        assertThatThrownBy(() -> builder.build(repository, List.of("**/*.xml"), List.of()))
+        assertThatThrownBy(() -> build(List.of("**/*.xml"), List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("external entities are forbidden")
                 .hasMessageContaining("mapper/XxeMapper.xml");
@@ -859,6 +858,10 @@ class MyBatisSqlInventoryBuilderTest {
         assertThat(properties.getExcludes()).containsExactly("target/**");
         assertThatThrownBy(() -> properties.getIncludes().add("mutate"))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    private MyBatisSqlInventory build(List<String> includes, List<String> excludes) {
+        return builder.build(repository, List.of("."), includes, excludes);
     }
 
     private Path write(String relativePath, String content) throws IOException {
