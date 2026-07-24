@@ -131,6 +131,32 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
+    void requiresProjectRelativeSourcePathsBeforeDatabasePreflight() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config).replace(
+                "  paths:\n    - \"src/main/resources/mappers\"\n",
+                ""));
+
+        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-missing-source-paths")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source.paths");
+        assertThat(client.toolArguments).isEmpty();
+    }
+
+    @Test
+    void publishesSourcePathsInVersionTwoRerunContract() throws Exception {
+        chain.run(request("full", "", "", "run-source-contract"));
+
+        JsonNode contract = objectMapper.readTree(stableOut.resolve("source-contract.json").toFile());
+        assertThat(contract.path("schema_version").asText())
+                .isEqualTo("mybatis-sql-review-source-contract/v2");
+        assertThat(contract.path("paths").isArray()).isTrue();
+        assertThat(contract.path("paths")).hasSize(1);
+        assertThat(contract.path("paths").get(0).asText())
+                .isEqualTo("src/main/resources/mappers");
+    }
+
+    @Test
     void defaultsDatabaseScopeToAllAndBindsItToNativePreflightCalls() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config).replace("                  scope: ALL\n", ""));
@@ -247,6 +273,13 @@ class MyBatisSqlReviewWorkflowChainTest {
 
         Files.writeString(mapper, originalMapper);
         Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config).replace(
+                "    - \"src/main/resources/mappers\"",
+                "    - \"src/main/resources\""
+        ));
+        assertFullRerunRequired(request("rerun", "sql", sqlKey, "run-paths-drift"));
+
+        writeConfig();
         Files.writeString(config, Files.readString(config).replace(
                 "    - \"**/*Mapper.xml\"",
                 "    - \"src/main/resources/mappers/*Mapper.xml\""
@@ -554,6 +587,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                 paths:
                   out: %s
                 source:
+                  paths:
+                    - "src/main/resources/mappers"
                   include:
                     - "**/*Mapper.xml"
                   exclude: []

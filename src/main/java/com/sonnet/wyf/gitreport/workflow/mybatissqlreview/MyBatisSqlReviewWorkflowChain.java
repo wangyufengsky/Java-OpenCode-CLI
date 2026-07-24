@@ -230,6 +230,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     private MyBatisSqlInventory buildInventory(Configuration configuration) {
         return inventoryBuilder.build(
                 configuration.getProject().getRepo(),
+                configuration.getSource().getPaths(),
                 configuration.getSource().getInclude(),
                 configuration.getSource().getExclude()
         );
@@ -300,8 +301,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     ) throws Exception {
         Path inventory = bundleRoot.resolve(MyBatisSqlReportRenderer.INVENTORY);
         ObjectNode contract = objectMapper.createObjectNode();
-        contract.put("schema_version", "mybatis-sql-review-source-contract/v1");
+        contract.put("schema_version", "mybatis-sql-review-source-contract/v2");
         contract.put("repository_real_path", repositoryRealPath(configuration));
+        contract.putPOJO("paths", configuration.getSource().getPaths());
         contract.putPOJO("include", configuration.getSource().getInclude());
         contract.putPOJO("exclude", configuration.getSource().getExclude());
         contract.put("inventory_sha256", sha256(inventory));
@@ -334,11 +336,11 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         Set<String> fields = new LinkedHashSet<>();
         contract.fieldNames().forEachRemaining(fields::add);
         Set<String> expectedFields = Set.of(
-                "schema_version", "repository_real_path", "include", "exclude", "inventory_sha256",
+                "schema_version", "repository_real_path", "paths", "include", "exclude", "inventory_sha256",
                 "artifact_sha256"
         );
         if (!expectedFields.equals(fields)
-                || !"mybatis-sql-review-source-contract/v1".equals(
+                || !"mybatis-sql-review-source-contract/v2".equals(
                 contract.path("schema_version").asText())) {
             throw new IllegalStateException("published source contract is invalid; run a full rerun");
         }
@@ -372,10 +374,11 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         if (requireCurrentConfiguration
                 && (!repositoryRealPath(configuration).equals(
                 contract.path("repository_real_path").asText())
+                || !configuration.getSource().getPaths().equals(textArray(contract.path("paths")))
                 || !configuration.getSource().getInclude().equals(textArray(contract.path("include")))
                 || !configuration.getSource().getExclude().equals(textArray(contract.path("exclude"))))) {
             throw new IllegalStateException(
-                    "targeted rerun source root/include/exclude changed; run a full rerun"
+                    "targeted rerun source root/paths/include/exclude changed; run a full rerun"
             );
         }
     }
@@ -794,7 +797,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         private void validate() {
             Objects.requireNonNull(project, "project").validate();
             Objects.requireNonNull(paths, "paths").validate();
-            Objects.requireNonNull(source, "source").validate();
+            Objects.requireNonNull(source, "source").validate(project.getRepo());
             Objects.requireNonNull(database, "database").validate();
             Objects.requireNonNull(agentbridge, "agentbridge");
         }
@@ -985,8 +988,17 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     }
 
     public static final class Source {
+        private List<String> paths = List.of();
         private List<String> include = List.of("**/*.xml");
         private List<String> exclude = List.of();
+
+        public List<String> getPaths() {
+            return paths;
+        }
+
+        public void setPaths(List<String> paths) {
+            this.paths = paths == null ? List.of() : List.copyOf(paths);
+        }
 
         public List<String> getInclude() {
             return include;
@@ -1004,7 +1016,9 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             this.exclude = exclude == null ? List.of() : List.copyOf(exclude);
         }
 
-        private void validate() {
+        private void validate(Path repository) {
+            MyBatisSqlSourceScope scope = MyBatisSqlSourceScope.resolve(repository, paths);
+            paths = scope.configuredPaths();
             if (include == null || include.isEmpty() || include.stream().anyMatch(value -> value == null || value.isBlank())) {
                 throw new IllegalArgumentException("source.include must contain at least one non-blank XML glob");
             }
