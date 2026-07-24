@@ -81,11 +81,13 @@ public class ProjectUnitTestGenerationBatchRunner {
         for (Map<String, Object> batch : batches) {
             String batchId = string(batch.get("batch_id"));
             Acceptance acceptance = validate(properties, batch);
+            BatchResult existing = allResults.get(batchId);
             BatchResult result = new BatchResult(
                     batchId,
                     acceptance.accepted(),
                     acceptance.summary(),
-                    List.of(new AttemptRecord(0, "verification", acceptance.accepted(), acceptance.summary()))
+                    List.of(new AttemptRecord(0, "verification", acceptance.accepted(), acceptance.summary())),
+                    existing == null ? List.of() : existing.issues()
             );
             selectedResults.add(result);
             allResults.put(result.batchId(), result);
@@ -97,11 +99,12 @@ public class ProjectUnitTestGenerationBatchRunner {
     BatchResult runBatch(ProjectUnitTestGenerationProperties properties, Path out, Map<String, Object> batch) throws Exception {
         String batchId = string(batch.get("batch_id"));
         List<AttemptRecord> attempts = new ArrayList<>();
+        List<String> issues = new ArrayList<>();
 
         Acceptance precheck = validate(properties, batch);
         attempts.add(new AttemptRecord(0, "precheck", precheck.accepted(), precheck.summary()));
         if (precheck.accepted()) {
-            return new BatchResult(batchId, true, precheck.summary(), attempts);
+            return new BatchResult(batchId, true, precheck.summary(), attempts, issues);
         }
 
         String failureSummary = precheck.summary();
@@ -130,19 +133,26 @@ public class ProjectUnitTestGenerationBatchRunner {
 
             ValidationCheck protectedFiles = protectedSnapshot.validate();
             if (!protectedFiles.ok()) {
-                AttemptRecord record = new AttemptRecord(attempt, "postcheck", false, protectedFiles.error());
-                attempts.add(record);
-                return new BatchResult(batchId, false, protectedFiles.error(), attempts);
+                if (!issues.contains(protectedFiles.error())) {
+                    issues.add(protectedFiles.error());
+                }
+                attempts.add(new AttemptRecord(attempt, "filesystem-issue", false, protectedFiles.error()));
             }
 
             Acceptance postcheck = validate(properties, batch);
             attempts.add(new AttemptRecord(attempt, "postcheck", postcheck.accepted(), postcheck.summary()));
             if (postcheck.accepted()) {
-                return new BatchResult(batchId, true, postcheck.summary(), attempts);
+                return new BatchResult(batchId, true, postcheck.summary(), attempts, issues);
             }
             failureSummary = postcheck.summary();
         }
-        return new BatchResult(batchId, false, "exceeded agentbridge.max-attempts: " + failureSummary, attempts);
+        return new BatchResult(
+                batchId,
+                false,
+                "exceeded agentbridge.max-attempts: " + failureSummary,
+                attempts,
+                issues
+        );
     }
 
     private Acceptance validate(ProjectUnitTestGenerationProperties properties, Map<String, Object> batch) throws Exception {
@@ -459,6 +469,7 @@ public class ProjectUnitTestGenerationBatchRunner {
             row.put("accepted", result.accepted());
             row.put("failure_summary", result.failureSummary());
             row.put("attempts", result.attempts().stream().map(AttemptRecord::toMap).toList());
+            row.put("issues", result.issues());
             rows.add(row);
         }
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(out.resolve(RESULTS_JSON).toFile(), Map.of(
@@ -483,7 +494,8 @@ public class ProjectUnitTestGenerationBatchRunner {
                     batchId,
                     row.path("accepted").asBoolean(false),
                     row.path("failure_summary").asText(""),
-                    attempts(row.path("attempts"))
+                    attempts(row.path("attempts")),
+                    strings(row.path("issues"))
             ));
         }
         return results;
@@ -505,6 +517,15 @@ public class ProjectUnitTestGenerationBatchRunner {
         return attempts;
     }
 
+    private List<String> strings(JsonNode rows) {
+        if (!rows.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        rows.forEach(row -> values.add(row.asText("")));
+        return values.stream().filter(value -> !value.isBlank()).toList();
+    }
+
     private String first(Object value) {
         if (value instanceof List<?> list && !list.isEmpty()) {
             return list.get(0).toString();
@@ -520,7 +541,13 @@ public class ProjectUnitTestGenerationBatchRunner {
         return value == null ? "" : value.replace('\\', '/');
     }
 
-    public record BatchResult(String batchId, boolean accepted, String failureSummary, List<AttemptRecord> attempts) {
+    public record BatchResult(
+            String batchId,
+            boolean accepted,
+            String failureSummary,
+            List<AttemptRecord> attempts,
+            List<String> issues
+    ) {
     }
 
     public record AttemptRecord(int attempt, String phase, boolean accepted, String summary) {

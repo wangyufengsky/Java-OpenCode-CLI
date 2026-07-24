@@ -1,0 +1,14 @@
+{
+  "schemaVersion" : "workflow-run/v1",
+  "executionId" : "run-20260724T100811.083+0800-0baf7b1b",
+  "consoleRunId" : 2024,
+  "chainId" : "git-code-contribution-report",
+  "mode" : "rerun",
+  "rerunType" : "synthesis",
+  "rerunIds" : [ ],
+  "publicationGeneration" : 2,
+  "state" : "FAILED",
+  "message" : "git-report rerun requires existing preparation output: /Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/git-report-output/runs/run-20260724T100811.083+0800-0baf7b1b/bundle/summary.json",
+  "stableRoot" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/git-report-output",
+  "updatedAt" : "2026-07-24T10:08:11.103528+08:00"
+}

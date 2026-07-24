@@ -18,6 +18,7 @@ import java.util.Set;
 
 public final class MyBatisDatabasePreflight {
     private static final String SAFETY_PROBE_CONTRACT_VERSION = "mybatis-sql-review-db-safety-v2";
+    private static final String GENERIC_CONNECTION_PROBE_SQL = "SELECT 1 AS contract_probe";
     private static final List<String> SAFETY_PROBE_COLUMNS = List.of(
             "probeContractVersion", "currentDatabase", "currentSchema", "currentUser",
             "superuser", "rolbypassrls", "systemAdmin", "auditAdmin", "roleAdmin", "roleMembershipCount",
@@ -133,19 +134,31 @@ public final class MyBatisDatabasePreflight {
         Map<String, AgentBridgeClient.ToolDefinition> tools = requireNativeTools(mcpUri);
         requireNativeToolSchemas(tools);
         JsonNode dataSource = resolveDataSource(mcpUri, nativeContract, binding.dataSource());
-        String databaseSystem = requiredText(dataSource, "databaseSystem", "data-source databaseSystem");
-        if (!databaseSystem.toLowerCase(Locale.ROOT).contains("gaussdb")) {
-            throw new IllegalStateException("configured data source must identify a GaussDB database");
-        }
-        Environment environment = verifiedEnvironment(dataSource, contract.environment());
+        DataSourceIdentity dataSourceIdentity = dataSourceIdentity(dataSource);
+        String databaseSystem = dataSourceIdentity.databaseSystem();
+        Environment environment = verifiedEnvironment(dataSource, contract.environment(), contract.safetyMode());
         requireCatalog(mcpUri, nativeContract, binding.catalog());
-        Set<String> safeBaseRelations = safeBaseRelations(
-                client.callTool(mcpUri, DatabaseMcpContract.LIST_TABLE_SCHEMA, nativeContract.tableSchemaArguments()).structured(),
-                binding);
-        SafetyProbe probe = verifySafetyProbe(callProbe(mcpUri, nativeContract), binding, contract, safeBaseRelations);
-        return new Result(binding, databaseSystem, environment,
-                new StatementTimeoutContract(Duration.ofMillis(probe.statementTimeoutMs()),
-                        StatementTimeoutScope.EFFECTIVE_SESSION, true), safeBaseRelations);
+        AgentBridgeClient.ToolResponse tableSchemaResponse = client.callTool(
+                mcpUri, DatabaseMcpContract.LIST_TABLE_SCHEMA, nativeContract.tableInventoryArguments());
+        if (tableSchemaResponse.text().contains("[...truncated]")) {
+            throw new IllegalStateException(
+                    "Database MCP table-schema response was truncated; request a bounded table inventory without columns/indexes");
+        }
+        TableInventory tableInventory = safeBaseRelations(
+                tableSchemaResponse.structured(), binding);
+        StatementTimeoutContract verifiedTimeout;
+        if (contract.safetyMode() == SafetyMode.STRICT && isGaussDb(databaseSystem)) {
+            SafetyProbe probe = verifySafetyProbe(
+                    callProbe(mcpUri, nativeContract, SAFETY_PROBE_SQL), binding, contract, tableInventory);
+            verifiedTimeout = new StatementTimeoutContract(Duration.ofMillis(probe.statementTimeoutMs()),
+                    StatementTimeoutScope.EFFECTIVE_SESSION, true);
+        } else {
+            verifyGenericConnectionProbe(
+                    callProbe(mcpUri, nativeContract, GENERIC_CONNECTION_PROBE_SQL), binding);
+            verifiedTimeout = contract.statementTimeout();
+        }
+        return new Result(binding, dataSourceIdentity, environment, verifiedTimeout, tableInventory,
+                contract.safetyMode());
     }
 
     public Result verify(URI mcpUri, URI webBaseUri, DatabaseContract contract) throws Exception {
@@ -162,13 +175,23 @@ public final class MyBatisDatabasePreflight {
         Map<String, AgentBridgeClient.ToolDefinition> tools = requireNativeTools(mcpUri);
         requireNativeToolSchemas(tools);
         JsonNode dataSource = resolveDataSource(mcpUri, nativeContract, verified.binding().dataSource());
-        String currentSystem = requiredText(dataSource, "databaseSystem", "data-source databaseSystem");
-        if (!verified.databaseSystem().equals(currentSystem) || verifiedEnvironment(dataSource, verified.environment()) != verified.environment()) {
-            throw new IllegalStateException("per-task data-source system or environment changed after preflight");
+        DataSourceIdentity currentIdentity = dataSourceIdentity(dataSource);
+        if (!verified.dataSourceIdentity.equals(currentIdentity)) {
+            throw new IllegalStateException("per-task data-source identity changed after preflight");
         }
-        verifySafetyProbe(callProbe(mcpUri, nativeContract), verified.binding(),
-                new DatabaseContract(verified.binding().dataSource(), verified.binding().catalog(), verified.binding().schema(),
-                        verified.environment(), true, true, true, verified.statementTimeout()), verified.safeBaseRelations());
+        String currentSystem = currentIdentity.databaseSystem();
+        if (verifiedEnvironment(dataSource, verified.environment(), verified.safetyMode()) != verified.environment()) {
+            throw new IllegalStateException("per-task data-source environment changed after preflight");
+        }
+        if (verified.safetyMode() == SafetyMode.STRICT && isGaussDb(currentSystem)) {
+            verifySafetyProbe(callProbe(mcpUri, nativeContract, SAFETY_PROBE_SQL), verified.binding(),
+                    new DatabaseContract(verified.binding().dataSource(), verified.binding().catalog(), verified.binding().schema(),
+                            verified.environment(), true, true, true, verified.statementTimeout(),
+                            verified.safetyMode()), verified.tableInventory);
+        } else {
+            verifyGenericConnectionProbe(
+                    callProbe(mcpUri, nativeContract, GENERIC_CONNECTION_PROBE_SQL), verified.binding());
+        }
     }
 
     private Map<String, AgentBridgeClient.ToolDefinition> requireNativeTools(URI mcpUri) throws Exception {
@@ -334,39 +357,76 @@ public final class MyBatisDatabasePreflight {
         return "";
     }
 
-    private Environment verifiedEnvironment(JsonNode source, Environment expected) {
-        if (expected != Environment.READ_REPLICA
-                || !"read-replica".equalsIgnoreCase(source.path("environment").asText())) {
+    private Environment verifiedEnvironment(JsonNode source, Environment expected, SafetyMode safetyMode) {
+        if (safetyMode == SafetyMode.CONNECTIVITY_ONLY) {
+            if (expected != Environment.TEST) {
+                throw new IllegalStateException(
+                        "connectivity-only database safety mode is restricted to the test environment");
+            }
+            String reported = source.path("environment").asText("").strip();
+            String normalized = reported.toLowerCase(Locale.ROOT);
+            if (Set.of("production", "prod", "production-primary", "primary").contains(normalized)) {
+                throw new IllegalStateException(
+                        "connectivity-only database safety mode cannot target a non-test data source");
+            }
+            return Environment.TEST;
+        }
+        if (expected != Environment.READ_REPLICA) {
+            throw new IllegalStateException("data-source environment must identify a physical read-replica target");
+        }
+        String reported = source.path("environment").asText("").strip();
+        if (!reported.isEmpty() && !"read-replica".equalsIgnoreCase(reported)) {
             throw new IllegalStateException("data-source environment must identify a physical read-replica target");
         }
         return Environment.READ_REPLICA;
     }
 
-    private Set<String> safeBaseRelations(JsonNode response, DatabaseMcpContract.Binding binding) {
-        if (!response.isObject() || !binding.catalog().equals(response.path("catalog").asText())
-                || !binding.schema().equals(response.path("schema").asText())) {
+    private TableInventory safeBaseRelations(JsonNode response, DatabaseMcpContract.Binding binding) {
+        if (!response.isObject()) {
+            throw new IllegalStateException("table-schema metadata does not match the configured catalog/schema target");
+        }
+        boolean mismatchedCatalog = response.has("catalog")
+                && !binding.catalog().equals(response.path("catalog").asText());
+        boolean mismatchedSchema = response.has("schema")
+                && !binding.schema().equals(response.path("schema").asText());
+        if (mismatchedCatalog || mismatchedSchema) {
             throw new IllegalStateException("table-schema metadata does not match the configured catalog/schema target");
         }
         JsonNode tables = response.path("tables");
         if (!tables.isArray() || tables.isEmpty()) {
             throw new IllegalStateException("Database MCP table-schema inspection must return at least one base TABLE");
         }
+        int totalTablesFound = tables.size();
+        if (response.has("totalTablesFound") || response.has("sampledCount")) {
+            JsonNode total = response.path("totalTablesFound");
+            JsonNode sampled = response.path("sampledCount");
+            if (!total.isIntegralNumber() || !sampled.isIntegralNumber()
+                    || total.intValue() < sampled.intValue()
+                    || sampled.intValue() != tables.size()) {
+                throw new IllegalStateException("Database MCP table-schema inspection returned an incomplete table inventory");
+            }
+            totalTablesFound = total.intValue();
+        }
         Set<String> relations = new LinkedHashSet<>();
         for (JsonNode table : tables) {
-            if (!table.isObject() || !"TABLE".equalsIgnoreCase(table.path("type").asText())) {
+            if (!table.isObject()) {
                 throw new IllegalStateException("every safe relation must explicitly report type TABLE");
             }
-            String name = requiredText(table, "name", "base table name");
+            String reportedType = table.path("type").asText("").strip();
+            if (!reportedType.isEmpty() && !"TABLE".equalsIgnoreCase(reportedType)) {
+                throw new IllegalStateException("every safe relation must explicitly report type TABLE");
+            }
+            String name = firstRequiredText(table, List.of("tableName", "name"), "base table name");
             if (!isUnquotedIdentifier(name) || !relations.add(canonicalRelation(binding.schema(), name))) {
                 throw new IllegalStateException("safe base table inventory contains an invalid or duplicate relation");
             }
         }
-        return Set.copyOf(relations);
+        return new TableInventory(relations, totalTablesFound);
     }
 
-    private JsonNode callProbe(URI mcpUri, DatabaseMcpContract contract) throws Exception {
+    private JsonNode callProbe(URI mcpUri, DatabaseMcpContract contract, String sql) throws Exception {
         AgentBridgeClient.ToolResponse response = client.callTool(mcpUri, DatabaseMcpContract.EXECUTE_QUERY,
-                contract.queryArguments(SAFETY_PROBE_SQL));
+                contract.queryArguments(sql));
         if (response.rawResult().path("isError").asBoolean(false)) {
             throw new IllegalStateException("database safety probe returned an MCP tool error");
         }
@@ -374,7 +434,8 @@ public final class MyBatisDatabasePreflight {
     }
 
     private SafetyProbe verifySafetyProbe(JsonNode response, DatabaseMcpContract.Binding binding,
-                                          DatabaseContract contract, Set<String> expectedBaseRelations) {
+                                          DatabaseContract contract, TableInventory tableInventory) {
+        verifyQueryEnvelope(response, binding);
         JsonNode row = probeRow(response);
         Set<String> fields = new LinkedHashSet<>();
         row.fieldNames().forEachRemaining(fields::add);
@@ -408,16 +469,61 @@ public final class MyBatisDatabasePreflight {
                 || timeoutMillis > contract.statementTimeout().maximum().toMillis()) {
             throw new IllegalStateException("database safety probe statementTimeoutMs must be positive and no more than configured/30000");
         }
-        List<String> expectedTables = expectedBaseRelations.stream()
+        List<String> sampledTables = tableInventory.safeBaseRelations().stream()
                 .map(relation -> relation.substring(relation.indexOf('.') + 1)).sorted().toList();
-        requireProbeText(row, "baseTableNames", String.join(",", expectedTables));
-        if (requiredProbeLong(row, "baseTableCount") != expectedBaseRelations.size()) {
+        String reportedNames = requiredProbeText(row, "baseTableNames");
+        Set<String> verifiedTables = new LinkedHashSet<>();
+        for (String table : reportedNames.split(",", -1)) {
+            String name = table.strip().toLowerCase(Locale.ROOT);
+            if (!isUnquotedIdentifier(name) || !verifiedTables.add(name)) {
+                throw new IllegalStateException("database safety probe baseTableNames is invalid");
+            }
+        }
+        long verifiedTableCount = requiredProbeLong(row, "baseTableCount");
+        if (verifiedTableCount != tableInventory.totalTablesFound()
+                || verifiedTableCount != verifiedTables.size()
+                || !verifiedTables.containsAll(sampledTables)) {
             throw new IllegalStateException("database safety probe baseTableCount does not match the verified inventory");
         }
         if (!requiredProbeBoolean(row, "readReplica")) {
             throw new IllegalStateException("database safety probe could not prove a physical read-replica with pg_is_in_recovery()");
         }
         return new SafetyProbe(timeoutMillis);
+    }
+
+    private void verifyGenericConnectionProbe(JsonNode response, DatabaseMcpContract.Binding binding) {
+        verifyQueryEnvelope(response, binding);
+        JsonNode row = probeRow(response);
+        if (row.size() != 1) {
+            throw new IllegalStateException("generic database connection probe must return contract_probe=1");
+        }
+        Map.Entry<String, JsonNode> probe = row.fields().next();
+        String normalizedName = probe.getKey().replace("_", "").toLowerCase(Locale.ROOT);
+        if (!"contractprobe".equals(normalizedName) || !probe.getValue().isNumber()
+                || probe.getValue().decimalValue().compareTo(java.math.BigDecimal.ONE) != 0) {
+            throw new IllegalStateException("generic database connection probe must return contract_probe=1");
+        }
+    }
+
+    private void verifyQueryEnvelope(JsonNode response, DatabaseMcpContract.Binding binding) {
+        if (!response.isObject()) {
+            return;
+        }
+        boolean mismatchedMode = response.has("mode")
+                && !"QUERY".equalsIgnoreCase(response.path("mode").asText());
+        boolean missingResultSet = response.has("hasResultSet")
+                && !response.path("hasResultSet").asBoolean(false);
+        boolean mismatchedUpdateCount = response.has("updateCount")
+                && response.path("updateCount").asLong() != -1;
+        boolean mismatchedDataSource = response.has("dataSource")
+                && !binding.dataSource().equals(response.path("dataSource").asText());
+        boolean mismatchedRowCount = response.has("rowCount")
+                && (!response.path("rowCount").isIntegralNumber()
+                || response.path("rowCount").intValue() != response.path("rows").size());
+        if (mismatchedMode || missingResultSet || mismatchedUpdateCount
+                || mismatchedDataSource || mismatchedRowCount) {
+            throw new IllegalStateException("database query response envelope does not match the bound read query");
+        }
     }
 
     private JsonNode probeRow(JsonNode response) {
@@ -427,9 +533,15 @@ public final class MyBatisDatabasePreflight {
             }
             throw new IllegalStateException("database safety probe must return exactly one row");
         }
-        if (!response.isObject() || !response.path("columns").isArray() || !response.path("rows").isArray()
-                || response.path("rows").size() != 1) {
-            throw new IllegalStateException("database safety probe must return an array or strict columns/one-row response");
+        if (!response.isObject() || !response.path("rows").isArray() || response.path("rows").size() != 1) {
+            throw new IllegalStateException("database probe must return an array or an object with exactly one row");
+        }
+        JsonNode encodedRow = response.path("rows").get(0);
+        if (!response.has("columns") && encodedRow.isObject()) {
+            return encodedRow;
+        }
+        if (!response.path("columns").isArray()) {
+            throw new IllegalStateException("database safety probe columns must be an array when rows are positional");
         }
         List<String> columns = new ArrayList<>();
         for (JsonNode column : response.path("columns")) {
@@ -441,7 +553,6 @@ public final class MyBatisDatabasePreflight {
         if (!SAFETY_PROBE_COLUMNS.equals(columns)) {
             throw new IllegalStateException("database safety probe columns do not match contract " + SAFETY_PROBE_CONTRACT_VERSION);
         }
-        JsonNode encodedRow = response.path("rows").get(0);
         if (encodedRow.isObject()) {
             return encodedRow;
         }
@@ -456,6 +567,23 @@ public final class MyBatisDatabasePreflight {
     }
 
     private void verifyCredentialContract(DatabaseContract contract) {
+        StatementTimeoutContract timeout = contract.statementTimeout();
+        if (!timeout.confirmed() || timeout.maximum().isZero() || timeout.maximum().isNegative()
+                || timeout.maximum().compareTo(Duration.ofSeconds(30)) > 0) {
+            throw new IllegalStateException("confirmed database/server/role statement_timeout must be positive and <= 30 seconds");
+        }
+        if (timeout.scope() != StatementTimeoutScope.DATABASE
+                && timeout.scope() != StatementTimeoutScope.SERVER
+                && timeout.scope() != StatementTimeoutScope.ROLE) {
+            throw new IllegalStateException("statement_timeout scope must be DATABASE, SERVER, or ROLE");
+        }
+        if (contract.safetyMode() == SafetyMode.CONNECTIVITY_ONLY) {
+            if (contract.environment() != Environment.TEST) {
+                throw new IllegalStateException(
+                        "connectivity-only database safety mode is restricted to the test environment");
+            }
+            return;
+        }
         if (contract.environment() != Environment.READ_REPLICA) {
             throw new IllegalStateException("database environment must be a physical read-replica");
         }
@@ -467,16 +595,6 @@ public final class MyBatisDatabasePreflight {
         }
         if (!contract.userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic()) {
             throw new IllegalStateException("user-defined and security-definer function execution must be revoked from the audit account, including PUBLIC");
-        }
-        StatementTimeoutContract timeout = contract.statementTimeout();
-        if (!timeout.confirmed() || timeout.maximum().isZero() || timeout.maximum().isNegative()
-                || timeout.maximum().compareTo(Duration.ofSeconds(30)) > 0) {
-            throw new IllegalStateException("confirmed database/server/role statement_timeout must be positive and <= 30 seconds");
-        }
-        if (timeout.scope() != StatementTimeoutScope.DATABASE
-                && timeout.scope() != StatementTimeoutScope.SERVER
-                && timeout.scope() != StatementTimeoutScope.ROLE) {
-            throw new IllegalStateException("statement_timeout scope must be DATABASE, SERVER, or ROLE");
         }
     }
 
@@ -494,6 +612,42 @@ public final class MyBatisDatabasePreflight {
             throw new IllegalStateException("missing " + label + " in Database MCP response");
         }
         return value;
+    }
+
+    private String firstRequiredText(JsonNode node, List<String> fields, String label) {
+        for (String field : fields) {
+            String value = node.path(field).asText("").strip();
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        throw new IllegalStateException("missing " + label + " in Database MCP response");
+    }
+
+    private String databaseSystem(JsonNode dataSource) {
+        return firstRequiredText(dataSource,
+                List.of("type", "databaseSystem", "dbType", "databaseType"), "data-source database type");
+    }
+
+    private DataSourceIdentity dataSourceIdentity(JsonNode dataSource) {
+        return new DataSourceIdentity(
+                firstRequiredText(dataSource, List.of("dataSource", "name"), "data-source name"),
+                databaseSystem(dataSource),
+                optionalText(dataSource, "driverClass"),
+                optionalText(dataSource, "url"),
+                optionalText(dataSource, "version"),
+                optionalText(dataSource, "scope"),
+                optionalText(dataSource, "project"),
+                optionalText(dataSource, "projectPath")
+        );
+    }
+
+    private String optionalText(JsonNode node, String field) {
+        return node.path(field).asText("").strip();
+    }
+
+    private boolean isGaussDb(String databaseSystem) {
+        return databaseSystem.toLowerCase(Locale.ROOT).contains("gaussdb");
     }
 
     private void requireProbeText(JsonNode row, String field, String expected) {
@@ -524,6 +678,20 @@ public final class MyBatisDatabasePreflight {
     }
 
     public enum Environment { READ_REPLICA, TEST, PRODUCTION_PRIMARY }
+    public enum SafetyMode {
+        STRICT("strict"),
+        CONNECTIVITY_ONLY("connectivity-only");
+
+        private final String configValue;
+
+        SafetyMode(String configValue) {
+            this.configValue = configValue;
+        }
+
+        public String configValue() {
+            return configValue;
+        }
+    }
     public enum StatementTimeoutScope { DATABASE, SERVER, ROLE, EFFECTIVE_SESSION }
 
     public record StatementTimeoutContract(Duration maximum, StatementTimeoutScope scope, boolean confirmed) {
@@ -537,39 +705,79 @@ public final class MyBatisDatabasePreflight {
                                    boolean nonOwnerNonAdminReadOnlyAccount,
                                    boolean rowLevelSecurityDisabledForSafeBaseTables,
                                    boolean userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic,
-                                   StatementTimeoutContract statementTimeout) {
+                                   StatementTimeoutContract statementTimeout,
+                                   SafetyMode safetyMode) {
+        public DatabaseContract(String connectionName, String databaseName, String schemaName, Environment environment,
+                                boolean nonOwnerNonAdminReadOnlyAccount,
+                                boolean rowLevelSecurityDisabledForSafeBaseTables,
+                                boolean userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic,
+                                StatementTimeoutContract statementTimeout) {
+            this(connectionName, databaseName, schemaName, environment, nonOwnerNonAdminReadOnlyAccount,
+                    rowLevelSecurityDisabledForSafeBaseTables,
+                    userDefinedAndSecurityDefinerFunctionExecutionRevokedIncludingPublic,
+                    statementTimeout, SafetyMode.STRICT);
+        }
+
         public DatabaseContract {
             Objects.requireNonNull(connectionName, "connectionName");
             Objects.requireNonNull(databaseName, "databaseName");
             Objects.requireNonNull(schemaName, "schemaName");
             Objects.requireNonNull(environment, "environment");
             Objects.requireNonNull(statementTimeout, "statementTimeout");
+            Objects.requireNonNull(safetyMode, "safetyMode");
         }
     }
 
     private record SafetyProbe(long statementTimeoutMs) { }
+    private record TableInventory(Set<String> safeBaseRelations, int totalTablesFound) {
+        private TableInventory {
+            safeBaseRelations = Set.copyOf(safeBaseRelations);
+            if (safeBaseRelations.isEmpty() || totalTablesFound < safeBaseRelations.size()) {
+                throw new IllegalArgumentException("table inventory must contain a valid bounded sample");
+            }
+        }
+    }
+    private record DataSourceIdentity(
+            String name,
+            String databaseSystem,
+            String driverClass,
+            String url,
+            String version,
+            String scope,
+            String project,
+            String projectPath
+    ) { }
 
     public static final class Result {
         private final DatabaseMcpContract.Binding binding;
-        private final String databaseSystem;
+        private final DataSourceIdentity dataSourceIdentity;
         private final Environment environment;
         private final StatementTimeoutContract statementTimeout;
+        private final TableInventory tableInventory;
         private final Set<String> safeBaseRelations;
+        private final SafetyMode safetyMode;
 
-        private Result(DatabaseMcpContract.Binding binding, String databaseSystem, Environment environment,
-                       StatementTimeoutContract statementTimeout, Set<String> safeBaseRelations) {
+        private Result(DatabaseMcpContract.Binding binding, DataSourceIdentity dataSourceIdentity, Environment environment,
+                       StatementTimeoutContract statementTimeout, TableInventory tableInventory,
+                       SafetyMode safetyMode) {
             this.binding = Objects.requireNonNull(binding, "binding");
-            this.databaseSystem = Objects.requireNonNull(databaseSystem, "databaseSystem");
+            this.dataSourceIdentity = Objects.requireNonNull(dataSourceIdentity, "dataSourceIdentity");
             this.environment = Objects.requireNonNull(environment, "environment");
             this.statementTimeout = Objects.requireNonNull(statementTimeout, "statementTimeout");
-            this.safeBaseRelations = Set.copyOf(Objects.requireNonNull(safeBaseRelations, "safeBaseRelations"));
+            this.tableInventory = Objects.requireNonNull(tableInventory, "tableInventory");
+            this.safeBaseRelations = tableInventory.safeBaseRelations();
+            this.safetyMode = Objects.requireNonNull(safetyMode, "safetyMode");
         }
 
         public DatabaseMcpContract.Binding binding() { return binding; }
-        public String databaseSystem() { return databaseSystem; }
+        public String databaseSystem() { return dataSourceIdentity.databaseSystem(); }
         public Environment environment() { return environment; }
         public StatementTimeoutContract statementTimeout() { return statementTimeout; }
         public Set<String> safeBaseRelations() { return safeBaseRelations; }
+        public SafetyMode safetyMode() { return safetyMode; }
+        public String databaseSafety() {
+            return safetyMode == SafetyMode.CONNECTIVITY_ONLY ? "unverified" : "verified";
+        }
 
     }
 }

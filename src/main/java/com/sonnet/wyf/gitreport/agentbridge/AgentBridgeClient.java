@@ -521,15 +521,32 @@ public class AgentBridgeClient {
     }
 
     private JsonNode structured(String text, JsonNode result) {
-        if (result.has("structuredContent")) {
-            return result.path("structuredContent").deepCopy();
-        }
+        JsonNode structuredContent = result.path("structuredContent");
+        boolean emptyStructuredContent = structuredContent.isMissingNode()
+                || structuredContent.isNull()
+                || structuredContent.isObject() && structuredContent.isEmpty()
+                || structuredContent.isArray() && structuredContent.isEmpty()
+                || structuredContent.isTextual() && structuredContent.asText().isBlank();
+        JsonNode textJson = null;
         if (!text.isBlank()) {
             try {
-                return objectMapper.readTree(text).deepCopy();
+                textJson = objectMapper.readTree(text);
             } catch (Exception ignored) {
-                return objectMapper.createObjectNode();
+                // Non-JSON text remains available through ToolResponse.text().
             }
+        }
+        if (!emptyStructuredContent) {
+            if (structuredContent.isObject() && textJson != null && textJson.isObject()) {
+                ObjectNode merged = (ObjectNode) textJson.deepCopy();
+                structuredContent.fields().forEachRemaining(
+                        entry -> merged.set(entry.getKey(), entry.getValue().deepCopy())
+                );
+                return merged;
+            }
+            return structuredContent.deepCopy();
+        }
+        if (textJson != null) {
+            return textJson.deepCopy();
         }
         return objectMapper.createObjectNode();
     }

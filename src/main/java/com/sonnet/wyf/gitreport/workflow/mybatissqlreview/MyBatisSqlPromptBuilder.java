@@ -43,6 +43,8 @@ public final class MyBatisSqlPromptBuilder {
         runtime.put("schema", context.schema());
         runtime.put("project", context.project().toAbsolutePath().normalize().toString());
         runtime.put("scope", context.scope());
+        runtime.put("safety_mode", context.safetyMode());
+        runtime.put("database_safety", context.databaseSafety());
         Path candidateDirectory = context.candidateDirectory().toAbsolutePath().normalize();
         runtime.put("candidate_directory", candidateDirectory.toString());
         runtime.put("report_path", candidateDirectory.resolve("report.md").toString());
@@ -87,8 +89,36 @@ public final class MyBatisSqlPromptBuilder {
             String schema,
             Path project,
             String scope,
+            String safetyMode,
+            String databaseSafety,
             Path candidateDirectory
     ) {
+        public Context(
+                String statementKey,
+                String mapperRelativePath,
+                String namespace,
+                String statementId,
+                String commandType,
+                boolean selectKey,
+                int sourceStartLine,
+                int sourceEndLine,
+                String rawMapperXml,
+                String normalizedSql,
+                List<String> dynamicNodes,
+                List<String> parameterPlaceholders,
+                String dataSource,
+                String catalog,
+                String schema,
+                Path project,
+                String scope,
+                Path candidateDirectory
+        ) {
+            this(statementKey, mapperRelativePath, namespace, statementId, commandType, selectKey,
+                    sourceStartLine, sourceEndLine, rawMapperXml, normalizedSql, dynamicNodes,
+                    parameterPlaceholders, dataSource, catalog, schema, project, scope,
+                    "strict", "verified", candidateDirectory);
+        }
+
         public Context {
             requireNonBlank(statementKey, "statementKey");
             requireNonBlank(mapperRelativePath, "mapperRelativePath");
@@ -107,6 +137,8 @@ public final class MyBatisSqlPromptBuilder {
             requireNonBlank(schema, "schema");
             project = Objects.requireNonNull(project, "project").toAbsolutePath().normalize();
             scope = DatabaseMcpContract.Scope.parse(scope).name();
+            requireNonBlank(safetyMode, "safetyMode");
+            requireNonBlank(databaseSafety, "databaseSafety");
             Objects.requireNonNull(candidateDirectory, "candidateDirectory");
         }
 

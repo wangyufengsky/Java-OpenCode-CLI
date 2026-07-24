@@ -326,6 +326,10 @@ agentbridge:
   max-attempts: 5
 ```
 
+Agent 若创建、修改或删除 `allowed_write_globs` 以外的仓库文件，链路会把该变化记录到
+`agentbridge-results.json` 的 `issues` 以及最终报告中，但不会仅因这类问题中断当前批次或后续批次。
+测试存在性、编译、运行和可选覆盖率验收仍按原规则决定 batch 是否通过。
+
 | 字段 | 说明 |
 | --- | --- |
 | `project.id` | 写入任务和报告元信息的项目 ID。 |
@@ -378,7 +382,8 @@ database:
   database-name: "CHANGE_ME_DATABASE"
   schema-name: "CHANGE_ME_SCHEMA"
   scope: "ALL"
-  environment: "read-replica"
+  safety-mode: "connectivity-only"
+  environment: "test"
   non-owner-non-admin-read-only-account: false
   row-level-security-disabled-for-safe-base-tables: false
   user-defined-and-security-definer-function-execution-revoked-including-public: false
@@ -410,11 +415,12 @@ agentbridge:
 | `database.connection-name` | AgentBridge Custom MCP 注册的 Database MCP 数据源名，必须唯一匹配。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
 | `database.scope` | Database MCP 数据源范围：`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`。 |
-| `database.environment` | 固定为 `read-replica`；预检读取 Database MCP 数据源元数据，并用数据库安全探针的 `pg_is_in_recovery()` 证明 physical standby。每个 SQL task 提交前会重新检查数据源元数据和安全探针。测试库或其它自证环境标签均不接受。 |
-| `database.non-owner-non-admin-read-only-account` | 必须为 `true`，确认凭证属于非 owner、非管理员的专用只读账号。 |
-| `database.row-level-security-disabled-for-safe-base-tables` | 必须为 `true`，确认所有可取证基础表均禁用 RLS。 |
-| `database.user-defined-and-security-definer-function-execution-revoked-including-public` | 必须为 `true`，确认审计账号无法执行用户定义函数和 `SECURITY DEFINER` 函数，并已撤销 `PUBLIC` 的 `EXECUTE`。 |
-| `database.statement-timeout-seconds` / `statement-timeout-scope` | 数据库、server 或 role 级硬超时；必须大于 0 且不超过 30 秒。 |
+| `database.safety-mode` | `connectivity-only` 对所有数据库仅执行受限 `SELECT 1`，只允许搭配 `environment: test`，报告明确标记 `database_safety=unverified`；`strict` 保留引擎安全校验。缺省值为 `strict`。 |
+| `database.environment` | `connectivity-only` 固定为 `test`；`strict` 固定为 `read-replica`。每个 SQL task 提交前都会重新绑定数据源并重复对应探针。 |
+| `database.non-owner-non-admin-read-only-account` | `strict` 必须为 `true`；`connectivity-only` 不把该声明当作已验证事实。 |
+| `database.row-level-security-disabled-for-safe-base-tables` | `strict` 必须为 `true`；`connectivity-only` 不验证 RLS。 |
+| `database.user-defined-and-security-definer-function-execution-revoked-including-public` | `strict` 必须为 `true`；`connectivity-only` 不验证函数执行权限。 |
+| `database.statement-timeout-seconds` / `statement-timeout-scope` | 数据库、server、role 或数据库产品的等价作用域硬超时；必须大于 0 且不超过 30 秒。 |
 | `database.max-rows` / `max-scenarios-per-sql` | 固定为每次 20 行、每条 SQL 最多 3 个代表性 SELECT 场景。 |
 | `database.max-evidence-bytes` | 单 task 数据库证据固定最多 262144 字节。 |
 | `database.retain-raw-rows` / `allow-agent-select` | 固定为 `true`；保留可复核证据，并仅允许受 Java 策略约束的简单 SELECT。 |
@@ -435,9 +441,9 @@ Database MCP 作为 AgentBridge Custom MCP 注册工具运行。应用预检与 
 
 每次调用都携带 `project` 和 `scope`；`scope` 取 `GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`。`cmcp_db_database_execute_sql_query` 的参数精确为 `dataSource`、`sql`、`maxRows: 20`、`project` 和 `scope`。DML、DDL、NoSQL 与未知工具均禁止调用；`insert`、`update`、`delete` 与 `selectKey` 仅进行静态审查。
 
-数据库连接指向集中式 GaussDB 物理只读副本，使用非 owner、非管理员、无角色继承的独立只读账号。安全预检确认可取证基础表的 RLS 状态、函数执行权限、有效 `statement_timeout` 以及账号没有写入或危险对象权限；任一安全事实无法证明时停止运行。数据库凭证隔离、权限与超时构成调用前的安全边界。
+数据库类型只记录、不限制为 GaussDB，并统一按 Database MCP 的真实返回结构读取 `type`、`tableName`、`rows` 等字段。`strict` 模式保留 GaussDB 物理只读副本、RLS、函数权限和有效 `statement_timeout` 探针，非 GaussDB 使用连通性探针及运维确认的安全声明。`connectivity-only` 模式面向可丢弃的开发库，对所有数据库仅执行 `SELECT 1`，不声明账号权限、RLS 或函数权限已经验证，并在逐 SQL 报告中标记 `database_safety=unverified`。
 
-AgentBridge 版本门槛为 `>=1.202.0`。完成 MCP session negotiation 后，Java 通过 MCP `tools/list` 与 `/tool-calls` 的 `items` 获取工具和调用证据。Java 审计 SQL grammar、safe relations 和 scenario count；`cmcp_db_database_execute_sql_query` 的 query 传 `maxRows: 20`。数据库 `statement_timeout` 提供执行超时。
+AgentBridge 版本门槛为 `>=1.202.0`。完成 MCP session negotiation 后，Java 通过 MCP `tools/list` 与 `/tool-calls` 的 `items` 获取工具和调用证据。Java 审计 SQL grammar、safe relations 和 scenario count；`cmcp_db_database_execute_sql_query` 的 query 传 `maxRows: 20`。GaussDB 的数据库 `statement_timeout` 提供执行超时，其他数据库使用等价的数据库侧超时声明。
 
 ## 运行时行为
 

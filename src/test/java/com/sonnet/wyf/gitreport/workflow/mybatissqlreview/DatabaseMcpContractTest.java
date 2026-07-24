@@ -40,6 +40,11 @@ class DatabaseMcpContractTest {
                  "includeColumns":true,"includeIndexes":true,"maxTables":200,
                  "project":"/workspace/example","scope":"ALL"}
                 """));
+        assertThat(contract.tableInventoryArguments()).isEqualTo(objectMapper.readTree("""
+                {"dataSource":"GaussDB-ReadOnly","catalog":"orders","schema":"audit",
+                 "includeColumns":false,"includeIndexes":false,"maxTables":200,
+                 "project":"/workspace/example","scope":"ALL"}
+                """));
     }
 
     @Test

@@ -82,7 +82,7 @@ public final class MyBatisToolCallAudit {
                 sql = call.arguments().path("sql").asText();
                 validateDeterminableScenario(sql, call.id(), database.binding().schema(), call.durationMs());
                 sqlPolicy.validate(sql, call.id(), database.binding().schema(), database.safeBaseRelations());
-                rows = parseRows(call);
+                rows = parseRows(call, database.binding());
             }
             facts.add(new AuditedCallFact(call.id(), call.toolName(), call.timestamp(), call.durationMs(),
                     database.binding().dataSource(), database.binding().catalog(), database.binding().schema(),
@@ -141,7 +141,7 @@ public final class MyBatisToolCallAudit {
         catch (IOException e) { throw violation(call, "tool result evidence could not be serialized safely"); }
     }
 
-    private RowData parseRows(AgentBridgeClient.ToolCallRecord call) {
+    private RowData parseRows(AgentBridgeClient.ToolCallRecord call, DatabaseMcpContract.Binding binding) {
         JsonNode value = call.result();
         if (value.isTextual()) try { value = objectMapper.readTree(value.asText()); } catch (IOException e) { throw violation(call, "query result is not valid JSON"); }
         if (value.isObject() && value.path("structuredContent").isContainerNode()) value = value.path("structuredContent");
@@ -149,14 +149,52 @@ public final class MyBatisToolCallAudit {
         if (value.isArray()) {
             for (JsonNode row : value) { requireRow(call, row); rows.add(row.deepCopy()); }
             if (!rows.isEmpty() && rows.getFirst().isObject()) rows.getFirst().fieldNames().forEachRemaining(columns::add);
-        } else if (value.isObject() && value.path("columns").isArray() && value.path("rows").isArray()) {
+        } else if (value.isObject() && value.path("rows").isArray()) {
             Set<String> unique = new LinkedHashSet<>();
-            for (JsonNode column : value.path("columns")) if (!column.isTextual() || column.asText().isBlank() || !unique.add(column.asText())) throw violation(call, "result columns must be unique non-blank strings"); else columns.add(column.asText());
+            if (value.has("columns")) {
+                if (!value.path("columns").isArray()) throw violation(call, "result columns must be an array");
+                for (JsonNode column : value.path("columns")) if (!column.isTextual() || column.asText().isBlank() || !unique.add(column.asText())) throw violation(call, "result columns must be unique non-blank strings"); else columns.add(column.asText());
+            }
             for (JsonNode row : value.path("rows")) { requireRow(call, row); rows.add(row.deepCopy()); }
-        } else throw violation(call, "query result must be an array or an object with columns and rows");
+            if (columns.isEmpty() && !rows.isEmpty()) {
+                if (!rows.getFirst().isObject()) throw violation(call, "result columns cannot be inferred from positional rows");
+                rows.getFirst().fieldNames().forEachRemaining(columns::add);
+                Set<String> expected = new LinkedHashSet<>(columns);
+                for (JsonNode row : rows) {
+                    if (!row.isObject()) throw violation(call, "query result rows must use one consistent representation");
+                    Set<String> actual = new LinkedHashSet<>();
+                    row.fieldNames().forEachRemaining(actual::add);
+                    if (!actual.equals(expected)) throw violation(call, "query result object rows must expose consistent columns");
+                }
+            }
+            requireRealQueryEnvelope(call, value, binding, rows.size());
+        } else throw violation(call, "query result must be an array or an object with rows");
         if (rows.size() > MAX_ROWS_PER_CALL) throw violation(call, "query result may retain at most 20 rows");
         ObjectNode payload = objectMapper.createObjectNode(); payload.set("columns", objectMapper.valueToTree(columns)); payload.set("rows", objectMapper.valueToTree(rows));
         return new RowData(payload, columns, rows);
+    }
+
+    private static void requireRealQueryEnvelope(
+            AgentBridgeClient.ToolCallRecord call,
+            JsonNode value,
+            DatabaseMcpContract.Binding binding,
+            int rowCount
+    ) {
+        boolean mismatchedMode = value.has("mode")
+                && !"QUERY".equalsIgnoreCase(value.path("mode").asText());
+        boolean missingResultSet = value.has("hasResultSet")
+                && !value.path("hasResultSet").asBoolean(false);
+        boolean mismatchedUpdateCount = value.has("updateCount")
+                && value.path("updateCount").asLong() != -1;
+        boolean mismatchedRowCount = value.has("rowCount")
+                && (!value.path("rowCount").isIntegralNumber()
+                || value.path("rowCount").intValue() != rowCount);
+        boolean mismatchedDataSource = value.has("dataSource")
+                && !binding.dataSource().equals(value.path("dataSource").asText());
+        if (mismatchedMode || missingResultSet || mismatchedUpdateCount
+                || mismatchedRowCount || mismatchedDataSource) {
+            throw violation(call, "query result envelope does not match the bound read query");
+        }
     }
 
     private static void requireRow(AgentBridgeClient.ToolCallRecord call, JsonNode row) { if (!row.isObject() && !row.isArray()) throw violation(call, "query result rows must contain objects or arrays"); }

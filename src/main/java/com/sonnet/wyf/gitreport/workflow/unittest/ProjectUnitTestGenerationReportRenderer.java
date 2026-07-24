@@ -22,6 +22,7 @@ public class ProjectUnitTestGenerationReportRenderer {
         report.append("## Batches\n\n");
         int accepted = 0;
         int failed = 0;
+        int issueCount = 0;
         for (JsonNode batch : batches.path("batches")) {
             String batchId = batch.path("batch_id").asText();
             JsonNode result = result(results, batchId);
@@ -40,10 +41,15 @@ public class ProjectUnitTestGenerationReportRenderer {
             if (!summary.isBlank()) {
                 report.append("  - summary: ").append(summary).append("\n");
             }
+            for (JsonNode issue : result.path("issues")) {
+                issueCount++;
+                report.append("  - issue: ").append(issue.asText()).append("\n");
+            }
         }
         report.append("\n## Batch Summary\n\n");
         report.append("- accepted: `").append(accepted).append("`\n");
         report.append("- failed: `").append(failed).append("`\n");
+        report.append("- recorded issues: `").append(issueCount).append("`\n");
         Path reportPath = out.resolve("unit-test-generation-report.md");
         Files.writeString(reportPath, report.toString());
         return reportPath;

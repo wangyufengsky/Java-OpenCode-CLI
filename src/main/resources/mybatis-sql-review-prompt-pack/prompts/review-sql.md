@@ -26,9 +26,9 @@ Do not call DML, DDL, NoSQL, or unknown tools. `<insert>`, `<update>`, `<delete>
 
 ## Required connection safety
 
-Use a centralized GaussDB physical read replica. Test databases and self-attested environment labels are not accepted. The connection uses a non-owner, non-admin, read-only account with no role inheritance.
+Use the configured relational Database MCP data source. The database type is recorded but is not restricted to GaussDB. Runtime `safety_mode=strict` uses the engine-specific safety contract. Runtime `safety_mode=connectivity-only` is restricted to `environment=test`, runs only a bounded `SELECT 1` connection probe, and exposes `database_safety=unverified`.
 
-Query only safe base tables for which RLS is disabled. The account cannot execute user-defined or security-definer functions, including PUBLIC grants. The effective `statement_timeout` is positive and no greater than 30 seconds.
+In strict mode, the connection uses a non-owner, non-admin, read-only account with no role inheritance, and non-GaussDB data sources rely on configured operator-confirmed safety assertions for equivalent row-security, function-execution, and timeout controls. Connectivity-only mode does not claim those properties were verified. Query only the bounded safe relation inventory returned by Database MCP.
 
 Database credentials, permissions, and timeout enforcement are the hard safety boundary. The post-hoc audit cannot prevent or undo a database call.
 
@@ -42,4 +42,4 @@ Write only the three exact absolute output paths in the runtime task context:
 2. `summary.json`
 3. `database-evidence.json`
 
-Do not write any other file. `report.md` uses the complete embedded template. Its Database Evidence section contains exactly `[database-evidence.json](database-evidence.json)`. Fill the five labeled report lines with the exact runtime `data_source`, `catalog`, `schema`, `project`, and `scope` values. `summary.json` satisfies the complete embedded schema and repeats those same values. All artifacts repeat the exact mapper and statement fields from the runtime context; do not add placeholder content.
+Do not write any other file. `report.md` uses the complete embedded template. Its Database Evidence section contains exactly `[database-evidence.json](database-evidence.json)`. Fill the seven labeled report lines with the exact runtime `data_source`, `catalog`, `schema`, `project`, `scope`, `safety_mode`, and `database_safety` values. `summary.json` satisfies the complete embedded schema and repeats the database binding values. All artifacts repeat the exact mapper and statement fields from the runtime context; do not add placeholder content.

@@ -11,6 +11,8 @@ Identify the mapper, statement key, command type, selectKey flag, source line ra
 - Schema: `exact runtime schema value`
 - Project: `exact runtime project value`
 - Scope: `exact runtime scope value`
+- Safety mode: `exact runtime safety_mode value`
+- Database safety: `exact runtime database_safety value`
 
 ## Static Analysis
 

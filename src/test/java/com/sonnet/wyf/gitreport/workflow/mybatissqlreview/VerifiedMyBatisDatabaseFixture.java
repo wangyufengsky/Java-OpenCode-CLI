@@ -108,16 +108,24 @@ final class VerifiedMyBatisDatabaseFixture {
         }
 
         private ObjectNode tableSchema() {
-            ObjectNode response = objectMapper.createObjectNode().put("catalog", catalog).put("schema", schema);
+            ObjectNode response = objectMapper.createObjectNode()
+                    .put("totalTablesFound", baseTables.size())
+                    .put("sampledCount", baseTables.size())
+                    .put("tablePrefix", "");
+            response.putArray("keywords");
             ArrayNode tables = response.putArray("tables");
-            baseTables.forEach(table -> tables.addObject().put("name", table).put("type", "TABLE"));
+            baseTables.forEach(table -> tables.addObject().put("tableName", table).put("columnCount", 1));
             return response;
         }
 
         private ArrayNode dataSources() {
             ArrayNode result = objectMapper.createArrayNode();
-            result.addObject().put("name", dataSource).put("databaseSystem", "GaussDB")
-                    .put("environment", "read-replica");
+            result.addObject()
+                    .put("name", dataSource)
+                    .put("type", "GaussDB")
+                    .put("driverClass", "org.opengauss.Driver")
+                    .put("url", "jdbc:opengauss://localhost/" + catalog)
+                    .put("scope", "PROJECT");
             return result;
         }
 
@@ -146,8 +154,11 @@ final class VerifiedMyBatisDatabaseFixture {
                             .collect(java.util.stream.Collectors.joining(",")))
                     .put("baseTableCount", baseTables.size()).put("readReplica", true);
             ObjectNode response = objectMapper.createObjectNode();
-            ArrayNode columns = response.putArray("columns");
-            row.fieldNames().forEachRemaining(columns::add);
+            response.put("mode", "QUERY")
+                    .put("updateCount", -1)
+                    .put("hasResultSet", true)
+                    .put("rowCount", 1)
+                    .put("dataSource", dataSource);
             response.putArray("rows").add(row);
             return response;
         }

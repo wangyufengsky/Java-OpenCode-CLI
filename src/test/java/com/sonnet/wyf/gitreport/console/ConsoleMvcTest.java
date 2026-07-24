@@ -280,6 +280,7 @@ class ConsoleMvcTest {
                 "database.schema-name",
                 "database.scope",
                 "GLOBAL、PROJECT 或 ALL",
+                "database.safety-mode",
                 "database.environment",
                 "database.non-owner-non-admin-read-only-account",
                 "database.row-level-security-disabled-for-safe-base-tables",
@@ -777,7 +778,8 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['database.database-name']").value("CHANGE_ME_DATABASE"))
                 .andExpect(jsonPath("$.defaults['database.schema-name']").value("CHANGE_ME_SCHEMA"))
                 .andExpect(jsonPath("$.defaults['database.scope']").value("ALL"))
-                .andExpect(jsonPath("$.defaults['database.environment']").value("read-replica"))
+                .andExpect(jsonPath("$.defaults['database.safety-mode']").value("connectivity-only"))
+                .andExpect(jsonPath("$.defaults['database.environment']").value("test"))
                 .andExpect(jsonPath("$.defaults['database.non-owner-non-admin-read-only-account']").value(false))
                 .andExpect(jsonPath("$.defaults['database.row-level-security-disabled-for-safe-base-tables']")
                         .value(false))

@@ -1018,6 +1018,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         private String databaseName;
         private String schemaName;
         private String scope = DatabaseMcpContract.Scope.ALL.name();
+        private String safetyMode = MyBatisDatabasePreflight.SafetyMode.STRICT.configValue();
         private String environment;
         private boolean nonOwnerNonAdminReadOnlyAccount;
         private boolean rowLevelSecurityDisabledForSafeBaseTables;
@@ -1060,6 +1061,14 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
 
         public void setScope(String scope) {
             this.scope = scope;
+        }
+
+        public String getSafetyMode() {
+            return safetyMode;
+        }
+
+        public void setSafetyMode(String safetyMode) {
+            this.safetyMode = safetyMode;
         }
 
         public String getEnvironment() {
@@ -1155,6 +1164,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             requireNonBlank(databaseName, "database.database-name");
             requireNonBlank(schemaName, "database.schema-name");
             scope = DatabaseMcpContract.Scope.parse(scope).name();
+            requireNonBlank(safetyMode, "database.safety-mode");
             requireNonBlank(environment, "database.environment");
             requireNonBlank(statementTimeoutScope, "database.statement-timeout-scope");
             if (statementTimeoutSeconds < 1 || statementTimeoutSeconds > 30) {
@@ -1189,7 +1199,8 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                                     "database.statement-timeout-scope"
                             ),
                             true
-                    )
+                    ),
+                    parseEnum(MyBatisDatabasePreflight.SafetyMode.class, safetyMode, "database.safety-mode")
             );
         }
     }

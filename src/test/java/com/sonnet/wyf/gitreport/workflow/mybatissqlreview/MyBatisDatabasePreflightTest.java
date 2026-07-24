@@ -56,6 +56,79 @@ class MyBatisDatabasePreflightTest {
                 .isEqualTo(Path.of("/workspace/example").toAbsolutePath().normalize().toString());
         assertThat(bridge.argumentsFor(DatabaseMcpContract.EXECUTE_QUERY).path("scope").asText())
                 .isEqualTo("ALL");
+        assertThat(bridge.argumentsFor(DatabaseMcpContract.LIST_TABLE_SCHEMA)
+                .path("includeColumns").booleanValue()).isFalse();
+        assertThat(bridge.argumentsFor(DatabaseMcpContract.LIST_TABLE_SCHEMA)
+                .path("includeIndexes").booleanValue()).isFalse();
+    }
+
+    @Test
+    void acceptsRealDatabaseMcpResponseShapesForNonGaussDbDataSources() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.useRealMySqlResponses();
+        MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(bridge);
+
+        MyBatisDatabasePreflight.Result result = preflight.verify(
+                bridge.mcpUri(), bridge.webUri(), mysqlContract(),
+                Path.of("/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI"), "ALL"
+        );
+
+        assertThat(result.databaseSystem()).isEqualTo("MySQL");
+        assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder(
+                "deepseek.company", "deepseek.game", "deepseek.player", "deepseek.player_game"
+        );
+        assertThat(bridge.argumentsFor(DatabaseMcpContract.EXECUTE_QUERY).path("sql").asText())
+                .isEqualTo("SELECT 1 AS contract_probe");
+    }
+
+    @Test
+    void rejectsIncompleteRealDatabaseMcpTableInventory() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.useRealMySqlResponses();
+        bridge.tableSchema().put("sampledCount", 3);
+
+        assertRejected(bridge, mysqlContract(), "incomplete table inventory");
+    }
+
+    @Test
+    void acceptsAConsistentBoundedSampleFromALargeDatabaseAsASafeSubset() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.useRealMySqlResponses();
+        bridge.tableSchema().put("totalTablesFound", 413);
+
+        MyBatisDatabasePreflight.Result result = new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), mysqlContract(),
+                Path.of("/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI"), "ALL"
+        );
+
+        assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder(
+                "deepseek.company", "deepseek.game", "deepseek.player", "deepseek.player_game"
+        );
+    }
+
+    @Test
+    void acceptsAGaussDbSampleWhenTheStrictProbeConfirmsTheFullInventory() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.tableSchema().put("totalTablesFound", 3).put("sampledCount", 2);
+        bridge.probeRow()
+                .put("baseTableNames", "line_items,orders,shipment_history")
+                .put("baseTableCount", 3);
+
+        MyBatisDatabasePreflight.Result result = new MyBatisDatabasePreflight(bridge).verify(
+                bridge.mcpUri(), bridge.webUri(), contract(), Path.of("/workspace/example"), "ALL"
+        );
+
+        assertThat(result.safeBaseRelations()).containsExactlyInAnyOrder(
+                "audit.line_items", "audit.orders"
+        );
+    }
+
+    @Test
+    void reportsTruncatedTableSchemaOutputInsteadOfClaimingThatTheDatabaseHasNoTables() {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.truncateTableSchemaResponse();
+
+        assertRejected(bridge, contract(), "table-schema response was truncated");
     }
 
     @Test
@@ -136,6 +209,22 @@ class MyBatisDatabasePreflightTest {
         assertThat(bridge.argumentsFor(DatabaseMcpContract.EXECUTE_QUERY).path("dataSource").asText())
                 .isEqualTo(result.binding().dataSource());
         assertThat(bridge.capabilityChecks()).isEqualTo(2);
+    }
+
+    @Test
+    void recheckRejectsRealDataSourceIdentityDriftWithTheSameNameAndType() throws Exception {
+        NativeDatabaseBridge bridge = nativeBridge();
+        bridge.useRealMySqlResponses();
+        MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(bridge);
+        MyBatisDatabasePreflight.Result result = preflight.verify(
+                bridge.mcpUri(), bridge.webUri(), mysqlContract(),
+                Path.of("/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI"), "ALL"
+        );
+        ((ObjectNode) bridge.dataSources().get(0))
+                .put("url", "jdbc:mysql://different-host:3306/deepseek");
+
+        assertThatThrownBy(() -> preflight.recheck(bridge.mcpUri(), bridge.webUri(), result))
+                .hasMessageContaining("data-source identity changed");
     }
 
     @Test
@@ -234,6 +323,18 @@ class MyBatisDatabasePreflightTest {
     }
 
     @Test
+    void rejectsConnectivityOnlyOutsideTheTestEnvironment() {
+        assertRejected(nativeBridge(), new MyBatisDatabasePreflight.DatabaseContract(
+                        "GaussDB-ReadOnly", "orders", "audit",
+                        MyBatisDatabasePreflight.Environment.PRODUCTION_PRIMARY,
+                        false, false, false,
+                        new MyBatisDatabasePreflight.StatementTimeoutContract(
+                                Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.ROLE, true),
+                        MyBatisDatabasePreflight.SafetyMode.CONNECTIVITY_ONLY),
+                "restricted to the test environment");
+    }
+
+    @Test
     void acceptsArrayAndPositionalColumnsRowsSafetyProbeResults() throws Exception {
         NativeDatabaseBridge bridge = nativeBridge();
         ArrayNode array = objectMapper.createArrayNode().add(bridge.probeRow().deepCopy());
@@ -287,6 +388,17 @@ class MyBatisDatabasePreflightTest {
         );
     }
 
+    private MyBatisDatabasePreflight.DatabaseContract mysqlContract() {
+        return new MyBatisDatabasePreflight.DatabaseContract(
+                "deepseek@localhost", "deepseek", "deepseek",
+                MyBatisDatabasePreflight.Environment.READ_REPLICA,
+                true, true, true,
+                new MyBatisDatabasePreflight.StatementTimeoutContract(
+                        Duration.ofSeconds(30), MyBatisDatabasePreflight.StatementTimeoutScope.ROLE, true
+                )
+        );
+    }
+
     private static String join(String first, String second) {
         return first + second;
     }
@@ -301,6 +413,7 @@ class MyBatisDatabasePreflightTest {
         private ArrayNode catalogs;
         private ObjectNode tableSchema;
         private JsonNode safetyProbe;
+        private boolean truncatedTableSchemaResponse;
         private boolean databaseMcpSupported = true;
         private int capabilityChecks;
 
@@ -382,6 +495,13 @@ class MyBatisDatabasePreflightTest {
         public ToolResponse callTool(URI ignored, String name, JsonNode requestArguments) {
             calledTools.add(name);
             arguments.put(name, requestArguments.deepCopy());
+            if (DatabaseMcpContract.LIST_TABLE_SCHEMA.equals(name) && truncatedTableSchemaResponse) {
+                return new ToolResponse(
+                        tableSchema,
+                        "{\"totalTablesFound\":413,\"sampledCount\":200,\"tables\":[...truncated]",
+                        objectMapper.createObjectNode()
+                );
+            }
             JsonNode response = switch (name) {
                 case DatabaseMcpContract.LIST_DATASOURCES -> dataSources;
                 case DatabaseMcpContract.LIST_DATABASES -> catalogs;
@@ -413,6 +533,42 @@ class MyBatisDatabasePreflightTest {
         ObjectNode safetyProbe() { return (ObjectNode) safetyProbe; }
         ObjectNode probeRow() { return (ObjectNode) safetyProbe().at("/rows/0"); }
         void setSafetyProbe(JsonNode safetyProbe) { this.safetyProbe = safetyProbe; }
+        void truncateTableSchemaResponse() { this.truncatedTableSchemaResponse = true; }
+
+        void useRealMySqlResponses() {
+            dataSources = objectMapper.createArrayNode();
+            dataSources.addObject()
+                    .put("driverClass", "com.mysql.cj.jdbc.Driver")
+                    .put("projectPath", "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI")
+                    .put("scope", "PROJECT")
+                    .put("name", "deepseek@localhost")
+                    .put("project", "Java-OpenCode-CLI")
+                    .put("type", "MySQL")
+                    .put("version", "9.2.0")
+                    .put("url", "jdbc:mysql://localhost:3306/deepseek");
+
+            catalogs = objectMapper.createArrayNode();
+            catalogs.addObject().put("name", "deepseek").put("type", "CATALOG");
+
+            tableSchema = objectMapper.createObjectNode()
+                    .put("totalTablesFound", 4)
+                    .put("sampledCount", 4)
+                    .put("tablePrefix", "");
+            tableSchema.putArray("keywords");
+            ArrayNode tables = tableSchema.putArray("tables");
+            tables.addObject().put("tableName", "COMPANY").put("columnCount", 6);
+            tables.addObject().put("tableName", "GAME").put("columnCount", 5);
+            tables.addObject().put("tableName", "PLAYER").put("columnCount", 2);
+            tables.addObject().put("tableName", "PLAYER_GAME").put("columnCount", 5);
+
+            safetyProbe = objectMapper.createObjectNode()
+                    .put("mode", "QUERY")
+                    .put("updateCount", -1)
+                    .put("hasResultSet", true)
+                    .put("rowCount", 1)
+                    .put("dataSource", "deepseek@localhost");
+            ((ObjectNode) safetyProbe).putArray("rows").addObject().put("contractProbe", 1);
+        }
 
         URI mcpUri() {
             return URI.create("http://127.0.0.1:1/mcp");

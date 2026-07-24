@@ -78,6 +78,16 @@ public final class DatabaseMcpContract {
                 .put("maxTables", MAX_TABLES);
     }
 
+    public ObjectNode tableInventoryArguments() {
+        return commonArguments()
+                .put("dataSource", binding.dataSource())
+                .put("catalog", binding.catalog())
+                .put("schema", binding.schema())
+                .put("includeColumns", false)
+                .put("includeIndexes", false)
+                .put("maxTables", MAX_TABLES);
+    }
+
     public ObjectNode queryArguments(String sql) {
         return commonArguments()
                 .put("dataSource", binding.dataSource())

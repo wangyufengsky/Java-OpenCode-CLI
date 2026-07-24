@@ -1,7 +1,7 @@
 # MyBatis XML SQL review chain. Replace every CHANGE_ME value before running.
-# Database credentials must be an isolated non-owner/non-admin read-only account on a
-# centralized GaussDB physical read replica. Every SQL task rechecks the configured native
-# Database MCP data source and safety probe before submit.
+# The example is configured for a disposable development database: connectivity-only runs
+# SELECT 1 and reports database safety as unverified. Use strict + read-replica with an
+# isolated non-owner/non-admin read-only account when the stronger safety boundary is needed.
 
 project:
   id: "example-project"
@@ -25,7 +25,8 @@ database:
   database-name: "CHANGE_ME_DATABASE"
   schema-name: "CHANGE_ME_SCHEMA"
   scope: "ALL"
-  environment: "read-replica"
+  safety-mode: "connectivity-only"
+  environment: "test"
   non-owner-non-admin-read-only-account: false
   row-level-security-disabled-for-safe-base-tables: false
   user-defined-and-security-definer-function-execution-revoked-including-public: false

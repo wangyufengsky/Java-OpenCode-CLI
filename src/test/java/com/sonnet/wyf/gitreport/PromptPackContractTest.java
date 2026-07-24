@@ -54,7 +54,7 @@ class PromptPackContractTest {
     }
 
     @Test
-    void myBatisSqlReviewPromptDefaultsAndDocumentationKeepTheHardSafetyBoundaryVisible() throws Exception {
+    void myBatisSqlReviewPromptAllowsRealDatabaseTypesAndKeepsTheHardSafetyBoundaryVisible() throws Exception {
         String prompt = Files.readString(Path.of(
                 "src/main/resources/mybatis-sql-review-prompt-pack/prompts/review-sql.md"));
         String chain = Files.readString(Path.of("src/main/resources/chains/mybatis-sql-review.yml"));
@@ -62,13 +62,12 @@ class PromptPackContractTest {
         String readme = Files.readString(Path.of("README.md"));
 
         assertThat(prompt).contains(
-                "centralized GaussDB physical read replica",
-                "Test databases and self-attested environment labels are not accepted",
+                "configured relational Database MCP data source",
+                "database type is recorded but is not restricted to GaussDB",
+                "safety_mode=connectivity-only",
+                "database_safety=unverified",
+                "operator-confirmed safety assertions",
                 "non-owner, non-admin, read-only account",
-                "RLS is disabled",
-                "security-definer functions",
-                "including PUBLIC grants",
-                "statement_timeout",
                 "post-hoc audit cannot prevent or undo"
         );
         assertThat(chain).contains(
@@ -93,14 +92,13 @@ class PromptPackContractTest {
                 "cmcp_db_database_execute_sql_query",
                 "GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`",
                 "DML、DDL、NoSQL 与未知工具均禁止调用",
-                "集中式 GaussDB",
-                "物理只读副本",
-                "独立只读账号",
-                "RLS",
-                "SECURITY DEFINER",
-                "PUBLIC",
+                "数据库类型只记录、不限制为 GaussDB",
+                "`connectivity-only` 对所有数据库仅执行受限 `SELECT 1`",
+                "`database.safety-mode`",
+                "运维确认的安全声明",
+                "不声明账号权限、RLS 或函数权限已经验证",
                 "30 秒",
-                "调用前的安全边界"
+                "逐 SQL 报告中标记 `database_safety=unverified`"
         );
     }
 

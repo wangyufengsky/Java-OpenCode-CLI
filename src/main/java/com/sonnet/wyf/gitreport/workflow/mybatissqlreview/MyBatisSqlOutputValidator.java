@@ -104,6 +104,7 @@ public final class MyBatisSqlOutputValidator {
         requireSummaryDatabaseBinding(summary, database.binding());
         int scenarioCount = validateEvidence(evidence, summary, expectedTask, database, auditedFacts);
         requireReportBinding(report, expectedTask, database.binding());
+        requireConnectivitySafetyMarker(report, database);
         return new Result(
                 expectedTask.statementKey(),
                 scenarioCount,
@@ -451,6 +452,24 @@ public final class MyBatisSqlOutputValidator {
             if (!Pattern.compile("(?m)^" + Pattern.quote(line) + "$").matcher(report).find()) {
                 throw new IllegalStateException("report.md database binding " + field
                         + " does not match the required labeled line");
+            }
+        }
+    }
+
+    private void requireConnectivitySafetyMarker(
+            String report,
+            MyBatisDatabasePreflight.Result database
+    ) {
+        if (database.safetyMode() != MyBatisDatabasePreflight.SafetyMode.CONNECTIVITY_ONLY) {
+            return;
+        }
+        for (String line : List.of(
+                "- Safety mode: `connectivity-only`",
+                "- Database safety: `unverified`"
+        )) {
+            if (!Pattern.compile("(?m)^" + Pattern.quote(line) + "$").matcher(report).find()) {
+                throw new IllegalStateException(
+                        "report.md must mark connectivity-only database safety as unverified");
             }
         }
     }

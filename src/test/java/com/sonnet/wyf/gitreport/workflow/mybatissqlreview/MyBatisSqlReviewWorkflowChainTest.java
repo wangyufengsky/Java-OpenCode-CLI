@@ -143,6 +143,38 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
+    void connectivityOnlyUsesSelectOneForGaussDbAndMarksPublishedArtifactsUnverified() throws Exception {
+        Path config = configDir.resolve("mybatis-sql-review.yml");
+        Files.writeString(config, Files.readString(config)
+                .replace("  environment: read-replica\n",
+                        "  safety-mode: connectivity-only\n"
+                                + "  environment: test\n"));
+
+        chain.run(request("full", "", "", "run-connectivity-only"));
+
+        assertThat(client.toolArguments)
+                .filteredOn(arguments -> arguments.has("sql"))
+                .extracting(arguments -> arguments.path("sql").asText())
+                .contains("SELECT 1 AS contract_probe")
+                .noneMatch(sql -> sql.contains("relrowsecurity"));
+        Path runRoot = stableOut.resolve("runs/run-connectivity-only");
+        try (var paths = Files.walk(runRoot.resolve("tasks"))) {
+            assertThat(paths.filter(path -> path.getFileName().toString().equals("task.json")).toList())
+                    .isNotEmpty()
+                    .allSatisfy(taskJson -> assertThat(taskJson).content()
+                            .contains("\"safety_mode\" : \"connectivity-only\"",
+                                    "\"database_safety\" : \"unverified\""));
+        }
+        try (var paths = Files.walk(runRoot.resolve("bundle"))) {
+            assertThat(paths.filter(path -> path.getFileName().toString().equals("report.md")).toList())
+                    .isNotEmpty()
+                    .allSatisfy(report -> assertThat(report).content()
+                            .contains("- Safety mode: `connectivity-only`",
+                                    "- Database safety: `unverified`"));
+        }
+    }
+
+    @Test
     void preservesPreviousStableReportWhenCandidateValidationFails() throws Exception {
         chain.run(request("full", "", "", "run-good"));
         String previousReport = Files.readString(stableOut.resolve("mybatis-sql-review-report.md"));
@@ -178,7 +210,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         client.mismatchDataSourceOnRecheck = true;
 
         assertThatThrownBy(() -> chain.run(request("full", "", "", "run-recheck-drift")))
-                .hasMessageContaining("data-source environment must identify a physical read-replica target");
+                .hasMessageContaining("per-task data-source identity changed after preflight");
         assertThat(client.postedStatementKeys).isEmpty();
     }
 
@@ -653,7 +685,10 @@ class MyBatisSqlReviewWorkflowChainTest {
                 case DatabaseMcpContract.LIST_DATASOURCES -> dataSources();
                 case DatabaseMcpContract.LIST_DATABASES -> databases();
                 case DatabaseMcpContract.LIST_TABLE_SCHEMA -> tableSchema();
-                case DatabaseMcpContract.EXECUTE_QUERY -> safetyProbe();
+                case DatabaseMcpContract.EXECUTE_QUERY ->
+                        "SELECT 1 AS contract_probe".equals(arguments.path("sql").asText())
+                                ? connectivityProbe()
+                                : safetyProbe();
                 default -> throw new IllegalArgumentException("unexpected native tool: " + name);
             };
             return new ToolResponse(structured, "", structured);
@@ -662,24 +697,29 @@ class MyBatisSqlReviewWorkflowChainTest {
         private ArrayNode dataSources() {
             dataSourceCalls++;
             ArrayNode response = objectMapper.createArrayNode();
-            ObjectNode source = response.addObject()
+            response.addObject()
                     .put("name", "Gauss Review")
-                    .put("databaseSystem", "GaussDB")
-                    .put("environment", mismatchDataSourceOnRecheck && dataSourceCalls > 1
-                            ? "primary" : "read-replica");
+                    .put("type", mismatchDataSourceOnRecheck && dataSourceCalls > 1
+                            ? "MySQL" : "GaussDB")
+                    .put("driverClass", "org.opengauss.Driver")
+                    .put("url", "jdbc:opengauss://localhost/orders")
+                    .put("scope", "PROJECT");
             return response;
         }
 
         private ArrayNode databases() {
             ArrayNode response = objectMapper.createArrayNode();
-            response.addObject().put("name", "orders");
+            response.addObject().put("name", "orders").put("type", "CATALOG");
             return response;
         }
 
         private ObjectNode tableSchema() {
             ObjectNode response = objectMapper.createObjectNode()
-                    .put("catalog", "orders").put("schema", "audit");
-            response.putArray("tables").addObject().put("name", "orders").put("type", "TABLE");
+                    .put("totalTablesFound", 1)
+                    .put("sampledCount", 1)
+                    .put("tablePrefix", "");
+            response.putArray("keywords");
+            response.putArray("tables").addObject().put("tableName", "orders").put("columnCount", 1);
             return response;
         }
 
@@ -745,8 +785,23 @@ class MyBatisSqlReviewWorkflowChainTest {
                     .put("baseTableCount", 1)
                     .put("readReplica", true);
             ObjectNode result = objectMapper.createObjectNode();
-            row.fieldNames().forEachRemaining(result.putArray("columns")::add);
+            result.put("mode", "QUERY")
+                    .put("updateCount", -1)
+                    .put("hasResultSet", true)
+                    .put("rowCount", 1)
+                    .put("dataSource", "Gauss Review");
             result.putArray("rows").add(row);
+            return result;
+        }
+
+        private ObjectNode connectivityProbe() {
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("mode", "QUERY")
+                    .put("updateCount", -1)
+                    .put("hasResultSet", true)
+                    .put("rowCount", 1)
+                    .put("dataSource", "Gauss Review");
+            result.putArray("rows").addObject().put("contractProbe", 1);
             return result;
         }
 
@@ -777,6 +832,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                     - Schema: `%s`
                     - Project: `%s`
                     - Scope: `%s`
+                    - Safety mode: `%s`
+                    - Database safety: `%s`
 
                     ## Statement
 
@@ -805,7 +862,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                     statementKey, mapperPath, namespace, statementId, commandType, selectKey,
                     runtime.path("data_source").asText(), runtime.path("catalog").asText(),
                     runtime.path("schema").asText(), runtime.path("project").asText(),
-                    runtime.path("scope").asText()
+                    runtime.path("scope").asText(), runtime.path("safety_mode").asText(),
+                    runtime.path("database_safety").asText()
             ));
             ObjectNode summary = objectMapper.createObjectNode()
                     .put("schema_version", "mybatis-sql-review-summary/v1")

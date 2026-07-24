@@ -203,6 +203,54 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void fillsMissingStructuredContentFieldsFromJsonContentText() throws Exception {
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "empty-structured-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 1,
+                          "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                        }
+                        """);
+                case "notifications/initialized" ->
+                        respondWithSession(exchange, 202, "empty-structured-session", "");
+                case "tools/call" -> respondWithSession(exchange, 200, "empty-structured-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 2,
+                          "result": {
+                            "structuredContent": {
+                              "totalTablesFound": 413,
+                              "sampledCount": 200
+                            },
+                            "content": [{
+                              "type": "text",
+                              "text": "{\\"totalTablesFound\\":413,\\"sampledCount\\":200,\\"tables\\":[{\\"tableName\\":\\"spring_session\\"}]}"
+                            }]
+                          }
+                        }
+                        """);
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "cmcp_db_database_list_table_schema",
+                objectMapper.createObjectNode().put("dataSource", "gaussdb")
+        );
+
+        assertThat(response.structured().path("totalTablesFound").intValue()).isEqualTo(413);
+        assertThat(response.structured().path("sampledCount").intValue()).isEqualTo(200);
+        assertThat(response.structured().path("tables").get(0).path("tableName").asText())
+                .isEqualTo("spring_session");
+    }
+
+    @Test
     void initializesMcpTransportBeforeCallingTools() throws Exception {
         List<JsonNode> requests = new ArrayList<>();
         List<String> sessionHeaders = new ArrayList<>();

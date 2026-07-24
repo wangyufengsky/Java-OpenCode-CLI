@@ -114,6 +114,47 @@ class MyBatisToolCallAuditTest {
                 selectStatement())).hasMessageContaining("at most 20 rows");
     }
 
+    @Test
+    void acceptsRealDatabaseMcpQueryEnvelopeWithoutColumns() {
+        ObjectNode actual = objectMapper.createObjectNode()
+                .put("mode", "QUERY")
+                .put("updateCount", -1)
+                .put("hasResultSet", true)
+                .put("rowCount", 1)
+                .put("dataSource", database.binding().dataSource());
+        actual.putArray("rows").addObject().put("id", 7);
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("real-query", DatabaseMcpContract.EXECUTE_QUERY,
+                        nativeQueryArguments("SELECT id FROM orders LIMIT 1"), actual)),
+                boundary(), database, selectStatement()
+        );
+
+        assertThat(result.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.columns()).containsExactly("id");
+            assertThat(fact.rows()).singleElement().satisfies(row ->
+                    assertThat(row.path("id").asInt()).isEqualTo(7));
+            assertThat(fact.resultData().path("columns").get(0).asText()).isEqualTo("id");
+        });
+    }
+
+    @Test
+    void rejectsRealDatabaseMcpQueryEnvelopeForAnotherDataSource() {
+        ObjectNode actual = objectMapper.createObjectNode()
+                .put("mode", "QUERY")
+                .put("updateCount", -1)
+                .put("hasResultSet", true)
+                .put("rowCount", 1)
+                .put("dataSource", "different-source");
+        actual.putArray("rows").addObject().put("id", 7);
+
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call("wrong-source", DatabaseMcpContract.EXECUTE_QUERY,
+                        nativeQueryArguments("SELECT id FROM orders LIMIT 1"), actual)),
+                boundary(), database, selectStatement()
+        )).hasMessageContaining("envelope");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "INSERT INTO orders(id) VALUES (1)",
