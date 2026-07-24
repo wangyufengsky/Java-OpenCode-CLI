@@ -14,15 +14,18 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -268,37 +271,250 @@ public class AgentBridgeClient {
             if (!item.isObject()) {
                 throw new IllegalStateException("AgentBridge GET /tool-calls items must be objects");
             }
-            String id = item.path("id").asText("").strip();
-            if (id.isEmpty()) {
-                throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
-            }
+            String id = requiredHistoryId(item);
             if (!ids.add(id)) {
                 throw new IllegalStateException("AgentBridge GET /tool-calls returned duplicate id: " + id);
             }
             String toolName = requiredHistoryText(item, "toolName");
             String status = requiredHistoryText(item, "status");
+            Instant timestamp = requiredHistoryTimestamp(item);
+            Long durationMs = requiredHistoryDuration(item);
+            HistoryPayload payload = historyPayload(webBaseUrl, item);
             calls.add(new ToolCallRecord(
                     id,
                     item.path("title").asText(""),
                     toolName,
                     item.path("kind").asText(""),
                     status,
-                    requiredHistoryTimestamp(item),
-                    structuredHistoryField(item.path("arguments"), "arguments"),
-                    historyResultField(item.path("result")),
-                    requiredHistoryDuration(item),
+                    timestamp,
+                    payload.arguments(),
+                    payload.result(),
+                    durationMs,
                     item.path("hooks")
             ));
         }
         return List.copyOf(calls);
     }
 
+    private HistoryPayload historyPayload(URI webBaseUrl, JsonNode item)
+            throws IOException, InterruptedException {
+        boolean hasArgumentsTruncated = item.has("argumentsTruncated");
+        boolean hasResultTruncated = item.has("resultTruncated");
+        if (!hasArgumentsTruncated && !hasResultTruncated) {
+            return legacyHistoryPayload(item);
+        }
+        if (!hasArgumentsTruncated || !hasResultTruncated) {
+            throw new IllegalStateException(
+                    "argumentsTruncated and resultTruncated must either both be present or both be absent"
+            );
+        }
+
+        boolean argumentsTruncated = requiredHistoryBoolean(item, "argumentsTruncated");
+        boolean resultTruncated = requiredHistoryBoolean(item, "resultTruncated");
+        if (!argumentsTruncated && !resultTruncated) {
+            return legacyHistoryPayload(item);
+        }
+        if (!requiredHistoryBoolean(item, "fullPayloadAvailable")) {
+            String reason = item.path("fullPayloadUnavailableReason").asText("unknown").strip();
+            throw new IllegalStateException("AgentBridge full payload unavailable: " + reason);
+        }
+
+        JsonNode detail = fetchVerifiedToolCallDetail(webBaseUrl, item);
+        String arguments = verifiedPayloadText(item, detail, "arguments");
+        String result = verifiedPayloadText(item, detail, "result");
+        return new HistoryPayload(
+                structuredHistoryField(objectMapper.getNodeFactory().textNode(arguments), "arguments"),
+                historyResultField(objectMapper.getNodeFactory().textNode(result))
+        );
+    }
+
+    private HistoryPayload legacyHistoryPayload(JsonNode item) {
+        return new HistoryPayload(
+                structuredHistoryField(item.path("arguments"), "arguments"),
+                historyResultField(item.path("result"))
+        );
+    }
+
+    private boolean requiredHistoryBoolean(JsonNode item, String field) {
+        JsonNode value = item.path(field);
+        if (!value.isBoolean()) {
+            throw new IllegalStateException(field + " must be a boolean");
+        }
+        return value.booleanValue();
+    }
+
+    private JsonNode fetchVerifiedToolCallDetail(URI webBaseUrl, JsonNode item)
+            throws IOException, InterruptedException {
+        URI detailUri = canonicalToolCallDetailUri(webBaseUrl, item);
+        HttpRequest request = HttpRequest.newBuilder(detailUri)
+                .timeout(Duration.ofSeconds(10))
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        HttpResponse<String> response = sendBounded(
+                request,
+                TOOL_CALL_DETAIL_RESPONSE_BYTES,
+                "AgentBridge tool-call detail response"
+        );
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                    "AgentBridge GET " + detailUri.getRawPath() + " failed: HTTP " + response.statusCode()
+            );
+        }
+        if (!detailUri.equals(response.uri())) {
+            throw new IllegalStateException("AgentBridge tool-call detail response URI mismatch");
+        }
+
+        JsonNode detail = uniqueKeyJsonResponse(response.body(), "AgentBridge tool-call detail");
+        if (!detail.isObject()) {
+            throw new IllegalStateException("AgentBridge tool-call detail must return an object");
+        }
+        verifyHistoryIdentity(item, detail);
+        return detail;
+    }
+
+    private URI canonicalToolCallDetailUri(URI webBaseUrl, JsonNode item) {
+        String id = requiredHistoryId(item);
+        JsonNode detailUrlNode = item.path("detailUrl");
+        if (!detailUrlNode.isTextual() || detailUrlNode.textValue().isBlank()) {
+            throw new IllegalStateException("detailUrl must not be blank");
+        }
+        String detailUrl = detailUrlNode.textValue();
+        URI detailReference;
+        try {
+            detailReference = URI.create(detailUrl);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("detailUrl must be a valid URI", exception);
+        }
+        if (detailReference.getRawQuery() != null) {
+            throw new IllegalStateException("detailUrl must not contain a query");
+        }
+        if (detailReference.getRawFragment() != null) {
+            throw new IllegalStateException("detailUrl must not contain a fragment");
+        }
+        if (detailReference.getUserInfo() != null) {
+            throw new IllegalStateException("detailUrl must not contain user-info");
+        }
+
+        URI detailUri = webBaseUrl.resolve(detailReference);
+        if (!sameOrigin(webBaseUrl, detailUri)) {
+            throw new IllegalStateException("detailUrl must use the same origin as AgentBridge Web Access");
+        }
+        String expectedPath = "/tool-calls/" + id;
+        if (!detailUrl.equals(expectedPath) || !expectedPath.equals(detailUri.getRawPath())) {
+            throw new IllegalStateException("detailUrl must equal exactly " + expectedPath);
+        }
+        return detailUri;
+    }
+
+    private boolean sameOrigin(URI first, URI second) {
+        return first.getScheme() != null
+                && second.getScheme() != null
+                && first.getScheme().equalsIgnoreCase(second.getScheme())
+                && first.getHost() != null
+                && second.getHost() != null
+                && first.getHost().equalsIgnoreCase(second.getHost())
+                && effectivePort(first) == effectivePort(second);
+    }
+
+    private int effectivePort(URI uri) {
+        if (uri.getPort() >= 0) {
+            return uri.getPort();
+        }
+        if ("http".equalsIgnoreCase(uri.getScheme())) {
+            return 80;
+        }
+        if ("https".equalsIgnoreCase(uri.getScheme())) {
+            return 443;
+        }
+        return -1;
+    }
+
+    private void verifyHistoryIdentity(JsonNode summary, JsonNode detail) {
+        if (!requiredHistoryId(summary).equals(requiredHistoryId(detail))) {
+            throw new IllegalStateException("id mismatch between summary and detail");
+        }
+        requireMatchingHistoryText(summary, detail, "toolName");
+        requireMatchingHistoryText(summary, detail, "status");
+        requireMatchingHistoryText(summary, detail, "timestamp");
+        Long summaryDuration = requiredHistoryDuration(summary);
+        Long detailDuration = requiredHistoryDuration(detail);
+        if (!Objects.equals(summaryDuration, detailDuration)) {
+            throw new IllegalStateException("durationMs mismatch between summary and detail");
+        }
+    }
+
+    private void requireMatchingHistoryText(JsonNode summary, JsonNode detail, String field) {
+        String summaryValue = requiredHistoryText(summary, field);
+        String detailValue = requiredHistoryText(detail, field);
+        if (!summaryValue.equals(detailValue)) {
+            throw new IllegalStateException(field + " mismatch between summary and detail");
+        }
+    }
+
+    private String verifiedPayloadText(JsonNode summary, JsonNode detail, String field) {
+        JsonNode value = detail.path(field);
+        if (!value.isTextual()) {
+            throw new IllegalStateException(field + " detail must be a string");
+        }
+        boolean summaryTruncated = requiredHistoryBoolean(summary, field + "Truncated");
+        boolean detailTruncated = requiredHistoryBoolean(detail, field + "Truncated");
+        if (summaryTruncated != detailTruncated) {
+            throw new IllegalStateException(field + " truncation mismatch between summary and detail");
+        }
+
+        long summaryBytes = requiredHistoryBytes(summary, field + "Bytes");
+        long detailBytes = requiredHistoryBytes(detail, field + "Bytes");
+        long actualBytes = value.textValue().getBytes(StandardCharsets.UTF_8).length;
+        if (summaryBytes != detailBytes || detailBytes != actualBytes) {
+            throw new IllegalStateException(field + " byte length mismatch");
+        }
+
+        String summarySha256 = requiredHistorySha256(summary, field + "Sha256");
+        String detailSha256 = requiredHistorySha256(detail, field + "Sha256");
+        String actualSha256 = sha256Utf8(value.textValue());
+        if (!summarySha256.equals(detailSha256) || !detailSha256.equals(actualSha256)) {
+            throw new IllegalStateException(field + " SHA-256 mismatch");
+        }
+        return value.textValue();
+    }
+
+    private long requiredHistoryBytes(JsonNode item, String field) {
+        JsonNode value = item.path(field);
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+            throw new IllegalStateException(field + " must be a non-negative integer");
+        }
+        return value.longValue();
+    }
+
+    private String requiredHistorySha256(JsonNode item, String field) {
+        JsonNode value = item.path(field);
+        if (!value.isTextual() || !value.textValue().matches("[0-9a-f]{64}")) {
+            throw new IllegalStateException(field + " must be a lowercase SHA-256");
+        }
+        return value.textValue();
+    }
+
+    private String sha256Utf8(String value) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
+            );
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
     private JsonNode uniqueKeyHistoryResponse(String responseBody) {
+        return uniqueKeyJsonResponse(responseBody, "AgentBridge GET /tool-calls");
+    }
+
+    private JsonNode uniqueKeyJsonResponse(String responseBody, String label) {
         try (JsonParser parser = objectMapper.getFactory().createParser(responseBody)) {
             parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
             return objectMapper.readTree(parser);
         } catch (IOException exception) {
-            throw new IllegalStateException("AgentBridge GET /tool-calls must contain unique JSON keys", exception);
+            throw new IllegalStateException(label + " must contain unique JSON keys", exception);
         }
     }
 
@@ -308,6 +524,17 @@ public class AgentBridgeClient {
             throw new IllegalStateException(field + " must not be blank");
         }
         return value.textValue().strip();
+    }
+
+    private String requiredHistoryId(JsonNode item) {
+        JsonNode value = item.path("id");
+        if (value.isTextual() && !value.textValue().isBlank()) {
+            return value.textValue().strip();
+        }
+        if (value.isIntegralNumber() && value.canConvertToLong() && value.longValue() > 0) {
+            return Long.toString(value.longValue());
+        }
+        throw new IllegalStateException("AgentBridge GET /tool-calls returned an item without id");
     }
 
     private Instant requiredHistoryTimestamp(JsonNode item) {
@@ -633,6 +860,9 @@ public class AgentBridgeClient {
 
     private static JsonNode copyJson(JsonNode value) {
         return value == null ? null : value.deepCopy();
+    }
+
+    private record HistoryPayload(JsonNode arguments, JsonNode result) {
     }
 
     private record McpSession(String id, String protocolVersion) {

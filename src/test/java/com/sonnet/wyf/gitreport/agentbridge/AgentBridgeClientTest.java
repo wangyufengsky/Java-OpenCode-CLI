@@ -7,6 +7,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,15 +21,18 @@ import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -471,6 +476,167 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void untruncatedToolCallDoesNotFetchAvailableDetail() throws Exception {
+        AtomicInteger detailRequests = new AtomicInteger();
+        ObjectNode call = toolCall("41", "2026-07-24T04:00:00Z");
+        call.put("argumentsTruncated", false);
+        call.put("resultTruncated", false);
+        call.put("fullPayloadAvailable", true);
+        call.put("detailUrl", "/tool-calls/41");
+
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, call);
+        server.createContext("/tool-calls/41", exchange -> {
+            detailRequests.incrementAndGet();
+            respond(exchange, 500, "{\"error\":\"detail must not be requested\"}");
+        });
+        server.start();
+
+        AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(record.arguments().path("sql").asText()).contains("SELECT");
+        assertThat(detailRequests).hasValue(0);
+    }
+
+    @Test
+    void fetchesAndVerifiesCompleteLongArgumentsAndResult() throws Exception {
+        String arguments = objectMapper.createObjectNode()
+                .put("path", "/workspace/out/report.md")
+                .put("content", "报".repeat(9_000))
+                .toString();
+        String result = objectMapper.createObjectNode()
+                .put("ok", true)
+                .put("evidence", "数".repeat(9_000))
+                .toString();
+        HistoryFixture fixture = historyFixture("77", "write_file", arguments, result);
+        AtomicInteger detailRequests = new AtomicInteger();
+        HttpServer server = historyServer(fixture, 200, detailRequests);
+
+        AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(record.arguments().path("content").asText()).hasSize(9_000);
+        assertThat(record.result().path("evidence").asText()).hasSize(9_000);
+        assertThat(detailRequests).hasValue(1);
+    }
+
+    @Test
+    void preservesVerifiedPlainTextResultWhenArgumentsAreTruncated() throws Exception {
+        String arguments = objectMapper.createObjectNode()
+                .put("path", "/workspace/out/report.md")
+                .put("content", "x".repeat(9_000))
+                .toString();
+        String result = "Created /workspace/out/report.md";
+        HistoryFixture fixture = historyFixture("78", "write_file", arguments, result);
+        HttpServer server = historyServer(fixture, 200, new AtomicInteger());
+
+        AgentBridgeClient.ToolCallRecord record = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(record.arguments().path("content").asText()).hasSize(9_000);
+        assertThat(record.result().asText()).isEqualTo(result);
+    }
+
+    @Test
+    void rejectsTruncatedHistoryWhenFullPayloadIsUnavailable() throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        fixture.summary().put("fullPayloadAvailable", false);
+        fixture.summary().put("fullPayloadUnavailableReason", "memory_budget");
+        fixture.summary().remove("detailUrl");
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, fixture.summary());
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("full payload unavailable")
+                .hasMessageContaining("memory_budget");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {404, 410})
+    void rejectsMissingOrEvictedToolCallDetails(int status) throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        HttpServer server = historyServer(fixture, status, new AtomicInteger());
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("GET /tool-calls/77 failed")
+                .hasMessageContaining("HTTP " + status);
+    }
+
+    @Test
+    void rejectsCrossOriginAndNonCanonicalDetailUrls() throws Exception {
+        assertRejectedDetailUrl(
+                "http://example.com/tool-calls/77",
+                "same origin"
+        );
+        assertRejectedDetailUrl(
+                "/tool-calls/77?download=true",
+                "query"
+        );
+        assertRejectedDetailUrl(
+                "/tool-calls/077",
+                "exactly /tool-calls/77"
+        );
+    }
+
+    @Test
+    void rejectsToolCallDetailIdentityAndTimingMismatches() throws Exception {
+        assertRejectedDetailMutation(detail -> detail.put("id", "other"), "id mismatch");
+        assertRejectedDetailMutation(detail -> detail.put("toolName", "run_command"), "toolName mismatch");
+        assertRejectedDetailMutation(detail -> detail.put("status", "error"), "status mismatch");
+        assertRejectedDetailMutation(
+                detail -> detail.put("timestamp", "2026-07-24T04:00:01Z"),
+                "timestamp mismatch"
+        );
+        assertRejectedDetailMutation(detail -> detail.put("durationMs", 43), "durationMs mismatch");
+    }
+
+    @Test
+    void rejectsToolCallDetailLengthAndSha256Mismatches() throws Exception {
+        assertRejectedDetailMutation(
+                detail -> detail.put("argumentsBytes", detail.path("argumentsBytes").longValue() + 1),
+                "arguments byte length mismatch"
+        );
+        assertRejectedDetailMutation(
+                detail -> detail.put("resultSha256", "0".repeat(64)),
+                "result SHA-256 mismatch"
+        );
+    }
+
+    @Test
+    void rejectsDuplicateKeysInToolCallDetail() throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        String duplicateDetail = fixture.detail().toString()
+                .replaceFirst("\\{\"id\":77", "{\"id\":77,\"id\":77");
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, fixture.summary());
+        server.createContext("/tool-calls/77", exchange -> respond(exchange, 200, duplicateDetail));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("detail must contain unique JSON keys");
+    }
+
+    @Test
+    void abortsToolCallDetailAboveEightMebibytes() throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, fixture.summary());
+        server.createContext("/tool-calls/77", exchange -> respond(
+                exchange,
+                200,
+                "{\"padding\":\"" + "x".repeat(8 * 1024 * 1024) + "\"}"
+        ));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("tool-call detail response")
+                .hasMessageContaining("byte limit");
+    }
+
+    @Test
     void malformedToolCallJsonFailsClosed() throws Exception {
         HttpServer server = server();
         nativeInfo(server);
@@ -673,6 +839,116 @@ class AgentBridgeClientTest {
                 .set("rows", objectMapper.createArrayNode().addObject().put("id", 1)));
         call.set("hooks", objectMapper.createObjectNode().put("post", true));
         return call;
+    }
+
+    private HistoryFixture longHistoryFixture() {
+        String arguments = objectMapper.createObjectNode()
+                .put("path", "/workspace/out/report.md")
+                .put("content", "x".repeat(9_000))
+                .toString();
+        String result = objectMapper.createObjectNode()
+                .put("ok", true)
+                .put("evidence", "y".repeat(9_000))
+                .toString();
+        return historyFixture("77", "write_file", arguments, result);
+    }
+
+    private HistoryFixture historyFixture(String id, String toolName, String arguments, String result) {
+        ObjectNode detail = objectMapper.createObjectNode()
+                .put("id", Long.parseLong(id))
+                .put("title", "Tool call")
+                .put("toolName", toolName)
+                .put("kind", "edit")
+                .put("status", "success")
+                .put("timestamp", "2026-07-24T04:00:00Z")
+                .put("arguments", arguments)
+                .put("result", result)
+                .put("durationMs", 42)
+                .put("hasHooks", false);
+        addPayloadMetadata(detail, "arguments", arguments);
+        addPayloadMetadata(detail, "result", result);
+
+        ObjectNode summary = detail.deepCopy();
+        summary.put("arguments", historySummary(arguments));
+        summary.put("result", historySummary(result));
+        summary.put("fullPayloadAvailable", true);
+        summary.put("detailUrl", "/tool-calls/" + id);
+        return new HistoryFixture(summary, detail);
+    }
+
+    private void addPayloadMetadata(ObjectNode node, String prefix, String value) {
+        node.put(prefix + "Truncated", value.length() > 8_000);
+        node.put(prefix + "Bytes", value.getBytes(StandardCharsets.UTF_8).length);
+        node.put(prefix + "Sha256", sha256(value));
+    }
+
+    private String historySummary(String value) {
+        return value.length() > 8_000
+                ? value.substring(0, 8_000) + "\n[…truncated]"
+                : value;
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
+            );
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private void historyList(HttpServer server, ObjectNode summary) {
+        server.createContext("/tool-calls", exchange -> respond(
+                exchange,
+                200,
+                objectMapper.createObjectNode()
+                        .set("items", objectMapper.createArrayNode().add(summary))
+                        .toString()
+        ));
+    }
+
+    private HttpServer historyServer(HistoryFixture fixture, int detailStatus, AtomicInteger detailRequests)
+            throws IOException {
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, fixture.summary());
+        server.createContext("/tool-calls/77", exchange -> {
+            detailRequests.incrementAndGet();
+            respond(exchange, detailStatus, detailStatus == 200 ? fixture.detail().toString() : "{\"error\":\"gone\"}");
+        });
+        if (!"77".equals(fixture.summary().path("id").asText())) {
+            String id = fixture.summary().path("id").asText();
+            server.createContext("/tool-calls/" + id, exchange -> {
+                detailRequests.incrementAndGet();
+                respond(exchange, detailStatus,
+                        detailStatus == 200 ? fixture.detail().toString() : "{\"error\":\"gone\"}");
+            });
+        }
+        server.start();
+        return server;
+    }
+
+    private void assertRejectedDetailMutation(Consumer<ObjectNode> mutation, String message) throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        mutation.accept(fixture.detail());
+        HttpServer server = historyServer(fixture, 200, new AtomicInteger());
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server))).hasMessageContaining(message);
+    }
+
+    private void assertRejectedDetailUrl(String detailUrl, String message) throws Exception {
+        HistoryFixture fixture = longHistoryFixture();
+        fixture.summary().put("detailUrl", detailUrl);
+        HttpServer server = server();
+        nativeInfo(server);
+        historyList(server, fixture.summary());
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server))).hasMessageContaining(message);
+    }
+
+    private record HistoryFixture(ObjectNode summary, ObjectNode detail) {
     }
 
     private static String join(String first, String second) {
