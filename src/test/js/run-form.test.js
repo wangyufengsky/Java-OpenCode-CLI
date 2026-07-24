@@ -341,6 +341,7 @@ test('MyBatis metadata renders every field, all summaries, and the three rerun m
     'project.name': 'Demo',
     'project.repo': '/workspace/demo',
     'paths.out': '/reports/mybatis',
+    'source.paths': ['src/main/resources/mapper'],
     'source.include': ['**/*Mapper.xml'],
     'database.connection-name': 'Gauss Review',
     'database.database-name': 'orders',
@@ -386,12 +387,12 @@ test('MyBatis metadata renders every field, all summaries, and the three rerun m
   );
   await initialize(harness);
 
-  assert.equal(harness.nodes.form.querySelectorAll('[data-config-key]').length, 30);
+  assert.equal(harness.nodes.form.querySelectorAll('[data-config-key]').length, 32);
   assert.ok(harness.nodes.form.querySelector('#config-database-connection-name'));
   assert.ok(harness.nodes.form.querySelector('#config-agentbridge-validation-max-corrections'));
   assert.equal(harness.nodes.summaryChain.textContent, 'MyBatis SQL 审查');
   assert.equal(harness.nodes.summaryProject.textContent, '/workspace/demo');
-  assert.equal(harness.nodes.summaryScope.textContent, '**/*Mapper.xml');
+  assert.equal(harness.nodes.summaryScope.textContent, 'src/main/resources/mapper');
   assert.equal(harness.nodes.summaryValidation.textContent, '失败即停止');
   assert.equal(harness.nodes.summaryAgentBridge.textContent, '自动重连 · 2 分钟超时');
   assert.equal(harness.nodes.summaryOutput.textContent, '/reports/mybatis');

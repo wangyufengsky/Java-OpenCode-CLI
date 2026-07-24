@@ -272,6 +272,7 @@ class ConsoleMvcTest {
                 "project.name",
                 "project.repo",
                 "paths.out",
+                "source.paths",
                 "source.include",
                 "source.exclude",
                 "database.connection-name",
@@ -771,6 +772,7 @@ class ConsoleMvcTest {
                 .andExpect(jsonPath("$.defaults['project.name']").value("Example Project"))
                 .andExpect(jsonPath("$.defaults['project.repo']").value("CHANGE_ME_PROJECT_REPO"))
                 .andExpect(jsonPath("$.defaults['paths.out']").value("mybatis-sql-review/example-project"))
+                .andExpect(jsonPath("$.defaults['source.paths'][0]").value("src/main/resources/mapper"))
                 .andExpect(jsonPath("$.defaults['source.include'][0]").value("**/*.xml"))
                 .andExpect(jsonPath("$.defaults['source.exclude'][0]").value("target/**"))
                 .andExpect(jsonPath("$.defaults['database.connection-name']")

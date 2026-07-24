@@ -12,6 +12,9 @@ paths:
   out: "mybatis-sql-review/example-project"
 
 source:
+  # 必填；每项都相对 project.repo，并递归扫描。空列表不会回退为全项目扫描。
+  paths:
+    - "src/main/resources/mapper"
   include:
     - "**/*.xml"
   exclude:

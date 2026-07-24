@@ -423,7 +423,7 @@
       'project.repo', 'paths.repo', 'new-project', 'java-root', 'project.id', 'project.name'
     ]) || '等待填写';
     document.querySelector('#summary-scope').textContent = firstSummaryValue([
-      'source.package-paths', 'source.include', 'git.include', 'transaction-plan-dir',
+      'source.paths', 'source.package-paths', 'source.include', 'git.include', 'transaction-plan-dir',
       'service-identify', 'xml-root'
     ]) || defaultScopeSummary(chainSelect.value);
     document.querySelector('#summary-validation').textContent = validationSummary();

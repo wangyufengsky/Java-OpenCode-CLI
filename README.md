@@ -355,7 +355,7 @@ Agent 若创建、修改或删除 `allowed_write_globs` 以外的仓库文件，
 
 ### `mybatis-sql-review`
 
-该链路只发现 MyBatis XML 中的顶层 `select`、`insert`、`update`、`delete` 和独立 `selectKey`。Java 负责 XML 清单、串行任务、工具调用事后审计、强产物校验和原子发布；DML 与 `selectKey` 只做静态审查，不会执行原语句。稳定输出包含 `sql-inventory.json`、`sql-tasks.json`、`traceability.json`、`data-quality.md`、mapper 索引、逐 SQL 三文件和 `mybatis-sql-review-report.md`，控制台继续在运行记录的 `output_path` 中展示发布目录。
+该链路只在 `source.paths` 指定的目录中递归发现 MyBatis XML，并审查其中的顶层 `select`、`insert`、`update`、`delete` 和独立 `selectKey`。每个目录都相对 `project.repo`；该字段必填，空列表不会回退为全项目扫描。Java 负责 XML 清单、串行任务、工具调用事后审计、强产物校验和原子发布；DML 与 `selectKey` 只做静态审查，不会执行原语句。稳定输出包含 `sql-inventory.json`、`sql-tasks.json`、`traceability.json`、`data-quality.md`、mapper 索引、逐 SQL 三文件和 `mybatis-sql-review-report.md`，控制台继续在运行记录的 `output_path` 中展示发布目录。
 
 示例：
 
@@ -369,6 +369,8 @@ paths:
   out: "mybatis-sql-review/example-project"
 
 source:
+  paths:
+    - "src/main/resources/mapper"
   include:
     - "**/*Mapper.xml"
   exclude:
@@ -411,7 +413,8 @@ agentbridge:
 | --- | --- |
 | `project.id` / `project.name` / `project.repo` | 项目标识、展示名称和 MyBatis mapper 所在的本地仓库。 |
 | `paths.out` | 隔离运行、稳定报告和控制台 `output_path` 对应的输出根目录。 |
-| `source.include` / `source.exclude` | Mapper XML 的 include/exclude glob；include 至少包含一项。 |
+| `source.paths` | 必填；相对 `project.repo` 的 Mapper 目录列表。每个目录递归扫描，空列表不会回退为全项目扫描。 |
+| `source.include` / `source.exclude` | 相对每个 `source.paths` 目录的 Mapper XML include/exclude glob；include 至少包含一项。 |
 | `database.connection-name` | AgentBridge Custom MCP 注册的 Database MCP 数据源名，必须唯一匹配。 |
 | `database.database-name` / `database.schema-name` | 每次工具调用都必须绑定的数据库与 schema。 |
 | `database.scope` | Database MCP 数据源范围：`GLOBAL`、`PROJECT` 或 `ALL`，默认 `ALL`。 |

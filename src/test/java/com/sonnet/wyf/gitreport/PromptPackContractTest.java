@@ -71,6 +71,8 @@ class PromptPackContractTest {
                 "post-hoc audit cannot prevent or undo"
         );
         assertThat(chain).contains(
+                "paths:",
+                "- \"src/main/resources/mapper\"",
                 "max-rows: 20",
                 "max-scenarios-per-sql: 3",
                 "max-evidence-bytes: 262144",
@@ -85,6 +87,9 @@ class PromptPackContractTest {
                 "mybatis-sql-review: sql | xml | index"
         );
         assertThat(readme).contains(
+                "`source.paths`",
+                "相对 `project.repo`",
+                "空列表不会回退为全项目扫描",
                 "AgentBridge Web Access",
                 "AgentBridge MCP",
                 "AgentBridge Custom MCP",
