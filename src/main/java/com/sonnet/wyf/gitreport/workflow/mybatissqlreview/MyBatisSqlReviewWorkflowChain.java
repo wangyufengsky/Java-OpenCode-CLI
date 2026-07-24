@@ -149,6 +149,10 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     List<Path> mapperFiles = inventory.mappers().stream()
                             .map(mapper -> repository.resolve(mapper.mapperRelativePath()).normalize())
                             .toList();
+                    List<Path> sourceDirectories = MyBatisSqlSourceScope.resolve(
+                            repository,
+                            configuration.getSource().getPaths()
+                    ).discoveryRoots();
                     List<Path> candidates = prepared.stream()
                             .map(task -> task.layout().candidate())
                             .toList();
@@ -158,6 +162,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                                          repository,
                                          activeWorkspace.stableRoot(),
                                          activeWorkspace.runRoot(),
+                                         sourceDirectories,
                                          mapperFiles,
                                          candidates
                                  )) {

@@ -135,13 +135,16 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Path repository,
             Path stableRoot,
             Path currentRun,
+            List<Path> sourceDirectories,
             List<Path> mapperFiles,
-            List<Path> candidates
+            List<Path> candidates,
+            ProtectionObserver observer
     ) throws IOException {
-        return protectRun(
-                objectMapper, repository, stableRoot, currentRun, mapperFiles, candidates,
-                ProtectionObserver.NOOP
+        RunProtection protection = RunProtection.establish(
+                objectMapper, repository, stableRoot, currentRun,
+                sourceDirectories, mapperFiles, candidates, observer
         );
+        return new MyBatisSqlReviewFilesystemGuard(protection);
     }
 
     static MyBatisSqlReviewFilesystemGuard protectRun(
@@ -149,14 +152,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Path repository,
             Path stableRoot,
             Path currentRun,
+            List<Path> sourceDirectories,
             List<Path> mapperFiles,
-            List<Path> candidates,
-            ProtectionObserver observer
+            List<Path> candidates
     ) throws IOException {
-        RunProtection protection = RunProtection.establish(
-                objectMapper, repository, stableRoot, currentRun, mapperFiles, candidates, observer
+        return protectRun(
+                objectMapper, repository, stableRoot, currentRun,
+                sourceDirectories, mapperFiles, candidates, ProtectionObserver.NOOP
         );
-        return new MyBatisSqlReviewFilesystemGuard(protection);
     }
 
     TaskScope protectTask(Path candidate) throws IOException {
@@ -876,11 +879,13 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 Path repository,
                 Path stableRoot,
                 Path currentRun,
+                List<Path> sourceDirectories,
                 List<Path> mapperFiles,
                 List<Path> candidates,
                 ProtectionObserver observer
         ) throws IOException {
             Objects.requireNonNull(objectMapper, "objectMapper");
+            Objects.requireNonNull(sourceDirectories, "sourceDirectories");
             Objects.requireNonNull(mapperFiles, "mapperFiles");
             Objects.requireNonNull(candidates, "candidates");
             Path normalizedRepository = normalizeDirectory(repository, "repository");
@@ -897,40 +902,54 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
             }
 
-            Set<Path> exactProtectedPaths = new LinkedHashSet<>();
+            if (sourceDirectories.isEmpty()) {
+                throw new IllegalArgumentException("source directories must not be empty");
+            }
+            List<Path> normalizedSourceDirectories = new ArrayList<>();
+            for (Path sourceDirectory : sourceDirectories) {
+                Path normalizedSource = normalizeDirectory(sourceDirectory, "source directory");
+                requireNoSymlinkPath(normalizedRepository, normalizedSource, "source directory");
+                normalizedSourceDirectories.add(normalizedSource);
+            }
+            normalizedSourceDirectories = minimalRoots(normalizedSourceDirectories);
+
+            Set<Path> normalizedMapperFiles = new LinkedHashSet<>();
             for (Path mapperFile : mapperFiles) {
                 Path normalizedMapper = mapperFile.toAbsolutePath().normalize();
                 requireNoSymlinkPath(normalizedRepository, normalizedMapper, "mapper input");
                 if (!Files.isRegularFile(normalizedMapper, LinkOption.NOFOLLOW_LINKS)) {
                     throw new IllegalStateException("mapper input must be a non-symlink regular file: " + normalizedMapper);
                 }
-                exactProtectedPaths.addAll(pathChain(normalizedRepository, normalizedMapper.getParent()));
-                exactProtectedPaths.add(normalizedMapper);
+                if (normalizedSourceDirectories.stream().noneMatch(normalizedMapper::startsWith)) {
+                    throw new IllegalArgumentException(
+                            "mapper input is outside configured source directories: " + normalizedMapper
+                    );
+                }
+                normalizedMapperFiles.add(normalizedMapper);
             }
-            exactProtectedPaths.add(normalizedStable);
 
-            List<Path> repositoryExcludedRoots = new ArrayList<>();
-            if (normalizedStable.startsWith(normalizedRepository)) {
-                requireNoSymlinkPath(normalizedRepository, normalizedStable, "stable output");
-                repositoryExcludedRoots.add(normalizedStable);
-            }
             List<TreeScope> protectedTrees = new ArrayList<>();
-            protectedTrees.add(new TreeScope(
-                    normalizedRepository,
-                    Set.copyOf(repositoryExcludedRoots),
-                    Set.of()
-            ));
+            for (Path sourceDirectory : normalizedSourceDirectories) {
+                Set<Path> scopedMapperFiles = normalizedMapperFiles.stream()
+                        .filter(path -> path.startsWith(sourceDirectory))
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                if (!scopedMapperFiles.isEmpty()) {
+                    protectedTrees.add(new TreeScope(
+                            sourceDirectory,
+                            Set.of(),
+                            scopedMapperFiles
+                    ));
+                }
+            }
             protectedTrees.add(new TreeScope(
                     normalizedStable,
                     Set.of(normalizedCurrentRun),
                     Set.of()
             ));
-            protectedTrees.addAll(gitCommonTrees(normalizedRepository));
             Set<Path> wholeProtectedPaths = new LinkedHashSet<>();
             for (TreeScope tree : protectedTrees) {
                 wholeProtectedPaths.addAll(treePaths(tree));
             }
-            wholeProtectedPaths.addAll(exactProtectedPaths);
 
             Path backup = Files.createTempDirectory("mybatis-sql-review-run-protected-");
             RunProtection result = new RunProtection(
@@ -952,7 +971,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 IOException restoreFailure = restorePermissionsBestEffort(result.originalPermissions);
                 cleanupBestEffort(backup);
                 IllegalStateException failure = new IllegalStateException(
-                        "failed to establish run-level POSIX filesystem protection", setupFailure
+                        "failed to establish run-level POSIX filesystem protection: "
+                                + concise(setupFailure),
+                        setupFailure
                 );
                 if (restoreFailure != null) {
                     failure.addSuppressed(restoreFailure);
@@ -1814,6 +1835,17 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             if (!root && attributes.isDirectory() && scope.excludesDirectory(normalized)) {
                 return;
             }
+            if (scope.restrictsRegularFiles()) {
+                if (attributes.isDirectory()) {
+                    boolean leadsToIncludedFile = scope.includedRegularFiles().stream()
+                            .anyMatch(included -> included.startsWith(normalized));
+                    if (!leadsToIncludedFile) {
+                        return;
+                    }
+                } else if (!scope.includedRegularFiles().contains(normalized)) {
+                    return;
+                }
+            }
             result.add(normalized);
             if (!attributes.isDirectory()) {
                 return;
@@ -1890,18 +1922,23 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         private record TreeScope(
                 Path root,
                 Set<Path> excludedRoots,
-                Set<String> excludedDirectoryNames
+                Set<Path> includedRegularFiles
         ) {
             private TreeScope {
                 root = root.toAbsolutePath().normalize();
                 excludedRoots = Set.copyOf(excludedRoots);
-                excludedDirectoryNames = Set.copyOf(excludedDirectoryNames);
+                includedRegularFiles = includedRegularFiles.stream()
+                        .map(path -> path.toAbsolutePath().normalize())
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
             }
 
             private boolean excludesDirectory(Path directory) {
                 Path normalized = directory.toAbsolutePath().normalize();
-                return excludedRoots.stream().anyMatch(normalized::startsWith)
-                        || excludedDirectoryNames.contains(normalized.getFileName().toString());
+                return excludedRoots.stream().anyMatch(normalized::startsWith);
+            }
+
+            private boolean restrictsRegularFiles() {
+                return !includedRegularFiles.isEmpty();
             }
         }
     }

@@ -74,6 +74,7 @@ public final class MyBatisSqlReviewTaskRunner {
                 repository,
                 workspace.stableRoot(),
                 workspace.runRoot(),
+                List.of(mapper.getParent()),
                 List.of(mapper),
                 List.of(prepared.layout().candidate())
         )) {

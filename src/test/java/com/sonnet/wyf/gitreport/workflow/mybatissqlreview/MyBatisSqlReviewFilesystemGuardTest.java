@@ -170,9 +170,17 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void cachesRunProtectionOnceAndIncludesGitBuildAndHistoricalTrees() throws Exception {
+    void protectsOnlyMapperFilesAndStableArtifactsWithoutSnapshottingGitOrBuildFiles() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
+        Path hugeBuildFile = layout.buildDirectory().resolve("huge.bin");
+        try (var channel = Files.newByteChannel(
+                hugeBuildFile,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.WRITE)) {
+            channel.position(65L * 1024 * 1024);
+            channel.write(java.nio.ByteBuffer.wrap(new byte[]{1}));
+        }
         RecordingProtectionObserver observer = new RecordingProtectionObserver();
         Set<PosixFilePermission> mapperOnePermissions = Files.getPosixFilePermissions(layout.mapperOne());
         Set<PosixFilePermission> mapperTwoPermissions = Files.getPosixFilePermissions(layout.mapperTwo());
@@ -183,6 +191,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 layout.repository(),
                 layout.stableRoot(),
                 layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo()),
                 observer
@@ -201,8 +210,9 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThat(observer.permissionChanges()).containsEntry(layout.mapperOne(), 1)
                 .containsEntry(layout.mapperTwo(), 1)
                 .containsEntry(layout.stableArtifact(), 1);
-        assertThat(observer.observedPaths()).anyMatch(path -> path.startsWith(layout.gitDirectory()))
-                .anyMatch(path -> path.startsWith(layout.buildDirectory()))
+        assertThat(observer.observedPaths())
+                .noneMatch(path -> path.startsWith(layout.gitDirectory()))
+                .noneMatch(path -> path.startsWith(layout.buildDirectory()))
                 .anyMatch(path -> path.startsWith(layout.historicalRun()));
         assertThat(Files.getPosixFilePermissions(layout.mapperOne())).isEqualTo(mapperOnePermissions);
         assertThat(Files.getPosixFilePermissions(layout.mapperTwo())).isEqualTo(mapperTwoPermissions);
@@ -221,6 +231,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 layout.repository(),
                 layout.stableRoot(),
                 layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
@@ -244,12 +255,10 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void taskScopeRestoresWholeRepositoryTamperingButAllowsExactlyThreeCandidateFiles() throws Exception {
+    void taskScopeRestoresMapperStableAndCurrentRunWhileIgnoringUnrelatedRepositoryFiles() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
-        byte[] pomBefore = Files.readAllBytes(layout.pom());
-        byte[] javaBefore = Files.readAllBytes(layout.javaSource());
-        byte[] deletedBefore = Files.readAllBytes(layout.userFile());
+        byte[] mapperBefore = Files.readAllBytes(layout.mapperTwo());
         byte[] stableBefore = Files.readAllBytes(layout.stableArtifact());
         Set<PosixFilePermission> mapperPermissions = Files.getPosixFilePermissions(layout.mapperTwo());
         Path injectedSource = layout.javaSource().getParent().resolve("Injected.java");
@@ -263,11 +272,12 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 layout.repository(),
                 layout.stableRoot(),
                 layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
 
-        assertThatThrownBy(() -> {
+        Throwable violation = org.assertj.core.api.Assertions.catchThrowable(() -> {
             try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
                 makeWritable(layout.repository());
                 makeWritable(layout.pom());
@@ -284,25 +294,28 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 Files.writeString(layout.stableArtifact(), "tampered stable publication");
                 Files.createSymbolicLink(repositorySymlink, external);
                 makeWritable(layout.mapperTwo());
+                Files.writeString(layout.mapperTwo(), "<mapper namespace=\"tampered\"/>");
                 Files.writeString(candidateSibling, "outside current candidate");
                 Files.writeString(layout.candidateOne().resolve("report.md"), "report");
                 Files.writeString(layout.candidateOne().resolve("summary.json"), "{}");
                 Files.writeString(layout.candidateOne().resolve("database-evidence.json"), "{}");
             }
-        }).isInstanceOf(IllegalStateException.class)
+        });
+        assertThat(violation).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("protected repository")
-                .hasMessageContaining("pom.xml")
-                .hasMessageContaining("Injected.java")
-                .hasMessageContaining("Escape.java")
+                .hasMessageContaining("TwoMapper.xml")
                 .hasMessageContaining("agent-sibling.txt");
+        assertThat(violation.getMessage())
+                .doesNotContain("pom.xml", "Injected.java", "Escape.java");
         guard.close();
 
-        assertThat(layout.pom()).hasBinaryContent(pomBefore);
-        assertThat(layout.javaSource()).hasBinaryContent(javaBefore);
-        assertThat(layout.userFile()).hasBinaryContent(deletedBefore);
+        assertThat(layout.pom()).hasContent("<project>tampered</project>");
+        assertThat(layout.javaSource()).hasContent("class Application { int tampered; }");
+        assertThat(layout.userFile()).doesNotExist();
+        assertThat(layout.mapperTwo()).hasBinaryContent(mapperBefore);
         assertThat(layout.stableArtifact()).hasBinaryContent(stableBefore);
-        assertThat(injectedSource).doesNotExist();
-        assertThat(repositorySymlink).doesNotExist();
+        assertThat(injectedSource).isRegularFile();
+        assertThat(repositorySymlink).isSymbolicLink();
         assertThat(candidateSibling).doesNotExist();
         assertThat(external).hasContent("external remains untouched");
         assertThat(Files.getPosixFilePermissions(layout.mapperTwo())).isEqualTo(mapperPermissions);
@@ -322,35 +335,38 @@ class MyBatisSqlReviewFilesystemGuardTest {
         Set<PosixFilePermission> externalFilePermissions = permissions("r--------");
         Files.setPosixFilePermissions(external, externalPermissions);
         Files.setPosixFilePermissions(externalFile, externalFilePermissions);
-        Path javaRoot = layout.repository().resolve("src/main/java");
-        byte[] javaBefore = Files.readAllBytes(layout.javaSource());
+        Path mapperRoot = layout.mapperOne().getParent();
+        byte[] mapperOneBefore = Files.readAllBytes(layout.mapperOne());
+        byte[] mapperTwoBefore = Files.readAllBytes(layout.mapperTwo());
 
         MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper,
                 layout.repository(),
                 layout.stableRoot(),
                 layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
 
         assertThatThrownBy(() -> {
             try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
-                makeWritable(javaRoot.getParent());
-                makeWritable(javaRoot);
-                makeWritable(layout.javaSource().getParent());
-                makeWritable(layout.javaSource());
-                Files.delete(layout.javaSource());
-                Files.delete(layout.javaSource().getParent());
-                Files.delete(javaRoot);
-                Files.createSymbolicLink(javaRoot, external);
+                makeWritable(mapperRoot.getParent());
+                makeWritable(mapperRoot);
+                makeWritable(layout.mapperOne());
+                makeWritable(layout.mapperTwo());
+                Files.delete(layout.mapperOne());
+                Files.delete(layout.mapperTwo());
+                Files.delete(mapperRoot);
+                Files.createSymbolicLink(mapperRoot, external);
             }
         }).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("protected repository");
         guard.close();
 
-        assertThat(javaRoot).isDirectory();
-        assertThat(layout.javaSource()).hasBinaryContent(javaBefore);
+        assertThat(mapperRoot).isDirectory();
+        assertThat(layout.mapperOne()).hasBinaryContent(mapperOneBefore);
+        assertThat(layout.mapperTwo()).hasBinaryContent(mapperTwoBefore);
         assertThat(externalFile).hasContent("outside remains unchanged");
         assertThat(Files.getPosixFilePermissions(external)).isEqualTo(externalPermissions);
         assertThat(Files.getPosixFilePermissions(externalFile)).isEqualTo(externalFilePermissions);
@@ -360,20 +376,21 @@ class MyBatisSqlReviewFilesystemGuardTest {
     void restoresAfterAProtectedDirectoryIsChangedToMode000() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
-        Path javaDirectory = layout.javaSource().getParent();
-        Set<PosixFilePermission> original = Files.getPosixFilePermissions(javaDirectory);
+        Path mapperDirectory = layout.mapperOne().getParent();
+        Set<PosixFilePermission> original = Files.getPosixFilePermissions(mapperDirectory);
         MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
-        Files.setPosixFilePermissions(javaDirectory, permissions("---------"));
+        Files.setPosixFilePermissions(mapperDirectory, permissions("---------"));
 
         assertThatThrownBy(guard::close)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("filesystem detection failed");
-        assertThat(Files.getPosixFilePermissions(javaDirectory)).isEqualTo(original);
-        assertThat(layout.javaSource()).isRegularFile();
+        assertThat(Files.getPosixFilePermissions(mapperDirectory)).isEqualTo(original);
+        assertThat(layout.mapperOne()).isRegularFile();
     }
 
     @Test
@@ -382,6 +399,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         RunLayout layout = runLayout();
         MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
@@ -390,8 +408,8 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 List.of(layout.diagnosticOne()),
                 () -> {
                     Files.writeString(layout.diagnosticOne(), "java output");
-                    makeWritable(layout.pom());
-                    Files.writeString(layout.pom(), "tampered");
+                    makeWritable(layout.mapperOne());
+                    Files.writeString(layout.mapperOne(), "tampered");
                     return null;
                 }
         ));
@@ -420,6 +438,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         };
         MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo()), observer
         );
@@ -482,6 +501,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         };
         try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo()), observer
         )) {
@@ -504,36 +524,29 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void preservesOnlyABoundedPrefixForALargeUnexpectedConflict() throws Exception {
+    void leavesLargeUnrelatedRepositoryFilesOutsideRunProtection() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
         MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper, layout.repository(), layout.stableRoot(), layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
                 List.of(layout.mapperOne(), layout.mapperTwo()),
                 List.of(layout.candidateOne(), layout.candidateTwo())
         );
         Path unexpected = layout.repository().resolve("unexpected-large.bin");
-        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> {
-            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
-                makeWritable(layout.repository());
-                Files.write(unexpected, new byte[128 * 1024]);
-            }
-        });
-        assertThat(thrown).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("recovery backup retained at");
-        Path backup = Path.of(thrown.getMessage().substring(
-                thrown.getMessage().lastIndexOf("recovery backup retained at")
-                        + "recovery backup retained at".length()).trim());
-        guard.close();
-
-        assertThat(unexpected).doesNotExist();
-        assertThat(Files.readString(backup.resolve("conflicts/README.txt")))
-                .contains("TRUNCATED prefix");
-        try (var copies = Files.list(backup.resolve("conflicts"))) {
-            Path preserved = copies.filter(path -> path.getFileName().toString().endsWith(".bin"))
-                    .findFirst().orElseThrow();
-            assertThat(Files.size(preserved)).isEqualTo(64L * 1024);
+        try (guard;
+             MyBatisSqlReviewFilesystemGuard.TaskScope ignored =
+                     guard.protectTask(layout.candidateOne());
+             var channel = Files.newByteChannel(
+                     unexpected,
+                     java.nio.file.StandardOpenOption.CREATE,
+                     java.nio.file.StandardOpenOption.WRITE)) {
+            channel.position(65L * 1024 * 1024);
+            channel.write(java.nio.ByteBuffer.wrap(new byte[]{1}));
         }
+
+        assertThat(unexpected).isRegularFile();
+        assertThat(Files.size(unexpected)).isEqualTo(65L * 1024 * 1024 + 1);
     }
 
     private Layout layout(boolean outputInsideRepository) throws Exception {
