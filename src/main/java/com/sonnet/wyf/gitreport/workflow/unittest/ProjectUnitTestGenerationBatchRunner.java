@@ -718,13 +718,47 @@ public class ProjectUnitTestGenerationBatchRunner {
         private void restore(String relative) throws Exception {
             Path source = backupRoot.resolve(relative).normalize();
             Path target = repo.resolve(relative).normalize();
+            if (!source.startsWith(backupRoot) || !target.startsWith(repo)) {
+                throw new IllegalStateException("protected restore path escapes its root: " + relative);
+            }
+            requireNoSymbolicLinkComponents(backupRoot, source, "protected restore backup");
+            if (!Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException("protected restore backup is not a regular file: " + relative);
+            }
+            if (!before.get(relative).equals(sha256(source))) {
+                throw new IllegalStateException("protected restore backup hash changed: " + relative);
+            }
+            requireNoSymbolicLinkComponents(repo, target, "protected restore target");
             Files.createDirectories(target.getParent());
+            requireNoSymbolicLinkComponents(repo, target, "protected restore target");
             Files.copy(
                     source,
                     target,
                     StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.COPY_ATTRIBUTES
             );
+        }
+
+        private static void requireNoSymbolicLinkComponents(
+                Path base,
+                Path target,
+                String label
+        ) throws Exception {
+            Path normalizedBase = base.toAbsolutePath().normalize();
+            Path normalizedTarget = target.toAbsolutePath().normalize();
+            if (!normalizedTarget.startsWith(normalizedBase)) {
+                throw new IllegalStateException(label + " escapes its root: " + normalizedTarget);
+            }
+            if (Files.isSymbolicLink(normalizedBase)) {
+                throw new IllegalStateException(label + " contains symbolic link: " + normalizedBase);
+            }
+            Path current = normalizedBase;
+            for (Path component : normalizedBase.relativize(normalizedTarget)) {
+                current = current.resolve(component);
+                if (Files.isSymbolicLink(current)) {
+                    throw new IllegalStateException(label + " contains symbolic link: " + current);
+                }
+            }
         }
 
         private static Map<String, String> fingerprint(

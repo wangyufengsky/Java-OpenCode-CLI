@@ -341,6 +341,44 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
+    void neverRestoresProtectedFilesThroughAnInjectedParentSymlink() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(1);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        Path outside = tempDir.resolve("outside");
+        Files.createDirectories(outside);
+
+        assertThatThrownBy(() -> chain(
+                properties,
+                new ProtectedParentSymlinkClient(properties, outside)
+        ).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected file restoration failed");
+
+        assertThat(outside.resolve("OrderService.java")).doesNotExist();
+    }
+
+    @Test
+    void neverRestoresProtectedFilesFromATamperedBackup() throws Exception {
+        ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(1);
+        properties.getSource().setPackagePaths(List.of("com.acme.order"));
+        writeSource(properties.getProject().getRepo());
+        Path source = properties.getProject().getRepo()
+                .resolve("src/main/java/com/acme/order/OrderService.java");
+
+        assertThatThrownBy(() -> chain(
+                properties,
+                new TamperedProtectedBackupClient(properties)
+        ).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("protected file restoration failed");
+
+        assertThat(source).content().doesNotContain("tampered backup");
+    }
+
+    @Test
     void allowsAgentToModifyCurrentModulePomAndExistingTest() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
         properties.getSource().setPackagePaths(List.of("com.acme.order"));
@@ -841,6 +879,51 @@ class ProjectUnitTestGenerationWorkflowChainTest {
             Files.createDirectories(productionFile.getParent());
             Files.writeString(productionFile, "package com.acme.build; class BuildInfo {}\n");
             super.createTargetTest(prompt);
+        }
+    }
+
+    private class ProtectedParentSymlinkClient extends FakeAgentBridgeClient {
+        private final Path outside;
+
+        ProtectedParentSymlinkClient(
+                ProjectUnitTestGenerationProperties properties,
+                Path outside
+        ) {
+            super(properties);
+            this.outside = outside;
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            super.createTargetTest(prompt);
+            Path protectedDirectory = properties.getProject().getRepo()
+                    .resolve("src/main/java/com/acme/order");
+            Files.delete(protectedDirectory.resolve("OrderService.java"));
+            Files.delete(protectedDirectory);
+            Files.createSymbolicLink(protectedDirectory, outside);
+        }
+    }
+
+    private class TamperedProtectedBackupClient extends FakeAgentBridgeClient {
+        TamperedProtectedBackupClient(ProjectUnitTestGenerationProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        protected void createTargetTest(String prompt) throws Exception {
+            super.createTargetTest(prompt);
+            Path source = properties.getProject().getRepo()
+                    .resolve("src/main/java/com/acme/order/OrderService.java");
+            Path backup;
+            try (var paths = Files.walk(tempDir)) {
+                backup = paths
+                        .filter(path -> path.toString().contains("protected-file-backup"))
+                        .filter(path -> path.getFileName().toString().equals("OrderService.java"))
+                        .findFirst()
+                        .orElseThrow();
+            }
+            Files.writeString(backup, "tampered backup\n");
+            Files.writeString(source, "tampered source\n");
         }
     }
 

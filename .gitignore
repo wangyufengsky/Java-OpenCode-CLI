@@ -40,6 +40,7 @@ build/
 
 ### Git report runtime output ###
 D:/
+/git-report-output/
 
 ### Task console runtime output ###
 data/
@@ -48,6 +49,7 @@ data/
 .agentbridge/conversation.db*
 .agentbridge/sessions/
 .agentbridge/hooks/.provision-hashes
+/.agent-work/
 
 ### Codex local workspaces ###
 .worktrees/

@@ -75,6 +75,22 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void reportsAgentWaitDeadlineAsTypedTimeout() throws Exception {
+        HttpServer server = server();
+        server.createContext("/info", exchange -> respond(exchange, 200, "{\"running\":true}"));
+        server.start();
+
+        assertThatThrownBy(() -> client.waitUntilIdle(
+                baseUri(server),
+                Duration.ZERO,
+                Duration.ofMillis(1)
+        )).satisfies(exception ->
+                assertThat(exception.getClass().getSimpleName())
+                        .isEqualTo("AgentBridgeTimeoutException")
+        );
+    }
+
+    @Test
     void acceptsNativeAgentBridgeVersionWithoutInventedCapabilityFields() throws Exception {
         HttpServer server = server();
         server.createContext("/info", exchange -> respond(exchange, 200, "{\"version\":\"1.202.1\"}"));

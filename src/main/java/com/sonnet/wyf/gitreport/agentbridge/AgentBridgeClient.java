@@ -85,7 +85,9 @@ public class AgentBridgeClient {
                 return;
             }
             if (System.nanoTime() >= deadline) {
-                throw new IllegalStateException("AgentBridge agent did not finish within " + timeout.toMinutes() + " minutes");
+                throw new AgentBridgeTimeoutException(
+                        "AgentBridge agent did not finish within " + timeout.toMinutes() + " minutes"
+                );
             }
             Thread.sleep(Math.max(1, pollInterval.toMillis()));
         }

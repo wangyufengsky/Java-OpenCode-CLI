@@ -243,7 +243,7 @@ public final class MyBatisSqlReviewTaskRunner {
                             )
                     );
                 } catch (Exception exception) {
-                    throw WorkflowFailureException.session(
+                    throw WorkflowFailureException.task(
                             WorkflowFailureCategory.SAFETY_VIOLATION,
                             "tool-call safety audit failed: " + messageOf(exception),
                             exception

@@ -121,6 +121,31 @@ class AgentBridgeTaskRunnerTest {
         );
     }
 
+    @Test
+    void preservesTimeoutStateAfterFreshSessionBudgetIsExhausted() throws Exception {
+        Path promptFile = writePrompt("PROMPT");
+        RecordingClient client = new RecordingClient();
+        client.timeoutEveryWait = true;
+        AgentBridgeTaskRunner runner = runner(client);
+
+        AgentBridgeRunResult result = runner.runUntilValidated(spec(
+                promptFile,
+                "MESSAGE",
+                () -> ValidationCheck.success(),
+                1
+        ));
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.agentState()).isEqualTo("timeout");
+        assertThat(result.validationOk()).isFalse();
+        assertThat(client.prompts).hasSize(4);
+        assertThat(tempDir.resolve("run/session-attempts/002/session-failure.json")).content()
+                .contains("\"category\" : \"SESSION_TIMEOUT\"");
+        assertThat(tempDir.resolve("run/agent-status.json")).content()
+                .contains("\"phase\" : \"timeout\"")
+                .contains("\"timedOut\" : true");
+    }
+
     private Path writePrompt(String text) throws Exception {
         Path promptFile = tempDir.resolve("worker-prompt.md");
         Files.writeString(promptFile, text);
@@ -157,6 +182,7 @@ class AgentBridgeTaskRunnerTest {
     private static final class RecordingClient extends AgentBridgeClient {
         private final List<String> prompts = new ArrayList<>();
         private boolean failFirstWait;
+        private boolean timeoutEveryWait;
         private int waits;
 
         RecordingClient() {
@@ -170,6 +196,9 @@ class AgentBridgeTaskRunnerTest {
 
         @Override
         public void waitUntilIdle(URI webBaseUrl, Duration timeout, Duration pollInterval) {
+            if (timeoutEveryWait) {
+                throw new AgentBridgeTimeoutException("AgentBridge agent did not finish within 1 minutes");
+            }
             if (failFirstWait && ++waits == 1) {
                 throw new IllegalStateException("temporary AgentBridge failure");
             }

@@ -93,22 +93,36 @@ public class AgentBridgeTaskRunner {
                         monitor.taskId(), spec.title(), correctionRound, maxCorrections, result.validationError());
             } catch (Exception exception) {
                 WorkflowFailureException failure = failureHandler.sessionFailure(
-                        WorkflowFailureCategory.SESSION_EXECUTION,
+                        sessionFailureCategory(exception),
                         exception
                 );
                 if (failure.scope() == WorkflowFailureScope.TASK) {
                     throw failure;
                 }
+                boolean timedOut = failure.category() == WorkflowFailureCategory.SESSION_TIMEOUT;
+                String failedState = timedOut ? "timeout" : "failed";
                 recordSessionFailure(spec, correctionRound + 1, failure.category(), failure.getMessage());
-                monitor.write("session_failed", "failed", false, correctionRound, failure.getMessage());
+                monitor.write(
+                        timedOut ? "timeout" : "session_failed",
+                        failedState,
+                        timedOut,
+                        correctionRound,
+                        failure.getMessage()
+                );
                 if (correctionRound >= maxCorrections) {
-                    monitor.write("validation_failed_final", "failed", false, correctionRound, failure.getMessage());
+                    monitor.write(
+                            timedOut ? "timeout" : "validation_failed_final",
+                            failedState,
+                            timedOut,
+                            correctionRound,
+                            failure.getMessage()
+                    );
                     return result(
                             spec,
                             monitor,
+                            timedOut,
                             false,
-                            false,
-                            "failed",
+                            failedState,
                             false,
                             failure.getMessage(),
                             correctionRound
@@ -121,6 +135,17 @@ public class AgentBridgeTaskRunner {
                         monitor.taskId(), spec.title(), correctionRound, maxCorrections, failure.getMessage());
             }
         }
+    }
+
+    private WorkflowFailureCategory sessionFailureCategory(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof AgentBridgeTimeoutException) {
+                return WorkflowFailureCategory.SESSION_TIMEOUT;
+            }
+            current = current.getCause();
+        }
+        return WorkflowFailureCategory.SESSION_EXECUTION;
     }
 
     private AgentBridgeRunResult waitForValidationRound(
@@ -174,12 +199,12 @@ public class AgentBridgeTaskRunner {
     private String correctionMessage(Path promptFile, String validationError, int correctionRound, int maxCorrections) {
         return """
                 Java 产物校验失败，请继续完成同一个 AgentBridge 任务，不要只回复说明。
-                
+
                 要求：
                 - 只修正原任务要求的目标文件。
                 - 保留原 prompt 的任务边界、路径载荷和输出结构。
                 - 完成后回复简短完成信息即可，Java 会重新验收。
-                
+
                 原 prompt 文件：%s
                 纠正轮次：%d/%d
                 校验错误：%s

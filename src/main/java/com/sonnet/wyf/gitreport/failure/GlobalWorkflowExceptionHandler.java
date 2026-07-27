@@ -26,9 +26,10 @@ public final class GlobalWorkflowExceptionHandler {
     }
 
     public WorkflowFailureException retryExhausted(String message, Throwable cause) {
+        String detail = messageOf(cause, "unknown session failure");
         return WorkflowFailureException.task(
                 WorkflowFailureCategory.RETRY_EXHAUSTED,
-                message,
+                message + ": " + detail,
                 cause
         );
     }

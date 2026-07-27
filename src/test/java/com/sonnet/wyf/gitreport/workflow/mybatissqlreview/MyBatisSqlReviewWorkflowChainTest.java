@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
@@ -130,29 +133,22 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
-    void retriesSafetyViolationInANewSessionWithoutFailingTheTask() throws Exception {
+    void stopsAfterConfirmedSafetyViolationWithoutPublishing() {
         client.injectUnsafeFirstSession = true;
 
-        chain.run(request("full", "", "", "run-safety-retry"));
+        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-safety-stop")))
+                .isInstanceOf(WorkflowFailureException.class)
+                .satisfies(exception -> {
+                    WorkflowFailureException failure = (WorkflowFailureException) exception;
+                    assertThat(failure.scope()).isEqualTo(WorkflowFailureScope.TASK);
+                    assertThat(failure.category()).isEqualTo(WorkflowFailureCategory.SAFETY_VIOLATION);
+                })
+                .hasMessageContaining("unapproved tool")
+                .hasMessageContaining("unsafe-write");
 
-        assertThat(client.postedStatementKeys).hasSize(4);
-        assertThat(client.postedStatementKeys.get(0))
-                .isEqualTo(client.postedStatementKeys.get(1));
-        assertThat(client.events.stream().filter("clear"::equals).toList()).hasSize(4);
-        Path tasksRoot = stableOut.resolve("runs/run-safety-retry/tasks");
-        try (var paths = Files.walk(tasksRoot)) {
-            assertThat(paths
-                    .filter(path -> path.getFileName().toString().equals("agent-status.json"))
-                    .filter(path -> {
-                        try {
-                            return Files.readString(path).contains("\"phase\" : \"session_failed\"");
-                        } catch (Exception exception) {
-                            throw new IllegalStateException(exception);
-                        }
-                    })
-                    .toList()).hasSize(1);
-        }
-        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
+        assertThat(client.postedStatementKeys).hasSize(1);
+        assertThat(client.events.stream().filter("clear"::equals).toList()).hasSize(1);
+        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).doesNotExist();
     }
 
     @Test
@@ -463,7 +459,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     void executionYamlAgentBridgeFieldsOverrideGlobalSettingsWhileMissingFieldsFallBack() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config) + """
-                
+
                 agentbridge:
                   web-base-url: http://yaml-agentbridge.test
                   timeout-minutes: 2
@@ -492,7 +488,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     void blankYamlUrlsFallBackToGlobalWhileTaskMessageCanRemainExplicitlyBlank() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config) + """
-                
+
                 agentbridge:
                   web-base-url: "   "
                   mcp-url: ""
@@ -536,15 +532,15 @@ class MyBatisSqlReviewWorkflowChainTest {
         Files.writeString(root.resolve("local.md"), "# Local\n");
         Files.writeString(root.resolve("report.md"), """
                 # Safe
-                
+
                 [local](local.md)
                 [reference][local-reference]
                 [multiline-reference][local-multiline-reference]
-                
+
                 [local-reference]: local.md
                 [local-multiline-reference]:
                   local.md
-                
+
                 ```sql
                 SELECT '[not-a-link](https://sql.example)' AS value;
                 SELECT '<https://sql.example>' AS value;
@@ -925,9 +921,9 @@ class MyBatisSqlReviewWorkflowChainTest {
             boolean selectKey = runtime.path("select_key").asBoolean();
             Files.writeString(candidate.resolve("report.md"), """
                     # SQL Review
-                    
+
                     Statement `%s` from `%s`, namespace `%s`, id `%s`, command `%s`, selectKey `%s`.
-                    
+
                     - Data source: `%s`
                     - Catalog: `%s`
                     - Schema: `%s`
@@ -935,29 +931,29 @@ class MyBatisSqlReviewWorkflowChainTest {
                     - Scope: `%s`
                     - Safety mode: `%s`
                     - Database safety: `%s`
-                    
+
                     ## Statement
-                    
+
                     Reviewed statically.
-                    
+
                     ## Static Analysis
-                    
+
                     No technical validation failure.
-                    
+
                     ## Database Evidence
-                    
+
                     [database-evidence.json](database-evidence.json)
-                    
+
                     ## Findings
-                    
+
                     No findings.
-                    
+
                     ## Recommendations
-                    
+
                     Retain normal regression coverage.
-                    
+
                     ## Limitations
-                    
+
                     No database calls were required.
                     """.formatted(
                     statementKey, mapperPath, namespace, statementId, commandType, selectKey,
