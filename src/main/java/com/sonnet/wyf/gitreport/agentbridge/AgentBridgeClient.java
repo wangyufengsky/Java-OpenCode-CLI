@@ -162,19 +162,31 @@ public class AgentBridgeClient {
 
     public ToolResponse callTool(URI mcpUrl, String name, JsonNode arguments) throws IOException, InterruptedException {
         requireLoopbackEndpoint(mcpUrl);
-        McpSession session = mcpSession(mcpUrl);
+        return executeWithMcpSessionRecovery(
+                mcpUrl,
+                session -> callTool(mcpUrl, session, name, arguments)
+        );
+    }
+
+    private ToolResponse callTool(
+            URI mcpUrl,
+            McpSession session,
+            String name,
+            JsonNode arguments
+    ) throws IOException, InterruptedException {
         ObjectNode params = objectMapper.createObjectNode();
         params.put("name", name);
         params.set("arguments", arguments == null ? objectMapper.createObjectNode() : arguments);
+
+        int responseLimit = isNativeDatabaseEvidenceTool(name)
+                ? SQL_TOOL_RESPONSE_BYTES
+                : GENERAL_TOOL_RESPONSE_BYTES;
         ObjectNode body = objectMapper.createObjectNode();
         body.put("jsonrpc", "2.0");
         body.put("id", requestIds.incrementAndGet());
         body.put("method", "tools/call");
         body.set("params", params);
 
-        int responseLimit = isNativeDatabaseEvidenceTool(name)
-                ? SQL_TOOL_RESPONSE_BYTES
-                : GENERAL_TOOL_RESPONSE_BYTES;
         HttpResponse<String> response = sendJson(
                 mcpUrl,
                 body,
@@ -183,7 +195,7 @@ public class AgentBridgeClient {
                 responseLimit,
                 "AgentBridge MCP tools/call response for " + name
         );
-        requireSuccess(response, "AgentBridge MCP tools/call failed: " + name);
+        requireMcpSuccess(response, "AgentBridge MCP tools/call failed: " + name);
         JsonNode root = objectMapper.readTree(response.body());
         if (root.hasNonNull("error")) {
             throw new IllegalStateException("AgentBridge MCP tool failed: " + root.path("error"));
@@ -195,7 +207,11 @@ public class AgentBridgeClient {
 
     public List<ToolDefinition> listTools(URI mcpUrl) throws IOException, InterruptedException {
         requireLoopbackEndpoint(mcpUrl);
-        McpSession session = mcpSession(mcpUrl);
+        return executeWithMcpSessionRecovery(mcpUrl, session -> listTools(mcpUrl, session));
+    }
+
+    private List<ToolDefinition> listTools(URI mcpUrl, McpSession session)
+            throws IOException, InterruptedException {
         List<ToolDefinition> tools = new ArrayList<>();
         Set<String> observedCursors = new HashSet<>();
         String cursor = null;
@@ -218,7 +234,7 @@ public class AgentBridgeClient {
                     MCP_METADATA_RESPONSE_BYTES,
                     "AgentBridge MCP tools/list response"
             );
-            requireSuccess(response, "AgentBridge MCP tools/list failed");
+            requireMcpSuccess(response, "AgentBridge MCP tools/list failed");
             JsonNode root = objectMapper.readTree(response.body());
             if (root.hasNonNull("error")) {
                 throw new IllegalStateException("AgentBridge MCP tools/list failed: " + root.path("error"));
@@ -668,10 +684,59 @@ public class AgentBridgeClient {
             if (existing != null) {
                 return existing;
             }
-            McpSession initialized = initializeMcpSession(mcpUrl);
+            McpSession initialized = initializeMcpSessionWithRecovery(mcpUrl);
             mcpSessions.put(mcpUrl, initialized);
             return initialized;
         }
+    }
+
+    private McpSession initializeMcpSessionWithRecovery(URI mcpUrl)
+            throws IOException, InterruptedException {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                return initializeMcpSession(mcpUrl);
+            } catch (McpSessionExpiredException exception) {
+                if (attempt == 1) {
+                    throw exception;
+                }
+            }
+        }
+        throw new IllegalStateException("AgentBridge MCP initialization recovery exhausted");
+    }
+
+    private <T> T executeWithMcpSessionRecovery(
+            URI mcpUrl,
+            McpSessionOperation<T> operation
+    ) throws IOException, InterruptedException {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            McpSession session = mcpSession(mcpUrl);
+            try {
+                return operation.execute(session);
+            } catch (McpSessionExpiredException exception) {
+                invalidateMcpSession(mcpUrl, session);
+                if (attempt == 1) {
+                    throw exception;
+                }
+            }
+        }
+        throw new IllegalStateException("AgentBridge MCP session recovery exhausted");
+    }
+
+    private void invalidateMcpSession(URI mcpUrl, McpSession expiredSession) {
+        synchronized (mcpSessionLock) {
+            if (mcpSessions.get(mcpUrl) == expiredSession) {
+                mcpSessions.remove(mcpUrl);
+            }
+        }
+    }
+
+    private void requireMcpSuccess(HttpResponse<String> response, String message) {
+        if (response.statusCode() == 404) {
+            throw new McpSessionExpiredException(
+                    message + ": HTTP " + response.statusCode() + " " + response.body()
+            );
+        }
+        requireSuccess(response, message);
     }
 
     private McpSession initializeMcpSession(URI mcpUrl) throws IOException, InterruptedException {
@@ -716,7 +781,7 @@ public class AgentBridgeClient {
                 SMALL_JSON_RESPONSE_BYTES,
                 "AgentBridge MCP initialized notification response"
         );
-        requireSuccess(notificationResponse, "AgentBridge MCP initialization notification failed");
+        requireMcpSuccess(notificationResponse, "AgentBridge MCP initialization notification failed");
         return session;
     }
 
@@ -892,6 +957,17 @@ public class AgentBridgeClient {
     }
 
     private record McpSession(String id, String protocolVersion) {
+    }
+
+    @FunctionalInterface
+    private interface McpSessionOperation<T> {
+        T execute(McpSession session) throws IOException, InterruptedException;
+    }
+
+    private static final class McpSessionExpiredException extends IllegalStateException {
+        private McpSessionExpiredException(String message) {
+            super(message);
+        }
     }
 
     private static final class LimitedStringBodySubscriber implements HttpResponse.BodySubscriber<String> {

@@ -303,6 +303,213 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void restartsInitializationWhenInitializedNotificationFindsExpiredSession() throws Exception {
+        AtomicInteger initializeCalls = new AtomicInteger();
+        AtomicInteger initializedNotifications = new AtomicInteger();
+        AtomicInteger toolCalls = new AtomicInteger();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> {
+                    String sessionId = initializeCalls.incrementAndGet() == 1
+                            ? "expired-during-initialize"
+                            : "initialized-session";
+                    respondWithSession(exchange, 200, sessionId, """
+                            {
+                              "jsonrpc": "2.0",
+                              "id": 1,
+                              "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                            }
+                            """);
+                }
+                case "notifications/initialized" -> {
+                    if (initializedNotifications.incrementAndGet() == 1) {
+                        respond(exchange, 404, "");
+                    } else {
+                        respondWithSession(exchange, 202, "initialized-session", "");
+                    }
+                }
+                case "tools/call" -> {
+                    toolCalls.incrementAndGet();
+                    respondWithSession(exchange, 200, "initialized-session", """
+                            {
+                              "jsonrpc": "2.0",
+                              "id": 2,
+                              "result": {
+                                "content": [{
+                                  "type": "text",
+                                  "text": "{\\"tests\\":[\\"OrderServiceTest\\"]}"
+                                }]
+                              }
+                            }
+                            """);
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
+        );
+
+        assertThat(response.structured().path("tests")).hasSize(1);
+        assertThat(initializeCalls).hasValue(2);
+        assertThat(initializedNotifications).hasValue(2);
+        assertThat(toolCalls).hasValue(1);
+    }
+
+    @Test
+    void reinitializesExpiredMcpSessionAndRetriesToolCallOnce() throws Exception {
+        AtomicInteger initializeCalls = new AtomicInteger();
+        AtomicInteger toolCalls = new AtomicInteger();
+        List<String> methods = new ArrayList<>();
+        List<String> sessionHeaders = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            String method = request.path("method").asText();
+            methods.add(method);
+            sessionHeaders.add(exchange.getRequestHeaders().getFirst("Mcp-Session-Id"));
+            switch (method) {
+                case "initialize" -> {
+                    String sessionId = initializeCalls.incrementAndGet() == 1
+                            ? "expired-session"
+                            : "fresh-session";
+                    respondWithSession(exchange, 200, sessionId, """
+                            {
+                              "jsonrpc": "2.0",
+                              "id": 1,
+                              "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                            }
+                            """);
+                }
+                case "notifications/initialized" -> respondWithSession(
+                        exchange,
+                        202,
+                        exchange.getRequestHeaders().getFirst("Mcp-Session-Id"),
+                        ""
+                );
+                case "tools/call" -> {
+                    if (toolCalls.incrementAndGet() == 1) {
+                        respond(exchange, 404, """
+                                {
+                                  "jsonrpc": "2.0",
+                                  "error": {
+                                    "code": -32600,
+                                    "message": "Unknown or expired MCP session: expired-session"
+                                  }
+                                }
+                                """);
+                    } else {
+                        respondWithSession(exchange, 200, "fresh-session", """
+                                {
+                                  "jsonrpc": "2.0",
+                                  "id": 2,
+                                  "result": {
+                                    "content": [{
+                                      "type": "text",
+                                      "text": "{\\"tests\\":[\\"OrderServiceTest\\"]}"
+                                    }]
+                                  }
+                                }
+                                """);
+                    }
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
+        );
+
+        assertThat(response.structured().path("tests")).hasSize(1);
+        assertThat(methods).containsExactly(
+                "initialize",
+                "notifications/initialized",
+                "tools/call",
+                "initialize",
+                "notifications/initialized",
+                "tools/call"
+        );
+        assertThat(sessionHeaders).containsExactly(
+                null,
+                "expired-session",
+                "expired-session",
+                null,
+                "fresh-session",
+                "fresh-session"
+        );
+    }
+
+    @Test
+    void reinitializesMcpSessionWhen404HasNoErrorBody() throws Exception {
+        AtomicInteger initializeCalls = new AtomicInteger();
+        AtomicInteger toolCalls = new AtomicInteger();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> {
+                    String sessionId = initializeCalls.incrementAndGet() == 1
+                            ? "expired-session"
+                            : "fresh-session";
+                    respondWithSession(exchange, 200, sessionId, """
+                            {
+                              "jsonrpc": "2.0",
+                              "id": 1,
+                              "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                            }
+                            """);
+                }
+                case "notifications/initialized" -> respondWithSession(
+                        exchange,
+                        202,
+                        exchange.getRequestHeaders().getFirst("Mcp-Session-Id"),
+                        ""
+                );
+                case "tools/call" -> {
+                    if (toolCalls.incrementAndGet() == 1) {
+                        respond(exchange, 404, "");
+                    } else {
+                        respondWithSession(exchange, 200, "fresh-session", """
+                                {
+                                  "jsonrpc": "2.0",
+                                  "id": 2,
+                                  "result": {
+                                    "content": [{
+                                      "type": "text",
+                                      "text": "{\\"tests\\":[\\"OrderServiceTest\\"]}"
+                                    }]
+                                  }
+                                }
+                                """);
+                    }
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode().put("file_pattern", "OrderServiceTest")
+        );
+
+        assertThat(response.structured().path("tests")).hasSize(1);
+        assertThat(initializeCalls).hasValue(2);
+        assertThat(toolCalls).hasValue(2);
+    }
+
+    @Test
     void usesToolTimeoutForLongRunningMcpCalls() throws Exception {
         CapturingHttpClient httpClient = new CapturingHttpClient("""
                 {
@@ -410,6 +617,92 @@ class AgentBridgeClientTest {
         assertThat(requests).extracting(request -> request.path("method").asText())
                 .containsExactly("initialize", "notifications/initialized", "tools/list", "tools/list");
         assertThat(requests.get(3).at("/params/cursor").asText()).isEqualTo("page-2");
+    }
+
+    @Test
+    void restartsToolsListPaginationAfterMcpSessionExpires() throws Exception {
+        AtomicInteger initializeCalls = new AtomicInteger();
+        List<String> listSessions = new ArrayList<>();
+        List<String> listCursors = new ArrayList<>();
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> {
+                    String sessionId = initializeCalls.incrementAndGet() == 1
+                            ? "expired-paged-session"
+                            : "fresh-paged-session";
+                    respondWithSession(exchange, 200, sessionId, """
+                            {
+                              "jsonrpc": "2.0",
+                              "id": 1,
+                              "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                            }
+                            """);
+                }
+                case "notifications/initialized" -> respondWithSession(
+                        exchange,
+                        202,
+                        exchange.getRequestHeaders().getFirst("Mcp-Session-Id"),
+                        ""
+                );
+                case "tools/list" -> {
+                    String sessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
+                    String cursor = request.at("/params/cursor").asText("");
+                    listSessions.add(sessionId);
+                    listCursors.add(cursor);
+                    if ("expired-paged-session".equals(sessionId) && "page-2".equals(cursor)) {
+                        respond(exchange, 404, "");
+                    } else if (cursor.isEmpty()) {
+                        respondWithSession(exchange, 200, sessionId, """
+                                {
+                                  "jsonrpc": "2.0",
+                                  "id": 2,
+                                  "result": {
+                                    "tools": [{
+                                      "name": "cmcp_db_database_list_datasources",
+                                      "inputSchema": {"type": "object"}
+                                    }],
+                                    "nextCursor": "page-2"
+                                  }
+                                }
+                                """);
+                    } else {
+                        respondWithSession(exchange, 200, sessionId, """
+                                {
+                                  "jsonrpc": "2.0",
+                                  "id": 3,
+                                  "result": {
+                                    "tools": [{
+                                      "name": "cmcp_db_database_execute_sql_query",
+                                      "inputSchema": {"type": "object"}
+                                    }]
+                                  }
+                                }
+                                """);
+                    }
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        List<AgentBridgeClient.ToolDefinition> tools = client.listTools(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp")
+        );
+
+        assertThat(tools).extracting(AgentBridgeClient.ToolDefinition::name)
+                .containsExactly(
+                        "cmcp_db_database_list_datasources",
+                        "cmcp_db_database_execute_sql_query"
+                );
+        assertThat(listSessions).containsExactly(
+                "expired-paged-session",
+                "expired-paged-session",
+                "fresh-paged-session",
+                "fresh-paged-session"
+        );
+        assertThat(listCursors).containsExactly("", "page-2", "", "page-2");
     }
 
     @Test
