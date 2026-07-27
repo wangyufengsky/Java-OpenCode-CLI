@@ -24,11 +24,8 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 
 class MyBatisSqlReviewWorkflowChainTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -58,7 +55,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                 </mapper>
                 """);
         writeConfig();
-        client = new RecordingAgentBridgeClient(objectMapper);
+        client = new RecordingAgentBridgeClient(objectMapper, repository);
         MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(client);
         MyBatisSqlReviewTaskRunner taskRunner = new MyBatisSqlReviewTaskRunner(
                 client,
@@ -82,7 +79,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
-    void runsExactlyOneSerialAttemptPerMappedStatementAndSelectKeyThenPublishesTheCompleteTree() throws Exception {
+    void runsOneSerialSessionPerStatementAndPreallocatesFreshRetrySessions() throws Exception {
         chain.run(request("full", "", "", "run-full"));
 
         JsonNode inventory = objectMapper.readTree(stableOut.resolve("sql-inventory.json").toFile());
@@ -91,7 +88,7 @@ class MyBatisSqlReviewWorkflowChainTest {
                 inventory.path("statements").findValuesAsText("statement_key")
         );
         assertThat(client.maximumActiveTasks).isEqualTo(1);
-        assertThat(client.candidateDirectoryCountsAtPost).containsExactly(3, 3, 3);
+        assertThat(client.candidateDirectoryCountsAtPost).containsExactly(6, 6, 6);
         assertThat(client.events).containsSubsequence(
                 "clear", "wait-for-clear", "history", "post", "wait-for-task", "history"
         );
@@ -110,24 +107,67 @@ class MyBatisSqlReviewWorkflowChainTest {
         Path runRoot = stableOut.resolve("runs/run-full");
         assertThat(runRoot.resolve("tasks")).isDirectory();
         try (var paths = Files.walk(runRoot.resolve("tasks"))) {
-            assertThat(paths.filter(path -> path.getFileName().toString().equals("candidate")).toList())
-                    .hasSize(3)
-                    .allSatisfy(candidate -> assertThat(candidate).isDirectoryContaining(path ->
-                            Set.of("report.md", "summary.json", "database-evidence.json")
-                                    .contains(path.getFileName().toString())));
+            List<Path> candidates = paths
+                    .filter(path -> path.getFileName().toString().equals("candidate"))
+                    .toList();
+            assertThat(candidates).hasSize(6);
+            assertThat(candidates.stream()
+                    .filter(candidate -> Files.isRegularFile(candidate.resolve("report.md")))
+                    .toList()).hasSize(3);
         }
         try (var paths = Files.walk(runRoot.resolve("tasks"))) {
             assertThat(paths.filter(path -> path.getFileName().toString().equals("tool-call-boundary.json")).toList())
-                    .hasSize(3);
+                    .hasSize(6);
         }
         try (var paths = Files.walk(runRoot.resolve("tasks"))) {
             assertThat(paths.filter(path -> path.getFileName().toString().equals("task.json")).toList())
-                    .hasSize(3)
+                    .hasSize(6)
                     .allSatisfy(taskJson -> assertThat(taskJson)
                             .content().contains("\"data_source\"", "\"catalog\"", "\"schema\"",
                                     "\"project\"", "\"scope\" : \"ALL\"")
                             .doesNotContain("connection_id", "database_name", "schema_name"));
         }
+    }
+
+    @Test
+    void retriesSafetyViolationInANewSessionWithoutFailingTheTask() throws Exception {
+        client.injectUnsafeFirstSession = true;
+
+        chain.run(request("full", "", "", "run-safety-retry"));
+
+        assertThat(client.postedStatementKeys).hasSize(4);
+        assertThat(client.postedStatementKeys.get(0))
+                .isEqualTo(client.postedStatementKeys.get(1));
+        assertThat(client.events.stream().filter("clear"::equals).toList()).hasSize(4);
+        Path tasksRoot = stableOut.resolve("runs/run-safety-retry/tasks");
+        try (var paths = Files.walk(tasksRoot)) {
+            assertThat(paths
+                    .filter(path -> path.getFileName().toString().equals("agent-status.json"))
+                    .filter(path -> {
+                        try {
+                            return Files.readString(path).contains("\"phase\" : \"session_failed\"");
+                        } catch (Exception exception) {
+                            throw new IllegalStateException(exception);
+                        }
+                    })
+                    .toList()).hasSize(1);
+        }
+        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
+    }
+
+    @Test
+    void retriesFilesystemIntegrityViolationInANewSessionAndRestoresMapper() throws Exception {
+        Path mapper = repository.resolve("src/main/resources/mappers/OrderMapper.xml");
+        String originalMapper = Files.readString(mapper);
+        client.injectMapperWriteFirstSession = true;
+
+        chain.run(request("full", "", "", "run-filesystem-retry"));
+
+        assertThat(client.postedStatementKeys).hasSize(4);
+        assertThat(client.postedStatementKeys.get(0))
+                .isEqualTo(client.postedStatementKeys.get(1));
+        assertThat(mapper).content().isEqualTo(originalMapper);
+        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
     }
 
     @Test
@@ -423,7 +463,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     void executionYamlAgentBridgeFieldsOverrideGlobalSettingsWhileMissingFieldsFallBack() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config) + """
-
+                
                 agentbridge:
                   web-base-url: http://yaml-agentbridge.test
                   timeout-minutes: 2
@@ -452,7 +492,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     void blankYamlUrlsFallBackToGlobalWhileTaskMessageCanRemainExplicitlyBlank() throws Exception {
         Path config = configDir.resolve("mybatis-sql-review.yml");
         Files.writeString(config, Files.readString(config) + """
-
+                
                 agentbridge:
                   web-base-url: "   "
                   mcp-url: ""
@@ -496,15 +536,15 @@ class MyBatisSqlReviewWorkflowChainTest {
         Files.writeString(root.resolve("local.md"), "# Local\n");
         Files.writeString(root.resolve("report.md"), """
                 # Safe
-
+                
                 [local](local.md)
                 [reference][local-reference]
                 [multiline-reference][local-multiline-reference]
-
+                
                 [local-reference]: local.md
                 [local-multiline-reference]:
                   local.md
-
+                
                 ```sql
                 SELECT '[not-a-link](https://sql.example)' AS value;
                 SELECT '<https://sql.example>' AS value;
@@ -619,6 +659,7 @@ class MyBatisSqlReviewWorkflowChainTest {
 
     private static final class RecordingAgentBridgeClient extends AgentBridgeClient {
         private final ObjectMapper objectMapper;
+        private final Path repository;
         private final List<String> events = new ArrayList<>();
         private final List<String> postedStatementKeys = new ArrayList<>();
         private final List<Integer> candidateDirectoryCountsAtPost = new ArrayList<>();
@@ -635,12 +676,17 @@ class MyBatisSqlReviewWorkflowChainTest {
         private boolean omitEvidence;
         private boolean missingRequiredTool;
         private boolean mismatchDataSourceOnRecheck;
+        private boolean injectUnsafeFirstSession;
+        private boolean unsafeSessionInjected;
+        private boolean injectMapperWriteFirstSession;
+        private boolean mapperWriteInjected;
         private int dataSourceCalls;
         private Runnable onListTools;
 
-        private RecordingAgentBridgeClient(ObjectMapper objectMapper) {
+        private RecordingAgentBridgeClient(ObjectMapper objectMapper, Path repository) {
             super(objectMapper);
             this.objectMapper = objectMapper;
+            this.repository = repository;
         }
 
         @Override
@@ -672,6 +718,26 @@ class MyBatisSqlReviewWorkflowChainTest {
                             .count());
                 }
                 writeCandidate(runtime);
+                if (injectMapperWriteFirstSession && !mapperWriteInjected) {
+                    mapperWriteInjected = true;
+                    Path mapper = repository.resolve(runtime.path("mapper_relative_path").asText());
+                    Files.writeString(mapper, Files.readString(mapper) + "\n<!-- forbidden session write -->\n");
+                }
+                if (injectUnsafeFirstSession && !unsafeSessionInjected) {
+                    unsafeSessionInjected = true;
+                    history.add(new ToolCallRecord(
+                            "unsafe-first-session",
+                            "unsafe-write",
+                            "unsafe-write",
+                            "mcp",
+                            "success",
+                            Instant.now(),
+                            objectMapper.createObjectNode(),
+                            objectMapper.createObjectNode(),
+                            1L,
+                            objectMapper.createObjectNode()
+                    ));
+                }
             } catch (Exception exception) {
                 throw new IllegalStateException(exception);
             }
@@ -859,9 +925,9 @@ class MyBatisSqlReviewWorkflowChainTest {
             boolean selectKey = runtime.path("select_key").asBoolean();
             Files.writeString(candidate.resolve("report.md"), """
                     # SQL Review
-
+                    
                     Statement `%s` from `%s`, namespace `%s`, id `%s`, command `%s`, selectKey `%s`.
-
+                    
                     - Data source: `%s`
                     - Catalog: `%s`
                     - Schema: `%s`
@@ -869,29 +935,29 @@ class MyBatisSqlReviewWorkflowChainTest {
                     - Scope: `%s`
                     - Safety mode: `%s`
                     - Database safety: `%s`
-
+                    
                     ## Statement
-
+                    
                     Reviewed statically.
-
+                    
                     ## Static Analysis
-
+                    
                     No technical validation failure.
-
+                    
                     ## Database Evidence
-
+                    
                     [database-evidence.json](database-evidence.json)
-
+                    
                     ## Findings
-
+                    
                     No findings.
-
+                    
                     ## Recommendations
-
+                    
                     Retain normal regression coverage.
-
+                    
                     ## Limitations
-
+                    
                     No database calls were required.
                     """.formatted(
                     statementKey, mapperPath, namespace, statementId, commandType, selectKey,

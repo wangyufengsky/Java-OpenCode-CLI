@@ -4,16 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
-import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
+import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationBatchRunner;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPreparation;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationPromptBuilder;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationProperties;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationReportRenderer;
-import com.sonnet.wyf.gitreport.workflow.unittest.ProjectUnitTestGenerationWorkflowChain;
+import com.sonnet.wyf.gitreport.workflow.unittest.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.DefaultResourceLoader;
@@ -323,19 +318,25 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
-    void recordsProtectedFileChangeAndContinuesRemainingBatches() throws Exception {
+    void retriesProtectedFileViolationInFreshSessionsAndRestoresFile() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(2);
         properties.getPaths().setOut(properties.getProject().getRepo().resolve("project-unit-tests"));
         writeSource(properties.getProject().getRepo());
         ProductionWritingClient client = new ProductionWritingClient(properties);
 
-        chain(properties, client).run(request("full", "", ""));
+        assertThatThrownBy(() -> chain(properties, client).run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exceeded agentbridge.max-attempts")
+                .hasMessageContaining("created protected file");
 
         assertThat(client.prompts).hasSize(2);
+        assertThat(properties.getProject().getRepo()
+                .resolve("src/main/java/com/acme/build/BuildInfo.java")).doesNotExist();
         assertThat(properties.getPaths().getOut().resolve("agentbridge-results.json")).content()
                 .contains("\"issues\"", "created protected file: src/main/java/com/acme/build/BuildInfo.java");
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("accepted: `2`", "failed: `0`")
+                .contains("accepted: `0`", "failed: `2`")
                 .contains("created protected file: src/main/java/com/acme/build/BuildInfo.java");
     }
 
@@ -383,33 +384,46 @@ class ProjectUnitTestGenerationWorkflowChainTest {
     }
 
     @Test
-    void recordsWhenAgentCreatesTestOutsideCurrentBatchModule() throws Exception {
+    void retriesAndRestoresTestCreatedOutsideCurrentBatchModule() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(2);
         writeModuleSource(properties.getProject().getRepo());
 
-        chain(properties, new CrossModuleTestWritingClient(properties)).run(request("full", "", ""));
+        assertThatThrownBy(() -> chain(properties, new CrossModuleTestWritingClient(properties))
+                .run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exceeded agentbridge.max-attempts");
 
         assertThat(properties.getPaths().getOut().resolve("agentbridge-results.json")).content()
-                .contains("\"accepted\" : true", "\"issues\"")
+                .contains("\"accepted\" : false", "\"issues\"")
                 .contains(
                         "created protected file",
                         "upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java"
                 );
+        assertThat(properties.getProject().getRepo()
+                .resolve("upfs-common/src/test/java/com/spdb/upfs/common/CommonServiceTest.java")).doesNotExist();
     }
 
     @Test
-    void recordsWhenAgentModifiesPomOutsideCurrentBatchModule() throws Exception {
+    void retriesAndRestoresPomModifiedOutsideCurrentBatchModule() throws Exception {
         ProjectUnitTestGenerationProperties properties = properties();
+        properties.getAgentbridge().setMaxAttempts(2);
         properties.getSource().setPackagePaths(List.of("upfs-cup/src/main/java/com/spdb/upfs/cup"));
         writeModuleSource(properties.getProject().getRepo());
+        String originalPom = Files.readString(properties.getProject().getRepo().resolve("upfs-common/pom.xml"));
 
-        chain(properties, new CrossModulePomWritingClient(properties)).run(request("full", "", ""));
+        assertThatThrownBy(() -> chain(properties, new CrossModulePomWritingClient(properties))
+                .run(request("full", "", "")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exceeded agentbridge.max-attempts");
 
         assertThat(properties.getPaths().getOut().resolve("agentbridge-results.json")).content()
-                .contains("\"accepted\" : true", "\"issues\"")
+                .contains("\"accepted\" : false", "\"issues\"")
                 .contains("modified protected file", "upfs-common/pom.xml");
+        assertThat(properties.getProject().getRepo().resolve("upfs-common/pom.xml")).content()
+                .isEqualTo(originalPom);
         assertThat(properties.getPaths().getOut().resolve("unit-test-generation-report.md")).content()
-                .contains("accepted: `1`", "failed: `0`", "recorded issues: `1`")
+                .contains("accepted: `0`", "failed: `1`", "recorded issues: `1`")
                 .contains("modified protected file: upfs-common/pom.xml");
     }
 

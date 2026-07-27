@@ -3,6 +3,10 @@ package com.sonnet.wyf.gitreport.agentbridge;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.core.ScheduledProbeWaiter;
+import com.sonnet.wyf.gitreport.failure.GlobalWorkflowExceptionHandler;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 
 public class AgentBridgeTaskRunner {
     private static final Logger log = LoggerFactory.getLogger(AgentBridgeTaskRunner.class);
@@ -18,6 +23,7 @@ public class AgentBridgeTaskRunner {
     private final ScheduledProbeWaiter scheduledProbeWaiter;
     private final WorkflowEventSink eventSink;
     private final ObjectMapper objectMapper;
+    private final GlobalWorkflowExceptionHandler failureHandler = new GlobalWorkflowExceptionHandler();
 
     public AgentBridgeTaskRunner(AgentBridgeClient client, ScheduledProbeWaiter scheduledProbeWaiter) {
         this(client, scheduledProbeWaiter, new WorkflowEventSink(), new ObjectMapper());
@@ -51,27 +57,69 @@ public class AgentBridgeTaskRunner {
         log.info("Starting AgentBridge task: taskId={}, title={}, runDir={}, timeoutMinutes={}, validationSettleSeconds={}, validationMaxCorrections={}",
                 monitor.taskId(), spec.title(), spec.runDir(), spec.timeoutMinutes(), spec.validationSettleSeconds(), spec.validationMaxCorrections());
         monitor.write("created", "created", false);
-        client.clearSession(spec.webBaseUrl());
-        client.postPrompt(spec.webBaseUrl(), text);
-        monitor.write("running", "submitted", false);
-
         int maxCorrections = Math.max(0, spec.validationMaxCorrections());
         int correctionRound = 0;
+        String sessionMessage = text;
         while (true) {
-            AgentBridgeRunResult result = waitForValidationRound(spec, monitor, correctionRound);
-            if (result.validationOk() || result.timedOut() || correctionRound >= maxCorrections) {
-                if (!result.validationOk()) {
-                    monitor.write("validation_failed_final", result.agentState(), result.timedOut(), correctionRound, result.validationError());
+            try {
+                client.clearSession(spec.webBaseUrl());
+                client.postPrompt(spec.webBaseUrl(), sessionMessage);
+                monitor.write("running", "submitted", false, correctionRound, "");
+
+                AgentBridgeRunResult result = waitForValidationRound(spec, monitor, correctionRound);
+                if (result.validationOk() || correctionRound >= maxCorrections) {
+                    if (!result.validationOk()) {
+                        recordSessionFailure(
+                                spec,
+                                correctionRound + 1,
+                                WorkflowFailureCategory.OUTPUT_VALIDATION,
+                                result.validationError()
+                        );
+                        monitor.write("validation_failed_final", result.agentState(), result.timedOut(), correctionRound, result.validationError());
+                    }
+                    return result;
                 }
-                return result;
+
+                recordSessionFailure(
+                        spec,
+                        correctionRound + 1,
+                        WorkflowFailureCategory.OUTPUT_VALIDATION,
+                        result.validationError()
+                );
+                correctionRound++;
+                sessionMessage = correctionMessage(spec.promptFile(), result.validationError(), correctionRound, maxCorrections);
+                monitor.write("session_failed_retrying", result.agentState(), false, correctionRound, result.validationError());
+                log.warn("AgentBridge session validation failed; starting a fresh session: taskId={}, title={}, correctionRound={}/{}, reason=\"{}\"",
+                        monitor.taskId(), spec.title(), correctionRound, maxCorrections, result.validationError());
+            } catch (Exception exception) {
+                WorkflowFailureException failure = failureHandler.sessionFailure(
+                        WorkflowFailureCategory.SESSION_EXECUTION,
+                        exception
+                );
+                if (failure.scope() == WorkflowFailureScope.TASK) {
+                    throw failure;
+                }
+                recordSessionFailure(spec, correctionRound + 1, failure.category(), failure.getMessage());
+                monitor.write("session_failed", "failed", false, correctionRound, failure.getMessage());
+                if (correctionRound >= maxCorrections) {
+                    monitor.write("validation_failed_final", "failed", false, correctionRound, failure.getMessage());
+                    return result(
+                            spec,
+                            monitor,
+                            false,
+                            false,
+                            "failed",
+                            false,
+                            failure.getMessage(),
+                            correctionRound
+                    );
+                }
+                correctionRound++;
+                sessionMessage = text;
+                monitor.write("session_failed_retrying", "failed", false, correctionRound, failure.getMessage());
+                log.warn("AgentBridge session failed; starting a fresh session: taskId={}, title={}, retry={}/{}, reason=\"{}\"",
+                        monitor.taskId(), spec.title(), correctionRound, maxCorrections, failure.getMessage());
             }
-            correctionRound++;
-            String correction = correctionMessage(spec.promptFile(), result.validationError(), correctionRound, maxCorrections);
-            monitor.write("validation_failed_correction_sent", result.agentState(), false, correctionRound, result.validationError());
-            log.warn("AgentBridge validation failed; sending correction prompt: taskId={}, title={}, correctionRound={}/{}, reason=\"{}\"",
-                    monitor.taskId(), spec.title(), correctionRound, maxCorrections, result.validationError());
-            client.postPrompt(spec.webBaseUrl(), correction);
-            monitor.write("running", "submitted", false, correctionRound, result.validationError());
         }
     }
 
@@ -80,17 +128,11 @@ public class AgentBridgeTaskRunner {
             AgentBridgeRunMonitor monitor,
             int correctionRound
     ) throws Exception {
-        try {
-            client.waitUntilIdle(
-                    spec.webBaseUrl(),
-                    Duration.ofMinutes(spec.timeoutMinutes()),
-                    Duration.ofMillis(Math.max(50, spec.pollMillis()))
-            );
-        } catch (Exception exception) {
-            ValidationCheck validation = validate(spec.validationProbe(), spec.runDir());
-            monitor.write("timeout", "timeout", true, correctionRound, validation.error());
-            return result(spec, monitor, true, false, "timeout", validation.ok(), validation.error(), correctionRound);
-        }
+        client.waitUntilIdle(
+                spec.webBaseUrl(),
+                Duration.ofMinutes(spec.timeoutMinutes()),
+                Duration.ofMillis(Math.max(50, spec.pollMillis()))
+        );
 
         int pollCount = monitor.recordPoll("idle");
         monitor.logHeartbeat("idle", pollCount);
@@ -132,16 +174,37 @@ public class AgentBridgeTaskRunner {
     private String correctionMessage(Path promptFile, String validationError, int correctionRound, int maxCorrections) {
         return """
                 Java 产物校验失败，请继续完成同一个 AgentBridge 任务，不要只回复说明。
-
+                
                 要求：
                 - 只修正原任务要求的目标文件。
                 - 保留原 prompt 的任务边界、路径载荷和输出结构。
                 - 完成后回复简短完成信息即可，Java 会重新验收。
-
+                
                 原 prompt 文件：%s
                 纠正轮次：%d/%d
                 校验错误：%s
                 """.formatted(promptFile, correctionRound, maxCorrections, validationError == null || validationError.isBlank() ? "unknown validation failure" : validationError);
+    }
+
+    private void recordSessionFailure(
+            ValidatedAgentBridgeTaskSpec spec,
+            int sessionAttempt,
+            WorkflowFailureCategory category,
+            String error
+    ) throws IOException {
+        Path directory = spec.runDir()
+                .resolve("session-attempts")
+                .resolve("%03d".formatted(sessionAttempt));
+        Files.createDirectories(directory);
+        var record = objectMapper.createObjectNode();
+        record.put("schema_version", "workflow-session-failure/v1");
+        record.put("scope", WorkflowFailureScope.SESSION.name());
+        record.put("category", category.name());
+        record.put("session_attempt", sessionAttempt);
+        record.put("recorded_at", Instant.now().toString());
+        record.put("error", error == null || error.isBlank() ? "unknown session failure" : error);
+        objectMapper.writerWithDefaultPrettyPrinter()
+                .writeValue(directory.resolve("session-failure.json").toFile(), record);
     }
 
     private AgentBridgeRunResult result(

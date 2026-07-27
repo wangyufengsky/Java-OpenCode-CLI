@@ -7,28 +7,25 @@ import com.sonnet.wyf.gitreport.artifact.TaskArtifactLayout;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
 import com.sonnet.wyf.gitreport.console.WorkflowRunContext;
+import com.sonnet.wyf.gitreport.failure.GlobalWorkflowExceptionHandler;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.LinkOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 public final class MyBatisSqlReviewTaskRunner {
     static final long MAX_CANDIDATE_FILE_BYTES = 1_048_576L;
@@ -43,6 +40,7 @@ public final class MyBatisSqlReviewTaskRunner {
     private final MyBatisSqlOutputValidator outputValidator;
     private final WorkflowEventSink eventSink;
     private final ObjectMapper objectMapper;
+    private final GlobalWorkflowExceptionHandler failureHandler = new GlobalWorkflowExceptionHandler();
 
     public MyBatisSqlReviewTaskRunner(
             AgentBridgeClient client,
@@ -67,7 +65,14 @@ public final class MyBatisSqlReviewTaskRunner {
             MyBatisDatabasePreflight.Result database,
             AgentBridgeSettings settings
     ) throws Exception {
-        PreparedTask prepared = prepare(workspace, statement, database, settings);
+        int maxSessionAttempts = Math.max(
+                2,
+                Math.max(0, settings.getValidationMaxCorrections()) + 1
+        );
+        List<PreparedTask> sessions = new java.util.ArrayList<>();
+        for (int attempt = 0; attempt < maxSessionAttempts; attempt++) {
+            sessions.add(prepare(workspace, statement, database, settings));
+        }
         Path mapper = repository.toAbsolutePath().normalize().resolve(statement.mapperRelativePath()).normalize();
         try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper,
@@ -76,9 +81,27 @@ public final class MyBatisSqlReviewTaskRunner {
                 workspace.runRoot(),
                 List.of(mapper.getParent()),
                 List.of(mapper),
-                List.of(prepared.layout().candidate())
+                sessions.stream().map(task -> task.layout().candidate()).toList()
         )) {
-            return runPrepared(workspace, prepared, guard);
+            WorkflowFailureException lastFailure = null;
+            for (PreparedTask session : sessions) {
+                try {
+                    return runPrepared(workspace, session, guard);
+                } catch (Exception exception) {
+                    WorkflowFailureException failure = failureHandler.sessionFailure(
+                            WorkflowFailureCategory.SESSION_EXECUTION,
+                            exception
+                    );
+                    if (failure.scope() == WorkflowFailureScope.TASK) {
+                        throw failure;
+                    }
+                    lastFailure = failure;
+                }
+            }
+            throw failureHandler.retryExhausted(
+                    "MyBatis SQL review exhausted fresh sessions for task " + statement.statementKey(),
+                    lastFailure
+            );
         }
     }
 
@@ -199,16 +222,33 @@ public final class MyBatisSqlReviewTaskRunner {
                 }
                 settle(settings.getValidationSettleSeconds());
                 List<AgentBridgeClient.ToolCallRecord> after = client.getToolCalls(webUri);
-                MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(layout.root(), layout.candidate());
-                MyBatisToolCallAudit.Result audit = toolCallAudit.audit(
-                        after,
-                        boundary,
-                        database,
-                        new MyBatisToolCallAudit.StatementContext(
-                                statement.statementKey(), commandType, statement.selectKey(),
-                                layout.candidate()
-                        )
-                );
+                try {
+                    MyBatisSqlReviewFilesystemGuard.requireSafeCandidate(layout.root(), layout.candidate());
+                } catch (Exception exception) {
+                    throw WorkflowFailureException.session(
+                            WorkflowFailureCategory.FILE_INTEGRITY_VIOLATION,
+                            "candidate filesystem integrity validation failed: " + messageOf(exception),
+                            exception
+                    );
+                }
+                MyBatisToolCallAudit.Result audit;
+                try {
+                    audit = toolCallAudit.audit(
+                            after,
+                            boundary,
+                            database,
+                            new MyBatisToolCallAudit.StatementContext(
+                                    statement.statementKey(), commandType, statement.selectKey(),
+                                    layout.candidate()
+                            )
+                    );
+                } catch (Exception exception) {
+                    throw WorkflowFailureException.session(
+                            WorkflowFailureCategory.SAFETY_VIOLATION,
+                            "tool-call safety audit failed: " + messageOf(exception),
+                            exception
+                    );
+                }
                 MyBatisSqlOutputValidator.Result validation = outputValidator.validate(
                         layout.candidate(),
                         new MyBatisSqlOutputValidator.ExpectedTaskContext(
@@ -269,22 +309,32 @@ public final class MyBatisSqlReviewTaskRunner {
                         publishedDirectory, validation
                 );
             } catch (Exception exception) {
-                String error = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+                WorkflowFailureException failure = failureHandler.sessionFailure(
+                        WorkflowFailureCategory.SESSION_EXECUTION,
+                        exception
+                );
+                String error = failure.getMessage();
                 try {
                     guard.withJavaWrites(List.of(layout.status()), () -> {
-                        writeStatus(layout, statement, "FAILED", "validation_failed_final", error);
+                        writeStatus(layout, statement, "FAILED", "session_failed", error);
                         return null;
                     });
                 } catch (Exception statusFailure) {
-                    exception.addSuppressed(statusFailure);
+                    failure.addSuppressed(statusFailure);
                 }
                 eventSink.taskStatusCurrent(
-                        statement.statementKey(), title, "FAILED", "validation_failed_final",
+                        statement.statementKey(), title, "FAILED", "session_failed",
                         layout.status().toString(), error
                 );
-                throw exception;
+                throw failure;
             }
         }
+    }
+
+    private String messageOf(Exception exception) {
+        return exception.getMessage() == null
+                ? exception.getClass().getSimpleName()
+                : exception.getMessage();
     }
 
     public record PreparedTask(

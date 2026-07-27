@@ -1,31 +1,18 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.EnumSet;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -995,7 +982,8 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             if (!protectedStale.isEmpty()) {
                 conflictDetected = true;
                 restoreProtectedPaths();
-                throw new IllegalStateException(
+                throw WorkflowFailureException.session(
+                        WorkflowFailureCategory.FILE_INTEGRITY_VIOLATION,
                         "protected repository/stable content changed: " + String.join("; ", protectedStale)
                                 + "; recovery backup retained at " + backupRoot
                 );
@@ -1004,7 +992,8 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             if (!stale.isEmpty()) {
                 conflictDetected = true;
                 restoreCurrentRun(null);
-                throw new IllegalStateException(
+                throw WorkflowFailureException.session(
+                        WorkflowFailureCategory.FILE_INTEGRITY_VIOLATION,
                         "protected current run content changed: " + String.join("; ", stale)
                                 + "; recovery backup retained at " + backupRoot
                 );
@@ -1047,7 +1036,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                         ? "current run filesystem verification failed"
                         : "protected repository/current run content changed: " + String.join("; ", violations))
                         + "; recovery backup retained at " + backupRoot;
-                IllegalStateException exception = new IllegalStateException(message);
+                WorkflowFailureException exception = WorkflowFailureException.session(
+                        WorkflowFailureCategory.FILE_INTEGRITY_VIOLATION,
+                        message
+                );
                 if (failure != null) {
                     exception.addSuppressed(failure);
                 }
@@ -1224,7 +1216,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 String message = violations.isEmpty()
                         ? "run-level filesystem protection restoration failed"
                         : "protected filesystem content changed: " + String.join("; ", violations)
-                        + "; recovery backup retained at " + backupRoot;
+                          + "; recovery backup retained at " + backupRoot;
                 IllegalStateException exception = new IllegalStateException(message);
                 if (detectionFailure != null) {
                     exception.addSuppressed(detectionFailure);

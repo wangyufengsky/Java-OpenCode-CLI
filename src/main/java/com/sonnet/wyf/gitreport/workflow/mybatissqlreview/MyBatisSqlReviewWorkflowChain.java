@@ -6,11 +6,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.artifact.RepositoryExecutionLock;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
-import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
-import com.sonnet.wyf.gitreport.runner.AgentBridgeSettings;
-import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
-import com.sonnet.wyf.gitreport.runner.WorkflowChain;
-import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
+import com.sonnet.wyf.gitreport.failure.GlobalWorkflowExceptionHandler;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
+import com.sonnet.wyf.gitreport.runner.*;
 
 import java.io.InputStream;
 import java.net.URI;
@@ -20,13 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HexFormat;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -48,6 +42,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
     private final AgentBridgeRunnerProperties runnerProperties;
     private final MyBatisSqlInventoryBuilder inventoryBuilder;
     private final MyBatisDatabasePreflight databasePreflight;
+    private final GlobalWorkflowExceptionHandler failureHandler = new GlobalWorkflowExceptionHandler();
     private final MyBatisSqlReviewTaskRunner taskRunner;
     private final MyBatisSqlReportRenderer reportRenderer;
     private final ObjectMapper objectMapper;
@@ -120,7 +115,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                     initializeJavaFile(activeWorkspace.bundleRoot().resolve(SOURCE_CONTRACT));
                 }
                 List<MyBatisSqlStatement> selected = selectTasks(mode, request, inventory);
-                List<MyBatisSqlReviewTaskRunner.PreparedTask> prepared = new ArrayList<>();
+                List<List<MyBatisSqlReviewTaskRunner.PreparedTask>> preparedSessions = new ArrayList<>();
                 boolean indexRerun = rerun && "index".equals(normalizeRerunType(request.rerunType()));
                 if (indexRerun) {
                     validatePublishedIndexInputs(activeWorkspace.bundleRoot(), inventory);
@@ -133,9 +128,20 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                             configuration.getDatabase().getScope()
                     );
                     for (MyBatisSqlStatement statement : selected) {
-                        prepared.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
+                        int maxSessionAttempts = Math.max(
+                                2,
+                                Math.max(0, settings.getValidationMaxCorrections()) + 1
+                        );
+                        List<MyBatisSqlReviewTaskRunner.PreparedTask> sessions = new ArrayList<>();
+                        for (int attempt = 0; attempt < maxSessionAttempts; attempt++) {
+                            sessions.add(taskRunner.prepare(activeWorkspace, statement, database, settings));
+                        }
+                        preparedSessions.add(List.copyOf(sessions));
                     }
                 }
+                List<MyBatisSqlReviewTaskRunner.PreparedTask> prepared = preparedSessions.stream()
+                        .flatMap(List::stream)
+                        .toList();
                 MyBatisSqlReportRenderer.Project project = new MyBatisSqlReportRenderer.Project(
                         configuration.getProject().getId(),
                         configuration.getProject().getName(),
@@ -172,8 +178,8 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                                 guardedInventory,
                                 "inventory changed before protected Agent execution"
                         );
-                        for (MyBatisSqlReviewTaskRunner.PreparedTask task : prepared) {
-                            taskRunner.runPrepared(activeWorkspace, task, guard);
+                        for (List<MyBatisSqlReviewTaskRunner.PreparedTask> sessions : preparedSessions) {
+                            runWithFreshSessions(activeWorkspace, sessions, guard);
                         }
                         guard.withJavaWrites(renderFiles, () -> {
                             reportRenderer.render(activeWorkspace.bundleRoot(), project, renderingInventory);
@@ -220,6 +226,36 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             }
             throw exception;
         }
+    }
+
+    private void runWithFreshSessions(
+            WorkflowArtifactWorkspace workspace,
+            List<MyBatisSqlReviewTaskRunner.PreparedTask> sessions,
+            MyBatisSqlReviewFilesystemGuard guard
+    ) throws Exception {
+        WorkflowFailureException lastFailure = null;
+        for (MyBatisSqlReviewTaskRunner.PreparedTask session : sessions) {
+            try {
+                taskRunner.runPrepared(workspace, session, guard);
+                return;
+            } catch (Exception exception) {
+                WorkflowFailureException failure = failureHandler.sessionFailure(
+                        WorkflowFailureCategory.SESSION_EXECUTION,
+                        exception
+                );
+                if (failure.scope() == WorkflowFailureScope.TASK) {
+                    throw failure;
+                }
+                lastFailure = failure;
+            }
+        }
+        String taskKey = sessions.isEmpty()
+                ? "unknown"
+                : sessions.getFirst().statement().statementKey();
+        throw failureHandler.retryExhausted(
+                "MyBatis SQL review exhausted fresh sessions for task " + taskKey,
+                lastFailure
+        );
     }
 
     private MyBatisSqlInventory publishedInventory(WorkflowArtifactWorkspace workspace) throws Exception {
@@ -641,66 +677,66 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         Path realRoot = root.toRealPath(LinkOption.NOFOLLOW_LINKS);
         List<String> invalid = new ArrayList<>();
         for (Path markdown : markdownFiles) {
-                if (Files.isSymbolicLink(markdown)
-                        || !Files.isRegularFile(markdown, LinkOption.NOFOLLOW_LINKS)
-                        || !markdown.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
-                    invalid.add(relative(root, markdown) + " -> unsafe Markdown file");
+            if (Files.isSymbolicLink(markdown)
+                    || !Files.isRegularFile(markdown, LinkOption.NOFOLLOW_LINKS)
+                    || !markdown.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
+                invalid.add(relative(root, markdown) + " -> unsafe Markdown file");
+                continue;
+            }
+            String prose = withoutFencedCode(Files.readString(markdown));
+            Matcher autolink = AUTOLINK.matcher(prose);
+            while (autolink.find()) {
+                invalid.add(relative(root, markdown) + " -> external autolink " + autolink.group());
+            }
+            Matcher html = RAW_HTML.matcher(prose);
+            while (html.find()) {
+                if (!AUTOLINK.matcher(html.group()).matches()) {
+                    invalid.add(relative(root, markdown) + " -> raw HTML " + html.group());
+                }
+            }
+            Matcher referenceDefinition = REFERENCE_DEFINITION.matcher(prose);
+            while (referenceDefinition.find()) {
+                String link = referenceDefinition.group(1) == null
+                        ? referenceDefinition.group(2)
+                        : referenceDefinition.group(1);
+                link = link.trim();
+                if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
+                    invalid.add(
+                            relative(root, markdown) + " -> external reference definition " + link
+                    );
+                }
+            }
+            Matcher matcher = MARKDOWN_LINK.matcher(prose);
+            while (matcher.find()) {
+                String link = matcher.group(1).trim();
+                if (link.isBlank() || link.startsWith("#")) {
                     continue;
                 }
-                String prose = withoutFencedCode(Files.readString(markdown));
-                Matcher autolink = AUTOLINK.matcher(prose);
-                while (autolink.find()) {
-                    invalid.add(relative(root, markdown) + " -> external autolink " + autolink.group());
+                if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
+                    invalid.add(relative(root, markdown) + " -> external link " + link);
+                    continue;
                 }
-                Matcher html = RAW_HTML.matcher(prose);
-                while (html.find()) {
-                    if (!AUTOLINK.matcher(html.group()).matches()) {
-                        invalid.add(relative(root, markdown) + " -> raw HTML " + html.group());
-                    }
+                int fragment = link.indexOf('#');
+                String fileLink = fragment < 0 ? link : link.substring(0, fragment);
+                if (fileLink.isBlank() || fileLink.indexOf('?') >= 0) {
+                    invalid.add(relative(root, markdown) + " -> invalid relative link " + link);
+                    continue;
                 }
-                Matcher referenceDefinition = REFERENCE_DEFINITION.matcher(prose);
-                while (referenceDefinition.find()) {
-                    String link = referenceDefinition.group(1) == null
-                            ? referenceDefinition.group(2)
-                            : referenceDefinition.group(1);
-                    link = link.trim();
-                    if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
-                        invalid.add(
-                                relative(root, markdown) + " -> external reference definition " + link
-                        );
-                    }
+                Path raw;
+                try {
+                    raw = Path.of(fileLink);
+                } catch (RuntimeException exception) {
+                    invalid.add(relative(root, markdown) + " -> " + link);
+                    continue;
                 }
-                Matcher matcher = MARKDOWN_LINK.matcher(prose);
-                while (matcher.find()) {
-                    String link = matcher.group(1).trim();
-                    if (link.isBlank() || link.startsWith("#")) {
-                        continue;
-                    }
-                    if (EXTERNAL_SCHEME.matcher(link).find() || link.startsWith("//")) {
-                        invalid.add(relative(root, markdown) + " -> external link " + link);
-                        continue;
-                    }
-                    int fragment = link.indexOf('#');
-                    String fileLink = fragment < 0 ? link : link.substring(0, fragment);
-                    if (fileLink.isBlank() || fileLink.indexOf('?') >= 0) {
-                        invalid.add(relative(root, markdown) + " -> invalid relative link " + link);
-                        continue;
-                    }
-                    Path raw;
-                    try {
-                        raw = Path.of(fileLink);
-                    } catch (RuntimeException exception) {
-                        invalid.add(relative(root, markdown) + " -> " + link);
-                        continue;
-                    }
-                    Path target = markdown.getParent().resolve(raw).normalize();
-                    if (raw.isAbsolute() || !target.startsWith(root)
-                            || Files.isSymbolicLink(target)
-                            || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
-                            || !target.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
-                        invalid.add(relative(root, markdown) + " -> " + link);
-                    }
+                Path target = markdown.getParent().resolve(raw).normalize();
+                if (raw.isAbsolute() || !target.startsWith(root)
+                        || Files.isSymbolicLink(target)
+                        || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                        || !target.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(realRoot)) {
+                    invalid.add(relative(root, markdown) + " -> " + link);
                 }
+            }
         }
         if (!invalid.isEmpty()) {
             throw new IllegalStateException("MyBatis SQL review contains invalid relative links: " + invalid);

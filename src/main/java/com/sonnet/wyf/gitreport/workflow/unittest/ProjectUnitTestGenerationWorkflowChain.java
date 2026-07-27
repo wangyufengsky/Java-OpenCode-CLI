@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.artifact.RepositoryExecutionLock;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactWorkspace;
-import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
 import com.sonnet.wyf.gitreport.runner.AgentBridgeRunnerProperties;
+import com.sonnet.wyf.gitreport.runner.ChainConfigLoader;
 import com.sonnet.wyf.gitreport.runner.WorkflowChain;
 import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
@@ -93,7 +95,10 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
                 .map(result -> result.batchId() + ": " + result.failureSummary())
                 .toList();
         if (!failures.isEmpty()) {
-            throw new IllegalStateException("project-unit-test-generation failed: " + String.join("; ", failures));
+            throw WorkflowFailureException.task(
+                    WorkflowFailureCategory.RETRY_EXHAUSTED,
+                    "project-unit-test-generation failed: " + String.join("; ", failures)
+            );
         }
     }
 
@@ -116,7 +121,8 @@ public class ProjectUnitTestGenerationWorkflowChain implements WorkflowChain {
         if (!Files.exists(path)) {
             return List.of();
         }
-        Map<String, Object> root = objectMapper.readValue(path.toFile(), new TypeReference<>() {});
+        Map<String, Object> root = objectMapper.readValue(path.toFile(), new TypeReference<>() {
+        });
         return JsonMaps.listOfMaps(root.get("batches"));
     }
 

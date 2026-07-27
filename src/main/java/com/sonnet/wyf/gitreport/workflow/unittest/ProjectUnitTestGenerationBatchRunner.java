@@ -6,25 +6,24 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import com.sonnet.wyf.gitreport.agentbridge.ValidationCheck;
 import com.sonnet.wyf.gitreport.artifact.WorkflowArtifactContext;
+import com.sonnet.wyf.gitreport.failure.GlobalWorkflowExceptionHandler;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
+import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
+import javax.xml.parsers.DocumentBuilderFactory;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
-import javax.xml.parsers.DocumentBuilderFactory;
 
 public class ProjectUnitTestGenerationBatchRunner {
     public static final String RESULTS_JSON = "agentbridge-results.json";
@@ -39,6 +38,7 @@ public class ProjectUnitTestGenerationBatchRunner {
     private final ProjectUnitTestGenerationPromptBuilder promptBuilder;
     private final ObjectMapper objectMapper;
     private final Duration pollInterval;
+    private final GlobalWorkflowExceptionHandler failureHandler = new GlobalWorkflowExceptionHandler();
 
     public ProjectUnitTestGenerationBatchRunner(
             AgentBridgeClient client,
@@ -115,36 +115,68 @@ public class ProjectUnitTestGenerationBatchRunner {
             Path runDir = WorkflowArtifactContext
                     .nextTaskAttempt("test-batch:" + batchId, out.resolve("test-batches").resolve(batchId))
                     .root();
-            ProtectedSnapshot protectedSnapshot = ProtectedSnapshot.capture(
-                    properties.getProject().getRepo(),
-                    out,
-                    batch,
-                    properties.getTest().getAdditionalBuildArtifactGlobs()
-            );
-            Path promptFile = runDir.resolve("worker-prompt.md");
-            Files.writeString(promptFile, promptBuilder.buildBatchPrompt(
-                    properties.getProject().getRepo(),
-                    Path.of(string(batch.get("input_json"))),
-                    failureSummary
-            ));
-            client.clearSession(webBaseUrl);
-            client.postPrompt(webBaseUrl, Files.readString(promptFile));
-            client.waitUntilIdle(webBaseUrl, timeout, pollInterval);
+            ProtectedSnapshot protectedSnapshot = null;
+            try {
+                protectedSnapshot = ProtectedSnapshot.capture(
+                        properties.getProject().getRepo(),
+                        out,
+                        runDir.resolve("protected-file-backup"),
+                        batch,
+                        properties.getTest().getAdditionalBuildArtifactGlobs()
+                );
+                Path promptFile = runDir.resolve("worker-prompt.md");
+                Files.writeString(promptFile, promptBuilder.buildBatchPrompt(
+                        properties.getProject().getRepo(),
+                        Path.of(string(batch.get("input_json"))),
+                        failureSummary
+                ));
+                client.clearSession(webBaseUrl);
+                client.postPrompt(webBaseUrl, Files.readString(promptFile));
+                client.waitUntilIdle(webBaseUrl, timeout, pollInterval);
 
-            ValidationCheck protectedFiles = protectedSnapshot.validate();
-            if (!protectedFiles.ok()) {
-                if (!issues.contains(protectedFiles.error())) {
-                    issues.add(protectedFiles.error());
+                ValidationCheck protectedFiles = protectedSnapshot.validateAndRestore();
+                if (!protectedFiles.ok()) {
+                    if (protectedFiles.error().startsWith("protected file restoration failed:")) {
+                        throw WorkflowFailureException.task(
+                                WorkflowFailureCategory.TASK_CONFIGURATION,
+                                protectedFiles.error()
+                        );
+                    }
+                    WorkflowFailureException failure = WorkflowFailureException.session(
+                            WorkflowFailureCategory.FILE_INTEGRITY_VIOLATION,
+                            protectedFiles.error()
+                    );
+                    if (!issues.contains(failure.getMessage())) {
+                        issues.add(failure.getMessage());
+                    }
+                    attempts.add(new AttemptRecord(attempt, "session-failed", false, failure.getMessage()));
+                    failureSummary = failure.getMessage();
+                    continue;
                 }
-                attempts.add(new AttemptRecord(attempt, "filesystem-issue", false, protectedFiles.error()));
-            }
 
-            Acceptance postcheck = validate(properties, batch);
-            attempts.add(new AttemptRecord(attempt, "postcheck", postcheck.accepted(), postcheck.summary()));
-            if (postcheck.accepted()) {
-                return new BatchResult(batchId, true, postcheck.summary(), attempts, issues);
+                Acceptance postcheck = validate(properties, batch);
+                attempts.add(new AttemptRecord(attempt, "postcheck", postcheck.accepted(), postcheck.summary()));
+                if (postcheck.accepted()) {
+                    return new BatchResult(batchId, true, postcheck.summary(), attempts, issues);
+                }
+                failureSummary = postcheck.summary();
+            } catch (Exception exception) {
+                if (protectedSnapshot != null) {
+                    ValidationCheck restored = protectedSnapshot.validateAndRestore();
+                    if (!restored.ok() && !issues.contains(restored.error())) {
+                        issues.add(restored.error());
+                    }
+                }
+                WorkflowFailureException failure = failureHandler.sessionFailure(
+                        WorkflowFailureCategory.SESSION_EXECUTION,
+                        exception
+                );
+                if (failure.scope() == WorkflowFailureScope.TASK) {
+                    throw failure;
+                }
+                attempts.add(new AttemptRecord(attempt, "session-failed", false, failure.getMessage()));
+                failureSummary = failure.getMessage();
             }
-            failureSummary = postcheck.summary();
         }
         return new BatchResult(
                 batchId,
@@ -574,6 +606,7 @@ public class ProjectUnitTestGenerationBatchRunner {
         private final List<String> targetTestFiles;
         private final List<String> additionalBuildArtifactGlobs;
         private final Map<String, String> before;
+        private final Path backupRoot;
 
         private ProtectedSnapshot(
                 Path repo,
@@ -581,7 +614,8 @@ public class ProjectUnitTestGenerationBatchRunner {
                 List<String> allowedWriteGlobs,
                 List<String> targetTestFiles,
                 List<String> additionalBuildArtifactGlobs,
-                Map<String, String> before
+                Map<String, String> before,
+                Path backupRoot
         ) {
             this.repo = repo.toAbsolutePath().normalize();
             this.out = out.toAbsolutePath().normalize();
@@ -589,11 +623,13 @@ public class ProjectUnitTestGenerationBatchRunner {
             this.targetTestFiles = List.copyOf(targetTestFiles);
             this.additionalBuildArtifactGlobs = List.copyOf(additionalBuildArtifactGlobs);
             this.before = before;
+            this.backupRoot = backupRoot.toAbsolutePath().normalize();
         }
 
         static ProtectedSnapshot capture(
                 Path repo,
                 Path out,
+                Path backupRoot,
                 Map<String, Object> batch,
                 List<String> additionalBuildArtifactGlobs
         ) throws Exception {
@@ -602,23 +638,38 @@ public class ProjectUnitTestGenerationBatchRunner {
             Path normalizedOut = (workspace == null ? out : workspace.runRoot()).toAbsolutePath().normalize();
             List<String> allowedWriteGlobs = listOfStrings(batch.get("allowed_write_globs"));
             List<String> targetTestFiles = listOfStrings(batch.get("target_test_files"));
+            Map<String, String> before = fingerprint(
+                    normalizedRepo,
+                    normalizedOut,
+                    allowedWriteGlobs,
+                    targetTestFiles,
+                    additionalBuildArtifactGlobs
+            );
+            Path normalizedBackupRoot = backupRoot.toAbsolutePath().normalize();
+            Files.createDirectories(normalizedBackupRoot);
+            for (String relative : before.keySet()) {
+                Path source = normalizedRepo.resolve(relative).normalize();
+                Path backup = normalizedBackupRoot.resolve(relative).normalize();
+                Files.createDirectories(backup.getParent());
+                Files.copy(
+                        source,
+                        backup,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.COPY_ATTRIBUTES
+                );
+            }
             return new ProtectedSnapshot(
                     normalizedRepo,
                     normalizedOut,
                     allowedWriteGlobs,
                     targetTestFiles,
                     additionalBuildArtifactGlobs,
-                    fingerprint(
-                            normalizedRepo,
-                            normalizedOut,
-                            allowedWriteGlobs,
-                            targetTestFiles,
-                            additionalBuildArtifactGlobs
-                    )
+                    before,
+                    normalizedBackupRoot
             );
         }
 
-        ValidationCheck validate() {
+        ValidationCheck validateAndRestore() {
             try {
                 Map<String, String> after = fingerprint(
                         repo,
@@ -627,23 +678,53 @@ public class ProjectUnitTestGenerationBatchRunner {
                         targetTestFiles,
                         additionalBuildArtifactGlobs
                 );
+                List<String> violations = new ArrayList<>();
                 for (String path : before.keySet()) {
                     if (!after.containsKey(path)) {
-                        return ValidationCheck.failed("deleted protected file: " + path);
-                    }
-                    if (!before.get(path).equals(after.get(path))) {
-                        return ValidationCheck.failed("modified protected file: " + path);
+                        violations.add("deleted protected file: " + path);
+                        restore(path);
+                    } else if (!before.get(path).equals(after.get(path))) {
+                        violations.add("modified protected file: " + path);
+                        restore(path);
                     }
                 }
                 for (String path : after.keySet()) {
                     if (!before.containsKey(path)) {
-                        return ValidationCheck.failed("created protected file: " + path);
+                        violations.add("created protected file: " + path);
+                        Files.deleteIfExists(repo.resolve(path).normalize());
                     }
+                }
+                if (!violations.isEmpty()) {
+                    Map<String, String> restored = fingerprint(
+                            repo,
+                            out,
+                            allowedWriteGlobs,
+                            targetTestFiles,
+                            additionalBuildArtifactGlobs
+                    );
+                    if (!before.equals(restored)) {
+                        return ValidationCheck.failed(
+                                "protected file restoration failed: protected snapshot still differs"
+                        );
+                    }
+                    return ValidationCheck.failed(String.join("; ", violations));
                 }
                 return ValidationCheck.success();
             } catch (Exception exception) {
-                return ValidationCheck.failed("protected file validation failed: " + exception.getMessage());
+                return ValidationCheck.failed("protected file restoration failed: " + exception.getMessage());
             }
+        }
+
+        private void restore(String relative) throws Exception {
+            Path source = backupRoot.resolve(relative).normalize();
+            Path target = repo.resolve(relative).normalize();
+            Files.createDirectories(target.getParent());
+            Files.copy(
+                    source,
+                    target,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES
+            );
         }
 
         private static Map<String, String> fingerprint(
