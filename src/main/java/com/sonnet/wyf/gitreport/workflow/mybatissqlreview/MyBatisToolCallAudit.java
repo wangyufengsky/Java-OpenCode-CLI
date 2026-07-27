@@ -152,7 +152,11 @@ public final class MyBatisToolCallAudit {
             case DatabaseMcpContract.EXECUTE_QUERY -> Set.of("project", "scope", "dataSource", "sql", "maxRows");
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };
-        arguments.fieldNames().forEachRemaining(field -> { if (!allowed.contains(field)) throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field); });
+        arguments.fieldNames().forEachRemaining(field -> {
+            if (!allowed.contains(field) && !DatabaseMcpContract.isOptionalInvocationMetadata(field)) {
+                throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field);
+            }
+        });
         for (String field : allowed) if (arguments.path(field).isMissingNode()) throw new IllegalStateException("tool call " + callId + " is missing required argument: " + field);
         if (binding == null) return;
         exact(arguments, "project", binding.project().toString(), callId);

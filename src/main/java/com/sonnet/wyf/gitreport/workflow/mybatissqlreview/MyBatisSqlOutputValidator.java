@@ -266,7 +266,7 @@ public final class MyBatisSqlOutputValidator {
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };
         arguments.fieldNames().forEachRemaining(field -> {
-            if (!allowed.contains(field)) {
+            if (!allowed.contains(field) && !DatabaseMcpContract.isOptionalInvocationMetadata(field)) {
                 throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field);
             }
         });

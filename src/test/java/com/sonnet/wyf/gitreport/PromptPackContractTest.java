@@ -306,6 +306,7 @@ class PromptPackContractTest {
                 "不要一次性重写完整大文件",
                 "不要修改生产代码、配置文件、其他模块的 `pom.xml` 或当前批次以外的测试文件",
                 "只需修改当前批次允许范围内的测试文件或当前模块 `pom.xml`",
+                "目标项目使用 Maven，禁止运行 Gradle 或 `gradlew`",
                 "只有 `batch_input_json.coverage.required` 为 `true` 时才验收覆盖率",
                 "最终只回复简短完成信息"
         );

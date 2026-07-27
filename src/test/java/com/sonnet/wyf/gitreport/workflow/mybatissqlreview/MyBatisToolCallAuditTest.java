@@ -44,6 +44,19 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
+    void acceptsOptionalAgentBridgeTitleOnDatabaseCalls() {
+        ObjectNode arguments = nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2")
+                .put("title", "Review bounded SQL");
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("query-with-title", DatabaseMcpContract.EXECUTE_QUERY, arguments, rows(2))),
+                boundary(), database, selectStatement());
+
+        assertThat(result.facts()).singleElement().satisfies(fact ->
+                assertThat(fact.arguments().path("title").asText()).isEqualTo("Review bounded SQL"));
+    }
+
+    @Test
     void acceptsAgentBridgeSuccessAndRejectsEveryOtherStatus() {
         assertThat(audit.audit(List.of(call("success", DatabaseMcpContract.EXECUTE_QUERY,
                 nativeQueryArguments("SELECT id FROM orders LIMIT 1"), rows(1))), boundary(), database,

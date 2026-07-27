@@ -91,6 +91,16 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void acceptsOptionalAgentBridgeTitleInPublishedDatabaseEvidence() throws Exception {
+        Path candidates = candidates();
+        ObjectNode evidence = evidence(candidates);
+        ((ObjectNode) evidence.at("/scenarios/0/arguments")).put("title", "Review bounded SQL");
+        write(candidates, evidence);
+
+        assertThat(validator.validatePublishedOffline(candidates, expected()).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
     void rejectsMismatchedAuditedArgumentsResultsRowsAndColumns() throws Exception {
         Path candidates = candidates();
         ObjectNode evidence = evidence(candidates);
