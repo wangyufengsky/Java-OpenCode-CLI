@@ -39,7 +39,9 @@ public class WorkflowEventSink {
     }
 
     private static void logEvent(long runId, String eventType, String message) {
-        if ("FAILED".equals(eventType) || "TASK_FAILED".equals(eventType)) {
+        if ("FAILED".equals(eventType)
+                || "TASK_FAILED".equals(eventType)
+                || "SESSION_FAILED".equals(eventType)) {
             log.warn("Workflow event: runId={}, eventType={}, message={}", runId, eventType, message);
         } else {
             log.info("Workflow event: runId={}, eventType={}, message={}", runId, eventType, message);
@@ -59,17 +61,19 @@ public class WorkflowEventSink {
             return;
         }
         try {
+            boolean sessionFailed = "session_failed".equalsIgnoreCase(phase);
+            String taskState = sessionFailed ? "RUNNING" : state;
             repository.upsertTaskStatus(new WorkflowTaskStatus(
                     runId,
                     taskKey,
                     taskName,
-                    state,
+                    taskState,
                     phase,
                     statusPath,
                     errorMessage,
                     Instant.now()
             ));
-            emit(runId, "TASK_" + state, taskKey + " " + phase);
+            emit(runId, sessionFailed ? "SESSION_FAILED" : "TASK_" + taskState, taskKey + " " + phase);
         } catch (RuntimeException exception) {
             log.warn("Unable to emit workflow task status: runId={}, taskKey={}, reason={}", runId, taskKey, exception.getMessage());
         }

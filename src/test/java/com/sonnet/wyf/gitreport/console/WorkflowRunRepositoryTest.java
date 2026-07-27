@@ -49,6 +49,35 @@ class WorkflowRunRepositoryTest {
     }
 
     @Test
+    void recordsSessionFailureWithoutMarkingTheTaskFailed() {
+        WorkflowRunRepository repository = repository();
+        WorkflowEventSink eventSink = new WorkflowEventSink(repository, new EventStreamService());
+        long runId = repository.createRun(new WorkflowRunSubmission(
+                "mybatis-sql-review", "full", null, null, null, Map.of(), null
+        ), tempDir.resolve("session-retry.yml").toString());
+
+        try (WorkflowRunContext.Scope ignored = WorkflowRunContext.open(runId)) {
+            eventSink.taskStatusCurrent(
+                    "sql:OrderMapper.deleteById",
+                    "OrderMapper.deleteById",
+                    "FAILED",
+                    "session_failed",
+                    "/tmp/agent-status.json",
+                    "tool-call safety audit failed"
+            );
+        }
+
+        assertThat(repository.listTaskStatuses(runId)).singleElement().satisfies(status -> {
+            assertThat(status.state()).isEqualTo("RUNNING");
+            assertThat(status.phase()).isEqualTo("session_failed");
+            assertThat(status.errorMessage()).isEqualTo("tool-call safety audit failed");
+        });
+        assertThat(repository.listEvents(runId))
+                .extracting(WorkflowRunEvent::eventType)
+                .containsExactly("SESSION_FAILED");
+    }
+
+    @Test
     void listsOnlyEventsAfterTheBoundEventIdInAscendingOrder() {
         WorkflowRunRepository repository = repository();
         long runId = repository.createRun(new WorkflowRunSubmission(

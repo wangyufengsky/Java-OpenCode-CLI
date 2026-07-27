@@ -203,6 +203,28 @@ test('STARTED event advances the run state to RUNNING', () => {
   assert.equal(harness.document.querySelector('#run-state').textContent, '运行中');
 });
 
+test('SESSION_FAILED remains visible without marking the run failed', async () => {
+  const requests = [];
+  const harness = createHarness(async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => snapshot('RUNNING') };
+  });
+
+  harness.source.onopen();
+  harness.source.emit('SESSION_FAILED', {
+    id: 12,
+    eventType: 'SESSION_FAILED',
+    message: 'sql:OrderMapper.deleteById session_failed'
+  });
+  await flushPromises();
+
+  const items = harness.document.querySelector('#events').querySelectorAll('li[data-event-id]');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].children[1].textContent, '会话已失败');
+  assert.equal(harness.document.querySelector('#run-state').textContent, '运行中');
+  assert.deepEqual(requests, ['/api/runs/42/snapshot?afterEventId=12']);
+});
+
 test('SSE reconnecting state is exposed without changing the event snapshot order', () => {
   const harness = createHarness();
   harness.source.emit('STARTED', { id: 11, eventType: 'STARTED', message: 'first' });

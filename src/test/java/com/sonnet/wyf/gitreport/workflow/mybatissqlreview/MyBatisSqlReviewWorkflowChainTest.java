@@ -5,7 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
+import com.sonnet.wyf.gitreport.console.EventStreamService;
 import com.sonnet.wyf.gitreport.console.WorkflowEventSink;
+import com.sonnet.wyf.gitreport.console.WorkflowRunContext;
+import com.sonnet.wyf.gitreport.console.WorkflowRunRepository;
+import com.sonnet.wyf.gitreport.console.WorkflowRunSchema;
+import com.sonnet.wyf.gitreport.console.WorkflowRunSubmission;
 import com.sonnet.wyf.gitreport.failure.WorkflowFailureCategory;
 import com.sonnet.wyf.gitreport.failure.WorkflowFailureException;
 import com.sonnet.wyf.gitreport.failure.WorkflowFailureScope;
@@ -16,7 +21,9 @@ import com.sonnet.wyf.gitreport.runner.WorkflowRunRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.core.io.DefaultResourceLoader;
+import org.sqlite.SQLiteDataSource;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -27,6 +34,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -41,6 +49,7 @@ class MyBatisSqlReviewWorkflowChainTest {
     private Path configDir;
     private RecordingAgentBridgeClient client;
     private MyBatisSqlReviewWorkflowChain chain;
+    private WorkflowRunRepository runRepository;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -60,12 +69,18 @@ class MyBatisSqlReviewWorkflowChainTest {
         writeConfig();
         client = new RecordingAgentBridgeClient(objectMapper, repository);
         MyBatisDatabasePreflight preflight = new MyBatisDatabasePreflight(client);
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("console.sqlite"));
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        new WorkflowRunSchema(jdbcTemplate).initialize();
+        runRepository = new WorkflowRunRepository(jdbcTemplate);
+        WorkflowEventSink eventSink = new WorkflowEventSink(runRepository, new EventStreamService());
         MyBatisSqlReviewTaskRunner taskRunner = new MyBatisSqlReviewTaskRunner(
                 client,
                 new MyBatisSqlPromptBuilder(objectMapper),
                 new MyBatisToolCallAudit(objectMapper),
                 new MyBatisSqlOutputValidator(objectMapper),
-                new WorkflowEventSink(),
+                eventSink,
                 objectMapper
         );
         AgentBridgeRunnerProperties runnerProperties = new AgentBridgeRunnerProperties();
@@ -133,22 +148,59 @@ class MyBatisSqlReviewWorkflowChainTest {
     }
 
     @Test
-    void stopsAfterConfirmedSafetyViolationWithoutPublishing() {
+    void retriesSafetyViolationInANewSessionWithoutFailingTheTask() throws Exception {
         client.injectUnsafeFirstSession = true;
 
-        assertThatThrownBy(() -> chain.run(request("full", "", "", "run-safety-stop")))
-                .isInstanceOf(WorkflowFailureException.class)
-                .satisfies(exception -> {
-                    WorkflowFailureException failure = (WorkflowFailureException) exception;
-                    assertThat(failure.scope()).isEqualTo(WorkflowFailureScope.TASK);
-                    assertThat(failure.category()).isEqualTo(WorkflowFailureCategory.SAFETY_VIOLATION);
-                })
-                .hasMessageContaining("unapproved tool")
-                .hasMessageContaining("unsafe-write");
+        chain.run(request("full", "", "", "run-safety-retry"));
 
-        assertThat(client.postedStatementKeys).hasSize(1);
-        assertThat(client.events.stream().filter("clear"::equals).toList()).hasSize(1);
-        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).doesNotExist();
+        assertThat(client.postedStatementKeys).hasSize(4);
+        assertThat(client.postedStatementKeys.get(0))
+                .isEqualTo(client.postedStatementKeys.get(1));
+        assertThat(client.events.stream().filter("clear"::equals).toList()).hasSize(4);
+        Path tasksRoot = stableOut.resolve("runs/run-safety-retry/tasks");
+        try (var paths = Files.walk(tasksRoot)) {
+            assertThat(paths
+                    .filter(path -> path.getFileName().toString().equals("agent-status.json"))
+                    .filter(path -> {
+                        try {
+                            return Files.readString(path).contains("\"phase\" : \"session_failed\"");
+                        } catch (Exception exception) {
+                            throw new IllegalStateException(exception);
+                        }
+                    })
+                    .toList()).hasSize(1);
+        }
+        assertThat(stableOut.resolve("mybatis-sql-review-report.md")).isRegularFile();
+    }
+
+    @Test
+    void promotesSafetyViolationToTaskFailureOnlyAfterFreshSessionsAreExhausted() {
+        client.injectUnsafeEverySession = true;
+        long runId = runRepository.createRun(new WorkflowRunSubmission(
+                "mybatis-sql-review", "full", null, null, null, Map.of(), null
+        ), tempDir.resolve("retry-exhausted.yml").toString());
+
+        try (WorkflowRunContext.Scope ignored = WorkflowRunContext.open(runId)) {
+            assertThatThrownBy(() -> chain.run(request("full", "", "", "run-safety-exhausted")))
+                    .isInstanceOf(WorkflowFailureException.class)
+                    .satisfies(exception -> {
+                        WorkflowFailureException failure = (WorkflowFailureException) exception;
+                        assertThat(failure.scope()).isEqualTo(WorkflowFailureScope.TASK);
+                        assertThat(failure.category()).isEqualTo(WorkflowFailureCategory.RETRY_EXHAUSTED);
+                    });
+        }
+
+        assertThat(runRepository.listEvents(runId))
+                .extracting(event -> event.eventType())
+                .containsExactly(
+                        "TASK_QUEUED", "TASK_RUNNING", "SESSION_FAILED",
+                        "TASK_QUEUED", "TASK_RUNNING", "SESSION_FAILED",
+                        "TASK_FAILED"
+                );
+        assertThat(runRepository.listTaskStatuses(runId)).singleElement().satisfies(status -> {
+            assertThat(status.state()).isEqualTo("FAILED");
+            assertThat(status.phase()).isEqualTo("retry_exhausted");
+        });
     }
 
     @Test
@@ -673,6 +725,7 @@ class MyBatisSqlReviewWorkflowChainTest {
         private boolean missingRequiredTool;
         private boolean mismatchDataSourceOnRecheck;
         private boolean injectUnsafeFirstSession;
+        private boolean injectUnsafeEverySession;
         private boolean unsafeSessionInjected;
         private boolean injectMapperWriteFirstSession;
         private boolean mapperWriteInjected;
@@ -719,10 +772,10 @@ class MyBatisSqlReviewWorkflowChainTest {
                     Path mapper = repository.resolve(runtime.path("mapper_relative_path").asText());
                     Files.writeString(mapper, Files.readString(mapper) + "\n<!-- forbidden session write -->\n");
                 }
-                if (injectUnsafeFirstSession && !unsafeSessionInjected) {
+                if (injectUnsafeEverySession || (injectUnsafeFirstSession && !unsafeSessionInjected)) {
                     unsafeSessionInjected = true;
                     history.add(new ToolCallRecord(
-                            "unsafe-first-session",
+                            "unsafe-session-" + postedStatementKeys.size(),
                             "unsafe-write",
                             "unsafe-write",
                             "mcp",

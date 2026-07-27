@@ -44,16 +44,19 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
-    void acceptsOptionalAgentBridgeTitleOnDatabaseCalls() {
+    void acceptsOptionalAgentBridgeInvocationMetadataOnDatabaseCalls() {
         ObjectNode arguments = nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2")
-                .put("title", "Review bounded SQL");
+                .put("title", "Review bounded SQL")
+                .put("keywords", "orders audit");
 
         MyBatisToolCallAudit.Result result = audit.audit(
-                List.of(call("query-with-title", DatabaseMcpContract.EXECUTE_QUERY, arguments, rows(2))),
+                List.of(call("query-with-metadata", DatabaseMcpContract.EXECUTE_QUERY, arguments, rows(2))),
                 boundary(), database, selectStatement());
 
-        assertThat(result.facts()).singleElement().satisfies(fact ->
-                assertThat(fact.arguments().path("title").asText()).isEqualTo("Review bounded SQL"));
+        assertThat(result.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.arguments().path("title").asText()).isEqualTo("Review bounded SQL");
+            assertThat(fact.arguments().path("keywords").asText()).isEqualTo("orders audit");
+        });
     }
 
     @Test

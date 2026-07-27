@@ -18,7 +18,8 @@
     TASK_QUEUED: '任务已排队',
     TASK_RUNNING: '任务运行中',
     TASK_SUCCEEDED: '任务已成功',
-    TASK_FAILED: '任务已失败'
+    TASK_FAILED: '任务已失败',
+    SESSION_FAILED: '会话已失败'
   };
 
   const phaseLabels = {
@@ -28,7 +29,8 @@
     running: '执行中',
     execution: '执行',
     complete: '已完成',
-    failed: '已失败'
+    failed: '已失败',
+    session_failed: '会话失败，正在重试'
   };
 
   const eventTypes = [
@@ -41,7 +43,8 @@
     'TASK_QUEUED',
     'TASK_RUNNING',
     'TASK_SUCCEEDED',
-    'TASK_FAILED'
+    'TASK_FAILED',
+    'SESSION_FAILED'
   ];
 
   function matchesEventFilter(event, filter) {
@@ -149,7 +152,10 @@
 
     function requiresSnapshotRefresh(event) {
       const eventType = String(event.eventType || '').toUpperCase();
-      return eventType.startsWith('TASK_') || eventType === 'SUCCEEDED' || eventType === 'FAILED';
+      return eventType.startsWith('TASK_')
+        || eventType === 'SESSION_FAILED'
+        || eventType === 'SUCCEEDED'
+        || eventType === 'FAILED';
     }
 
     function createEventItem(event, eventId) {

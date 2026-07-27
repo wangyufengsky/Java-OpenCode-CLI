@@ -98,10 +98,12 @@ public final class MyBatisSqlReviewTaskRunner {
                     lastFailure = failure;
                 }
             }
-            throw failureHandler.retryExhausted(
+            WorkflowFailureException exhausted = failureHandler.retryExhausted(
                     "MyBatis SQL review exhausted fresh sessions for task " + statement.statementKey(),
                     lastFailure
             );
+            recordTaskFailure(sessions.getLast(), "retry_exhausted", exhausted);
+            throw exhausted;
         }
     }
 
@@ -243,7 +245,7 @@ public final class MyBatisSqlReviewTaskRunner {
                             )
                     );
                 } catch (Exception exception) {
-                    throw WorkflowFailureException.task(
+                    throw WorkflowFailureException.session(
                             WorkflowFailureCategory.SAFETY_VIOLATION,
                             "tool-call safety audit failed: " + messageOf(exception),
                             exception
@@ -314,16 +316,19 @@ public final class MyBatisSqlReviewTaskRunner {
                         exception
                 );
                 String error = failure.getMessage();
+                String phase = failure.scope() == WorkflowFailureScope.TASK
+                        ? "task_failed"
+                        : "session_failed";
                 try {
                     guard.withJavaWrites(List.of(layout.status()), () -> {
-                        writeStatus(layout, statement, "FAILED", "session_failed", error);
+                        writeStatus(layout, statement, "FAILED", phase, error);
                         return null;
                     });
                 } catch (Exception statusFailure) {
                     failure.addSuppressed(statusFailure);
                 }
                 eventSink.taskStatusCurrent(
-                        statement.statementKey(), title, "FAILED", "session_failed",
+                        statement.statementKey(), title, "FAILED", phase,
                         layout.status().toString(), error
                 );
                 throw failure;
@@ -331,10 +336,25 @@ public final class MyBatisSqlReviewTaskRunner {
         }
     }
 
+    void recordTaskFailure(PreparedTask prepared, String phase, Throwable failure) {
+        eventSink.taskStatusCurrent(
+                prepared.statement().statementKey(),
+                prepared.title(),
+                "FAILED",
+                phase,
+                prepared.layout().status().toString(),
+                messageOf(failure)
+        );
+    }
+
+    private String messageOf(Throwable throwable) {
+        return throwable.getMessage() == null
+                ? throwable.getClass().getSimpleName()
+                : throwable.getMessage();
+    }
+
     private String messageOf(Exception exception) {
-        return exception.getMessage() == null
-                ? exception.getClass().getSimpleName()
-                : exception.getMessage();
+        return messageOf((Throwable) exception);
     }
 
     public record PreparedTask(

@@ -42,17 +42,18 @@ public class ConsoleText {
             "xml", "Mapper XML"
     );
 
-    private static final Map<String, String> EVENT_TYPES = Map.of(
-            "QUEUED", "已排队",
-            "STARTED", "已开始",
-            "SUCCEEDED", "已成功",
-            "FAILED", "已失败",
-            "TASK_GROUP_STARTED", "任务组已开始",
-            "TASK_GROUP_SUCCEEDED", "任务组已完成",
-            "TASK_QUEUED", "任务已排队",
-            "TASK_RUNNING", "任务运行中",
-            "TASK_SUCCEEDED", "任务已成功",
-            "TASK_FAILED", "任务已失败"
+    private static final Map<String, String> EVENT_TYPES = Map.ofEntries(
+            Map.entry("QUEUED", "已排队"),
+            Map.entry("STARTED", "已开始"),
+            Map.entry("SUCCEEDED", "已成功"),
+            Map.entry("FAILED", "已失败"),
+            Map.entry("TASK_GROUP_STARTED", "任务组已开始"),
+            Map.entry("TASK_GROUP_SUCCEEDED", "任务组已完成"),
+            Map.entry("TASK_QUEUED", "任务已排队"),
+            Map.entry("TASK_RUNNING", "任务运行中"),
+            Map.entry("TASK_SUCCEEDED", "任务已成功"),
+            Map.entry("TASK_FAILED", "任务已失败"),
+            Map.entry("SESSION_FAILED", "会话已失败")
     );
 
     private static final Map<String, String> FREQUENCIES = Map.of(
@@ -61,16 +62,17 @@ public class ConsoleText {
             "ONCE", "一次性"
     );
 
-    private static final Map<String, String> PHASES = Map.of(
-            "started", "已开始",
-            "submitted", "已提交",
-            "queued", "排队中",
-            "running", "运行中",
-            "idle", "空闲",
-            "complete", "已完成",
-            "completed", "已完成",
-            "timeout", "已超时",
-            "failed", "已失败"
+    private static final Map<String, String> PHASES = Map.ofEntries(
+            Map.entry("started", "已开始"),
+            Map.entry("submitted", "已提交"),
+            Map.entry("queued", "排队中"),
+            Map.entry("running", "运行中"),
+            Map.entry("idle", "空闲"),
+            Map.entry("complete", "已完成"),
+            Map.entry("completed", "已完成"),
+            Map.entry("timeout", "已超时"),
+            Map.entry("failed", "已失败"),
+            Map.entry("session_failed", "会话失败，正在重试")
     );
 
     public String chain(String value) {

@@ -252,10 +252,14 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
         String taskKey = sessions.isEmpty()
                 ? "unknown"
                 : sessions.getFirst().statement().statementKey();
-        throw failureHandler.retryExhausted(
+        WorkflowFailureException exhausted = failureHandler.retryExhausted(
                 "MyBatis SQL review exhausted fresh sessions for task " + taskKey,
                 lastFailure
         );
+        if (!sessions.isEmpty()) {
+            taskRunner.recordTaskFailure(sessions.getLast(), "retry_exhausted", exhausted);
+        }
+        throw exhausted;
     }
 
     private MyBatisSqlInventory publishedInventory(WorkflowArtifactWorkspace workspace) throws Exception {

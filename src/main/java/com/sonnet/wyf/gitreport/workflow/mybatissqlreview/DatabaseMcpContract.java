@@ -35,7 +35,7 @@ public final class DatabaseMcpContract {
             EXECUTE_NOSQL_WRITE_DELETE,
             EXECUTE_NOSQL_QUERY
     );
-    private static final Set<String> OPTIONAL_INVOCATION_METADATA = Set.of("title");
+    private static final Set<String> OPTIONAL_INVOCATION_METADATA = Set.of("title", "keywords");
 
     private final ObjectMapper objectMapper;
     private final Binding binding;
