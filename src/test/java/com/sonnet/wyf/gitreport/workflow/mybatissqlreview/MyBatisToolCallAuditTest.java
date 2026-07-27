@@ -44,10 +44,9 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
-    void acceptsOptionalAgentBridgeInvocationMetadataOnDatabaseCalls() {
+    void acceptsOptionalTitleMetadataOnDatabaseCalls() {
         ObjectNode arguments = nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2")
-                .put("title", "Review bounded SQL")
-                .put("keywords", "orders audit");
+                .put("title", "Review bounded SQL");
 
         MyBatisToolCallAudit.Result result = audit.audit(
                 List.of(call("query-with-metadata", DatabaseMcpContract.EXECUTE_QUERY, arguments, rows(2))),
@@ -55,8 +54,61 @@ class MyBatisToolCallAuditTest {
 
         assertThat(result.facts()).singleElement().satisfies(fact -> {
             assertThat(fact.arguments().path("title").asText()).isEqualTo("Review bounded SQL");
-            assertThat(fact.arguments().path("keywords").asText()).isEqualTo("orders audit");
         });
+    }
+
+    @Test
+    void acceptsSearchArgumentsOnlyOnListTableSchema() {
+        ObjectNode arguments = tableSchemaArguments().put("tablePrefix", "ord");
+        arguments.putArray("keywords").add("orders").add("status");
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("tables-with-search", DatabaseMcpContract.LIST_TABLE_SCHEMA,
+                        arguments, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement());
+
+        assertThat(result.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.arguments().path("keywords")).isEqualTo(arguments.path("keywords"));
+            assertThat(fact.arguments().path("tablePrefix").asText()).isEqualTo("ord");
+        });
+    }
+
+    @Test
+    void rejectsListTableSchemaSearchArgumentsOnOtherDatabaseTools() {
+        for (String field : List.of("keywords", "tablePrefix")) {
+            ObjectNode arguments = nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2");
+            if ("keywords".equals(field)) {
+                arguments.putArray(field).add("orders");
+            } else {
+                arguments.put(field, "ord");
+            }
+
+            assertThatThrownBy(() -> audit.audit(
+                    List.of(call("query-with-" + field, DatabaseMcpContract.EXECUTE_QUERY, arguments, rows(2))),
+                    boundary(), database, selectStatement()))
+                    .hasMessageContaining("unsupported argument")
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void rejectsInvalidListTableSchemaSearchArgumentTypes() {
+        ObjectNode stringKeywords = tableSchemaArguments().put("keywords", "orders");
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call("tables-with-string-keywords", DatabaseMcpContract.LIST_TABLE_SCHEMA,
+                        stringKeywords, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("keywords")
+                .hasMessageContaining("array");
+
+        ObjectNode arrayPrefix = tableSchemaArguments();
+        arrayPrefix.putArray("tablePrefix").add("ord");
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call("tables-with-array-prefix", DatabaseMcpContract.LIST_TABLE_SCHEMA,
+                        arrayPrefix, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement()))
+                .hasMessageContaining("tablePrefix")
+                .hasMessageContaining("string");
     }
 
     @Test
@@ -382,6 +434,15 @@ class MyBatisToolCallAuditTest {
     private ObjectNode nativeQueryArguments(String sql) {
         return commonArguments().put("dataSource", database.binding().dataSource())
                 .put("sql", sql).put("maxRows", DatabaseMcpContract.MAX_ROWS);
+    }
+
+    private ObjectNode tableSchemaArguments() {
+        return commonArguments().put("dataSource", database.binding().dataSource())
+                .put("catalog", database.binding().catalog())
+                .put("schema", database.binding().schema())
+                .put("includeColumns", true)
+                .put("includeIndexes", true)
+                .put("maxTables", DatabaseMcpContract.MAX_TABLES);
     }
 
     private ObjectNode rows(int count) {

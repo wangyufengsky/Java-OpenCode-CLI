@@ -91,14 +91,63 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
-    void acceptsOptionalAgentBridgeInvocationMetadataInPublishedDatabaseEvidence() throws Exception {
+    void acceptsOptionalTitleMetadataInPublishedDatabaseEvidence() throws Exception {
         Path candidates = candidates();
         ObjectNode evidence = evidence(candidates);
         ((ObjectNode) evidence.at("/scenarios/0/arguments")).put("title", "Review bounded SQL");
-        ((ObjectNode) evidence.at("/scenarios/0/arguments")).put("keywords", "orders audit");
         write(candidates, evidence);
 
         assertThat(validator.validatePublishedOffline(candidates, expected()).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
+    void acceptsSearchArgumentsOnPublishedListTableSchemaEvidence() throws Exception {
+        Path candidates = candidates();
+        ObjectNode evidence = evidence(candidates);
+        ObjectNode arguments = (ObjectNode) evidence.at("/metadata/0/arguments");
+        arguments.putArray("keywords").add("orders").add("status");
+        arguments.put("tablePrefix", "ord");
+        write(candidates, evidence);
+
+        assertThat(validator.validatePublishedOffline(candidates, expected()).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsListTableSchemaSearchArgumentsOnOtherPublishedDatabaseEvidence() throws Exception {
+        for (String field : List.of("keywords", "tablePrefix")) {
+            Path candidates = candidates();
+            ObjectNode evidence = evidence(candidates);
+            ObjectNode arguments = (ObjectNode) evidence.at("/scenarios/0/arguments");
+            if ("keywords".equals(field)) {
+                arguments.putArray(field).add("orders");
+            } else {
+                arguments.put(field, "ord");
+            }
+            write(candidates, evidence);
+
+            assertThatThrownBy(() -> validator.validatePublishedOffline(candidates, expected()))
+                    .hasMessageContaining("unsupported argument")
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void rejectsInvalidPublishedListTableSchemaSearchArgumentTypes() throws Exception {
+        Path candidatesWithStringKeywords = candidates();
+        ObjectNode stringKeywordsEvidence = evidence(candidatesWithStringKeywords);
+        ((ObjectNode) stringKeywordsEvidence.at("/metadata/0/arguments")).put("keywords", "orders");
+        write(candidatesWithStringKeywords, stringKeywordsEvidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(candidatesWithStringKeywords, expected()))
+                .hasMessageContaining("keywords")
+                .hasMessageContaining("array");
+
+        Path candidatesWithArrayPrefix = candidates();
+        ObjectNode arrayPrefixEvidence = evidence(candidatesWithArrayPrefix);
+        ((ObjectNode) arrayPrefixEvidence.at("/metadata/0/arguments")).putArray("tablePrefix").add("ord");
+        write(candidatesWithArrayPrefix, arrayPrefixEvidence);
+        assertThatThrownBy(() -> validator.validatePublishedOffline(candidatesWithArrayPrefix, expected()))
+                .hasMessageContaining("tablePrefix")
+                .hasMessageContaining("string");
     }
 
     @Test

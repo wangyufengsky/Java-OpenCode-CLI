@@ -266,7 +266,9 @@ public final class MyBatisSqlOutputValidator {
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };
         arguments.fieldNames().forEachRemaining(field -> {
-            if (!allowed.contains(field) && !DatabaseMcpContract.isOptionalInvocationMetadata(field)) {
+            if (!allowed.contains(field)
+                    && !DatabaseMcpContract.isOptionalInvocationMetadata(field)
+                    && !DatabaseMcpContract.isOptionalToolArgument(toolName, field)) {
                 throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field);
             }
         });
@@ -275,6 +277,7 @@ public final class MyBatisSqlOutputValidator {
                 throw new IllegalStateException("tool call " + callId + " is missing required argument: " + field);
             }
         }
+        DatabaseMcpContract.requireToolSpecificArgumentTypes(toolName, arguments, callId);
         requireExactText(arguments, "project", evidence.path("project").asText(), "tool call " + callId);
         requireExactText(arguments, "scope", evidence.path("scope").asText(), "tool call " + callId);
         if (!DatabaseMcpContract.LIST_DATASOURCES.equals(toolName)) {

@@ -153,11 +153,14 @@ public final class MyBatisToolCallAudit {
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };
         arguments.fieldNames().forEachRemaining(field -> {
-            if (!allowed.contains(field) && !DatabaseMcpContract.isOptionalInvocationMetadata(field)) {
+            if (!allowed.contains(field)
+                    && !DatabaseMcpContract.isOptionalInvocationMetadata(field)
+                    && !DatabaseMcpContract.isOptionalToolArgument(toolName, field)) {
                 throw new IllegalStateException("tool call " + callId + " uses an unsupported argument: " + field);
             }
         });
         for (String field : allowed) if (arguments.path(field).isMissingNode()) throw new IllegalStateException("tool call " + callId + " is missing required argument: " + field);
+        DatabaseMcpContract.requireToolSpecificArgumentTypes(toolName, arguments, callId);
         if (binding == null) return;
         exact(arguments, "project", binding.project().toString(), callId);
         exact(arguments, "scope", binding.scope().name(), callId);

@@ -1,5 +1,6 @@
 package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -35,7 +36,11 @@ public final class DatabaseMcpContract {
             EXECUTE_NOSQL_WRITE_DELETE,
             EXECUTE_NOSQL_QUERY
     );
-    private static final Set<String> OPTIONAL_INVOCATION_METADATA = Set.of("title", "keywords");
+    private static final Set<String> OPTIONAL_INVOCATION_METADATA = Set.of("title");
+    private static final Set<String> LIST_TABLE_SCHEMA_OPTIONAL_ARGUMENTS = Set.of(
+            "keywords",
+            "tablePrefix"
+    );
 
     private final ObjectMapper objectMapper;
     private final Binding binding;
@@ -63,6 +68,36 @@ public final class DatabaseMcpContract {
 
     static boolean isOptionalInvocationMetadata(String field) {
         return OPTIONAL_INVOCATION_METADATA.contains(field);
+    }
+
+    static boolean isOptionalToolArgument(String toolName, String field) {
+        return LIST_TABLE_SCHEMA.equals(toolName)
+                && LIST_TABLE_SCHEMA_OPTIONAL_ARGUMENTS.contains(field);
+    }
+
+    static void requireToolSpecificArgumentTypes(String toolName, JsonNode arguments, String callId) {
+        if (!LIST_TABLE_SCHEMA.equals(toolName)) {
+            return;
+        }
+        JsonNode keywords = arguments.path("keywords");
+        if (!keywords.isMissingNode()) {
+            if (!keywords.isArray()) {
+                throw new IllegalStateException(
+                        "tool call " + callId + " keywords must be an array of strings"
+                );
+            }
+            for (JsonNode keyword : keywords) {
+                if (!keyword.isTextual()) {
+                    throw new IllegalStateException(
+                            "tool call " + callId + " keywords must be an array of strings"
+                    );
+                }
+            }
+        }
+        JsonNode tablePrefix = arguments.path("tablePrefix");
+        if (!tablePrefix.isMissingNode() && !tablePrefix.isTextual()) {
+            throw new IllegalStateException("tool call " + callId + " tablePrefix must be a string");
+        }
     }
 
     public ObjectNode dataSourceArguments() {
