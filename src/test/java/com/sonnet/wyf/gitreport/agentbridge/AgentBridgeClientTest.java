@@ -210,6 +210,47 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void plainTextBeginningWithNumberDoesNotBecomeStructuredJson() throws Exception {
+        HttpServer server = server();
+        server.createContext("/mcp", exchange -> {
+            JsonNode request = objectMapper.readTree(body(exchange));
+            switch (request.path("method").asText()) {
+                case "initialize" -> respondWithSession(exchange, 200, "plain-text-session", """
+                        {
+                          "jsonrpc": "2.0",
+                          "id": 1,
+                          "result": {"protocolVersion": "2025-11-25", "capabilities": {}}
+                        }
+                        """);
+                case "notifications/initialized" -> respondWithSession(exchange, 202, "plain-text-session", "");
+                case "tools/call" -> {
+                    ObjectNode result = objectMapper.createObjectNode();
+                    result.putArray("content").addObject()
+                            .put("type", "text")
+                            .put("text", "44 tests:\n- com.example.OrderServiceTest");
+                    ObjectNode envelope = objectMapper.createObjectNode()
+                            .put("jsonrpc", "2.0")
+                            .put("id", 2);
+                    envelope.set("result", result);
+                    respondWithSession(exchange, 200, "plain-text-session", envelope.toString());
+                }
+                default -> respond(exchange, 400, "unknown MCP method");
+            }
+        });
+        server.start();
+
+        AgentBridgeClient.ToolResponse response = client.callTool(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/mcp"),
+                "list_tests",
+                objectMapper.createObjectNode().put("file_pattern", "*Test*")
+        );
+
+        assertThat(response.text()).startsWith("44 tests:");
+        assertThat(response.structured().isObject()).isTrue();
+        assertThat(response.structured()).isEmpty();
+    }
+
+    @Test
     void fillsMissingStructuredContentFieldsFromJsonContentText() throws Exception {
         HttpServer server = server();
         server.createContext("/mcp", exchange -> {
@@ -1133,6 +1174,27 @@ class AgentBridgeClientTest {
         assertThat(tool.inputSchema().has("tampered")).isFalse();
         assertThat(response.rawResult().has("sourceMutation")).isFalse();
         assertThat(tool.inputSchema().has("sourceMutation")).isFalse();
+    }
+
+    @Test
+    void parsesCurrentRunningHistoryShape() throws Exception {
+        HistoryFixture fixture = historyFixture(
+                "92",
+                "run_command",
+                "{\"command\":\"sleep 5\",\"timeout\":15}",
+                ""
+        );
+        fixture.summary().put("kind", "execute");
+        fixture.summary().put("status", "running");
+        fixture.summary().put("durationMs", -1);
+        fixture.summary().put("hasHooks", true);
+        HttpServer server = historyServer(fixture, 500, new AtomicInteger());
+
+        AgentBridgeClient.ToolCallRecord call = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(call.status()).isEqualTo("running");
+        assertThat(call.durationMs()).isNull();
+        assertThat(call.result().isNull()).isTrue();
     }
 
     @Test

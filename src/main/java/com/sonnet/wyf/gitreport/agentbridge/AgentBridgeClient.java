@@ -340,14 +340,14 @@ public class AgentBridgeClient {
         String result = verifiedPayloadText(item, detail, "result");
         return new HistoryPayload(
                 structuredHistoryField(objectMapper.getNodeFactory().textNode(arguments), "arguments"),
-                historyResultField(objectMapper.getNodeFactory().textNode(result))
+                historyResultField(objectMapper.getNodeFactory().textNode(result), item)
         );
     }
 
     private HistoryPayload legacyHistoryPayload(JsonNode item) {
         return new HistoryPayload(
                 structuredHistoryField(item.path("arguments"), "arguments"),
-                historyResultField(item.path("result"))
+                historyResultField(item.path("result"), item)
         );
     }
 
@@ -356,7 +356,7 @@ public class AgentBridgeClient {
         String result = verifiedUntruncatedSummaryText(item, "result");
         return new HistoryPayload(
                 structuredHistoryField(objectMapper.getNodeFactory().textNode(arguments), "arguments"),
-                historyResultField(objectMapper.getNodeFactory().textNode(result))
+                historyResultField(objectMapper.getNodeFactory().textNode(result), item)
         );
     }
 
@@ -593,10 +593,17 @@ public class AgentBridgeClient {
             return null;
         }
         JsonNode duration = item.path("durationMs");
-        if (!duration.isIntegralNumber() || !duration.canConvertToLong() || duration.longValue() < 0) {
+        if (!duration.isIntegralNumber() || !duration.canConvertToLong()) {
             throw new IllegalStateException("durationMs must be a non-negative integer");
         }
-        return duration.longValue();
+        long durationMs = duration.longValue();
+        if (durationMs == -1 && isRunningHistory(item)) {
+            return null;
+        }
+        if (durationMs < 0) {
+            throw new IllegalStateException("durationMs must be a non-negative integer");
+        }
+        return durationMs;
     }
 
     private JsonNode structuredHistoryField(JsonNode value, String label) {
@@ -617,9 +624,12 @@ public class AgentBridgeClient {
         }
     }
 
-    private JsonNode historyResultField(JsonNode value) {
+    private JsonNode historyResultField(JsonNode value, JsonNode item) {
         if (value.isObject() || value.isArray()) {
             return value.deepCopy();
+        }
+        if (value.isTextual() && value.textValue().isBlank() && isRunningHistory(item)) {
+            return objectMapper.nullNode();
         }
         if (!value.isTextual() || value.textValue().isBlank()) {
             throw new IllegalStateException("result must not be blank");
@@ -633,6 +643,10 @@ public class AgentBridgeClient {
             // AgentBridge records plain-text outputs for successful non-data tools.
         }
         return value.deepCopy();
+    }
+
+    private boolean isRunningHistory(JsonNode item) {
+        return "running".equals(item.path("status").asText());
     }
 
     private HttpResponse<String> sendJson(URI uri, JsonNode body) throws IOException, InterruptedException {
@@ -866,11 +880,7 @@ public class AgentBridgeClient {
                 || structuredContent.isTextual() && structuredContent.asText().isBlank();
         JsonNode textJson = null;
         if (!text.isBlank()) {
-            try {
-                textJson = objectMapper.readTree(text);
-            } catch (Exception ignored) {
-                // Non-JSON text remains available through ToolResponse.text().
-            }
+            textJson = completeJsonValue(text);
         }
         if (!emptyStructuredContent) {
             if (structuredContent.isObject() && textJson != null && textJson.isObject()) {
@@ -886,6 +896,16 @@ public class AgentBridgeClient {
             return textJson.deepCopy();
         }
         return objectMapper.createObjectNode();
+    }
+
+    private JsonNode completeJsonValue(String text) {
+        try (JsonParser parser = objectMapper.getFactory().createParser(text)) {
+            JsonNode parsed = objectMapper.readTree(parser);
+            return parsed != null && parser.nextToken() == null ? parsed : null;
+        } catch (IOException ignored) {
+            // Non-JSON text remains available through ToolResponse.text().
+            return null;
+        }
     }
 
     public record ToolResponse(JsonNode rawResult, String text, JsonNode structured) {
