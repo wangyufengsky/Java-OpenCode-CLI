@@ -148,7 +148,7 @@ public final class MyBatisToolCallAudit {
         Set<String> allowed = switch (toolName) {
             case DatabaseMcpContract.LIST_DATASOURCES -> Set.of("project", "scope");
             case DatabaseMcpContract.LIST_DATABASES -> Set.of("project", "scope", "dataSource");
-            case DatabaseMcpContract.LIST_TABLE_SCHEMA -> Set.of("project", "scope", "dataSource", "catalog", "schema", "includeColumns", "includeIndexes", "maxTables");
+            case DatabaseMcpContract.LIST_TABLE_SCHEMA -> Set.of("project", "scope", "dataSource", "catalog", "schema");
             case DatabaseMcpContract.EXECUTE_QUERY -> Set.of("project", "scope", "dataSource", "sql", "maxRows");
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };
@@ -167,11 +167,6 @@ public final class MyBatisToolCallAudit {
         if (!DatabaseMcpContract.LIST_DATASOURCES.equals(toolName)) exact(arguments, "dataSource", binding.dataSource(), callId);
         if (DatabaseMcpContract.LIST_TABLE_SCHEMA.equals(toolName)) {
             exact(arguments, "catalog", binding.catalog(), callId); exact(arguments, "schema", binding.schema(), callId);
-            if (!arguments.path("includeColumns").isBoolean() || !arguments.path("includeColumns").booleanValue()
-                    || !arguments.path("includeIndexes").isBoolean() || !arguments.path("includeIndexes").booleanValue()
-                    || !arguments.path("maxTables").isIntegralNumber() || arguments.path("maxTables").intValue() != DatabaseMcpContract.MAX_TABLES) {
-                throw new IllegalStateException("tool call " + callId + " table-schema metadata arguments are not the approved bounded values");
-            }
         }
         if (DatabaseMcpContract.EXECUTE_QUERY.equals(toolName)) {
             if (!arguments.path("sql").isTextual() || arguments.path("sql").asText().isBlank()) throw new IllegalStateException("tool call " + callId + " sql must be non-blank");

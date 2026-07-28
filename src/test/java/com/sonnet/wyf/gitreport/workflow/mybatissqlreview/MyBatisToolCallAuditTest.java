@@ -74,6 +74,34 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
+    void acceptsListTableSchemaWithoutOptionalDetailControls() {
+        ObjectNode arguments = tableSchemaArguments();
+        arguments.remove(List.of("includeColumns", "includeIndexes", "maxTables"));
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("tables-without-detail-controls", DatabaseMcpContract.LIST_TABLE_SCHEMA,
+                        arguments, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement());
+
+        assertThat(result.auditedCallIds()).containsExactly("tables-without-detail-controls");
+    }
+
+    @Test
+    void acceptsListTableSchemaWithMcpDefaultDetailControls() {
+        ObjectNode arguments = tableSchemaArguments()
+                .put("includeColumns", false)
+                .put("includeIndexes", false)
+                .put("maxTables", 20);
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(call("tables-with-default-detail-controls", DatabaseMcpContract.LIST_TABLE_SCHEMA,
+                        arguments, objectMapper.createObjectNode())),
+                boundary(), database, selectStatement());
+
+        assertThat(result.auditedCallIds()).containsExactly("tables-with-default-detail-controls");
+    }
+
+    @Test
     void rejectsListTableSchemaSearchArgumentsOnOtherDatabaseTools() {
         for (String field : List.of("keywords", "tablePrefix")) {
             ObjectNode arguments = nativeQueryArguments("SELECT id FROM audit.orders LIMIT 2");

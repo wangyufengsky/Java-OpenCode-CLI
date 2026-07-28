@@ -113,6 +113,30 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void acceptsPublishedListTableSchemaWithoutOptionalDetailControls() throws Exception {
+        Path candidates = candidates();
+        ObjectNode evidence = evidence(candidates);
+        ObjectNode arguments = (ObjectNode) evidence.at("/metadata/0/arguments");
+        arguments.remove(List.of("includeColumns", "includeIndexes", "maxTables"));
+        write(candidates, evidence);
+
+        assertThat(validator.validatePublishedOffline(candidates, expected()).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
+    void acceptsPublishedListTableSchemaWithMcpDefaultDetailControls() throws Exception {
+        Path candidates = candidates();
+        ObjectNode evidence = evidence(candidates);
+        ObjectNode arguments = (ObjectNode) evidence.at("/metadata/0/arguments");
+        arguments.put("includeColumns", false);
+        arguments.put("includeIndexes", false);
+        arguments.put("maxTables", 20);
+        write(candidates, evidence);
+
+        assertThat(validator.validatePublishedOffline(candidates, expected()).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
     void rejectsListTableSchemaSearchArgumentsOnOtherPublishedDatabaseEvidence() throws Exception {
         for (String field : List.of("keywords", "tablePrefix")) {
             Path candidates = candidates();

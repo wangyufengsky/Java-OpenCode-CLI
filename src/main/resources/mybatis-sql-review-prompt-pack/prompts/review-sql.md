@@ -14,11 +14,11 @@ Use only these four read-oriented tools:
 ```json
 {"project":"absolute project path","scope":"ALL"}
 {"dataSource":"configured data source","project":"absolute project path","scope":"ALL"}
-{"dataSource":"configured data source","catalog":"configured catalog","schema":"configured schema","includeColumns":true,"includeIndexes":true,"maxTables":200,"project":"absolute project path","scope":"ALL"}
+{"dataSource":"configured data source","catalog":"configured catalog","schema":"configured schema","project":"absolute project path","scope":"ALL"}
 {"dataSource":"configured data source","sql":"SELECT columns FROM safe_table LIMIT 1","maxRows":20,"project":"absolute project path","scope":"ALL"}
 ```
 
-For metadata calls, use only the runtime `data_source`, `catalog`, `schema`, `project`, and `scope` values. The table-schema call must request columns and indexes and retain a bounded table count.
+For metadata calls, use only the runtime `data_source`, `catalog`, `schema`, `project`, and `scope` values. The table-schema call may use the Database MCP tool's optional `includeColumns`, `includeIndexes`, and `maxTables` controls, but SQL review acceptance does not require them or constrain their values.
 
 For every `cmcp_db_database_execute_sql_query` call, pass `dataSource`, `sql`, `maxRows`, `project`, and `scope`. `maxRows` is always 20. Each scenario SQL is a Java-validated read-only SELECT against a safe base table and includes an integer `LIMIT` from 1 through 20. Run at most three scenario queries.
 

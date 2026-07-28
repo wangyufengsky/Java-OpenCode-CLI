@@ -261,7 +261,7 @@ public final class MyBatisSqlOutputValidator {
         Set<String> allowed = switch (toolName) {
             case DatabaseMcpContract.LIST_DATASOURCES -> Set.of("project", "scope");
             case DatabaseMcpContract.LIST_DATABASES -> Set.of("project", "scope", "dataSource");
-            case DatabaseMcpContract.LIST_TABLE_SCHEMA -> Set.of("project", "scope", "dataSource", "catalog", "schema", "includeColumns", "includeIndexes", "maxTables");
+            case DatabaseMcpContract.LIST_TABLE_SCHEMA -> Set.of("project", "scope", "dataSource", "catalog", "schema");
             case DatabaseMcpContract.EXECUTE_QUERY -> Set.of("project", "scope", "dataSource", "sql", "maxRows");
             default -> throw new IllegalStateException("tool call " + callId + " uses an unapproved tool: " + toolName);
         };

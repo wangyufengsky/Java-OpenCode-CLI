@@ -38,7 +38,10 @@ public final class DatabaseMcpContract {
     );
     private static final Set<String> OPTIONAL_INVOCATION_METADATA = Set.of("title");
     private static final Set<String> LIST_TABLE_SCHEMA_OPTIONAL_ARGUMENTS = Set.of(
+            "includeColumns",
+            "includeIndexes",
             "keywords",
+            "maxTables",
             "tablePrefix"
     );
 
