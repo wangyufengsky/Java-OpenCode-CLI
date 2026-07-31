@@ -1,5 +1,6 @@
 (function exposeSchedules() {
   'use strict';
+  if (document.querySelector('#app')) return;
 
   function copyDraft(record) {
     return { ...JSON.parse(JSON.stringify(record)), id: null };

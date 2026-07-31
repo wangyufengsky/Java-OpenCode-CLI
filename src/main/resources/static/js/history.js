@@ -1,4 +1,5 @@
 (() => {
+  if (document.querySelector('#app')) return;
   const form = document.querySelector('#history-filter-form');
   if (form) {
     const createdFrom = form.elements.namedItem('from');

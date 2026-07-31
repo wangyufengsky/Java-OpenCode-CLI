@@ -2,6 +2,8 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('运行详情')}"></head>
 <body data-run-id="0" th:attr="data-run-id=${run.id}">
+<div id="app"></div>
+<div class="legacy-fallback" aria-hidden="true">
 <div class="app-shell">
   <aside th:replace="~{fragments/layout :: sidebar('history')}"></aside>
   <main class="app-main">
@@ -115,6 +117,7 @@
     </section>
     </div>
   </main>
+</div>
 </div>
 <script src="/js/run-detail.js"></script>
 </body>

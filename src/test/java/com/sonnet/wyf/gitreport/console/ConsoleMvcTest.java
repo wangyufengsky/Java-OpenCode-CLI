@@ -672,7 +672,7 @@ class ConsoleMvcTest {
     }
 
     @Test
-    void pagesLoadOnlyTheirScopedScriptsAndLegacyBundleIsRetired() throws Exception {
+    void pagesLoadTheSharedVueBundleAndKeepLegacyScriptsPageScoped() throws Exception {
         long runId = repository.createRun(new WorkflowRunSubmission(
                 "git-code-contribution-report", "full", null, null, null, Map.of(), null
         ), "asset-contract-config.yml");
@@ -685,35 +685,42 @@ class ConsoleMvcTest {
                 .contains("本地任务控制台")
                 .contains("class=\"metrics\" aria-label=\"运行指标\"")
                 .contains("<span>需要关注</span>")
+                .contains("<div id=\"app\"></div>")
+                .contains("<link rel=\"stylesheet\" href=\"/assets/console-app.css\">")
+                .contains("<script type=\"module\" src=\"/assets/console-app.js\"></script>")
                 .doesNotContain("已连接")
                 .doesNotContain("<article><span>排队中</span>")
                 .doesNotContain("<article><span>已成功</span>")
-                .doesNotContain("<article><span>已失败</span>")
-                .doesNotContain("<script src=");
+                .doesNotContain("<article><span>已失败</span>");
         assertThat(mockMvc.perform(get("/runs/new"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
                 .contains("<title>新建运行</title>")
                 .contains("<h1>新建运行</h1>")
+                .contains("<div id=\"app\"></div>")
+                .contains("<script type=\"module\" src=\"/assets/console-app.js\"></script>")
                 .contains("<script src=\"/js/console-common.js?v=20260724-mybatis-path-scope\"></script>")
                 .contains("<script src=\"/js/run-form.js?v=20260724-mybatis-path-scope\"></script>")
-                .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js");
+                .doesNotContain("/js/run-detail.js", "/js/history.js", "/js/schedules.js", "/app.js\"");
         assertThat(mockMvc.perform(get("/runs/" + runId))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<div id=\"app\"></div>")
                 .contains("<script src=\"/js/run-detail.js\"></script>")
-                .doesNotContain("/js/console-common.js", "/js/run-form.js", "/js/history.js", "/js/schedules.js", "/app.js");
+                .doesNotContain("/js/run-form.js", "/js/history.js", "/js/schedules.js", "/app.js\"");
         assertThat(mockMvc.perform(get("/history"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<div id=\"app\"></div>")
                 .contains("<script src=\"/js/history.js\"></script>")
-                .doesNotContain("/js/console-common.js", "/js/run-form.js", "/js/run-detail.js", "/js/schedules.js", "/app.js");
+                .doesNotContain("/js/run-form.js", "/js/run-detail.js", "/js/schedules.js", "/app.js\"");
         assertThat(mockMvc.perform(get("/schedules"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .contains("<div id=\"app\"></div>")
                 .contains("<script src=\"/js/console-common.js\"></script>")
                 .contains("<script src=\"/js/schedules.js\"></script>")
-                .doesNotContain("/js/run-form.js", "/js/run-detail.js", "/js/history.js", "/app.js");
+                .doesNotContain("/js/run-form.js", "/js/run-detail.js", "/js/history.js", "/app.js\"");
         mockMvc.perform(get("/app.js"))
                 .andExpect(status().isNotFound());
     }

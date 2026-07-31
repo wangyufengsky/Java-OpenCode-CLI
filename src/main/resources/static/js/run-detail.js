@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  if (document.querySelector('#app')) return;
 
   const stateLabels = {
     QUEUED: '排队中',

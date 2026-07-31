@@ -2,6 +2,8 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('运行历史')}"></head>
 <body>
+<div id="app"></div>
+<div class="legacy-fallback" aria-hidden="true">
 <div class="app-shell">
   <aside th:replace="~{fragments/layout :: sidebar('history')}"></aside>
   <main class="app-main">
@@ -120,6 +122,7 @@
       </section>
     </div>
   </main>
+</div>
 </div>
 <script src="/js/history.js"></script>
 </body>

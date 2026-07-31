@@ -1,4 +1,5 @@
 (function initializeRunForm() {
+  if (document.querySelector('#app')) return;
   const common = window.ConsoleCommon;
   const runForm = document.querySelector('#run-form');
   if (!common || !runForm) return;

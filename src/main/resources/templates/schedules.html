@@ -2,6 +2,8 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('定时任务')}"></head>
 <body>
+<div id="app"></div>
+<div class="legacy-fallback" aria-hidden="true">
 <div class="app-shell" id="schedule-page">
   <aside th:replace="~{fragments/layout :: sidebar('schedules')}"></aside>
   <main class="app-main">
@@ -161,6 +163,7 @@
     </footer>
   </form>
 </section>
+</div>
 
 <script src="/js/console-common.js"></script>
 <script src="/js/schedules.js"></script>

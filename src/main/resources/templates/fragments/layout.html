@@ -3,8 +3,12 @@
 <head th:fragment="head(title)">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101828">
   <title th:text="${title}">AgentBridge 任务控制台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260721-wide-screen-1">
+  <link rel="stylesheet" href="/assets/console-app.css">
+  <style>.legacy-fallback{display:none!important}</style>
+  <script src="/js/console-common.js"></script>
+  <script type="module" src="/assets/console-app.js"></script>
 </head>
 <body>
 <aside class="app-sidebar" th:fragment="sidebar(activeItem)">

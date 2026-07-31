@@ -45,6 +45,11 @@ D:/
 ### Task console runtime output ###
 data/
 
+### Vue frontend build output ###
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
 ### AgentBridge local runtime state ###
 .agentbridge/conversation.db*
 .agentbridge/sessions/
