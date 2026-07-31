@@ -15,6 +15,7 @@ import { ElMessage } from 'element-plus'
 import { createRun, getChains, getDefaults, getRunConfig } from '@/api'
 import DynamicConfigForm from '@/components/DynamicConfigForm.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { chainConfigDefinitions, rerunTypeDefinitions } from '@/consoleConfig'
 import { chainLabels } from '@/formatters'
 
 const route = useRoute()
@@ -32,8 +33,8 @@ const error = ref('')
 const copyFrom = computed(() => Number(route.query.copyFrom) || null)
 const copiedFromLabel = ref<number | null>(null)
 
-const definition = computed(() => window.ConsoleCommon?.chainConfigDefinitions[chainId.value])
-const rerunTypes = computed(() => window.ConsoleCommon?.rerunTypeDefinitions[chainId.value] ?? [])
+const definition = computed(() => chainConfigDefinitions[chainId.value])
+const rerunTypes = computed(() => rerunTypeDefinitions[chainId.value] ?? [])
 const selectedRerun = computed(() => rerunTypes.value.find((item) => item.value === rerunType.value))
 const requiredFields = computed(() => definition.value?.fields.filter((field) => field.required) ?? [])
 const missingFields = computed(() => requiredFields.value.filter((field) => {
@@ -58,7 +59,7 @@ const output = computed(() => String(
 ))
 
 function chainDescription(chain: string): string {
-  return window.ConsoleCommon?.chainConfigDefinitions[chain]?.description ?? chain
+  return chainConfigDefinitions[chain]?.description ?? chain
 }
 
 watch(chainId, async (value, previous) => {

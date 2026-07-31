@@ -14,6 +14,7 @@ import DynamicConfigForm from '@/components/DynamicConfigForm.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { chainConfigDefinitions, rerunTypeDefinitions } from '@/consoleConfig'
 import { chainLabels, formatDateTime, scheduleFrequency } from '@/formatters'
 import type { SchedulePayload, WorkflowSchedule } from '@/types'
 
@@ -54,10 +55,10 @@ const filteredSchedules = computed(() => {
     return matchesQuery && matchesStatus
   })
 })
-const rerunTypes = computed(() => window.ConsoleCommon?.rerunTypeDefinitions[form.chainId] ?? [])
+const rerunTypes = computed(() => rerunTypeDefinitions[form.chainId] ?? [])
 const selectedRerun = computed(() => rerunTypes.value.find((item) => item.value === form.rerunType))
 const chainDescription = computed(() =>
-  window.ConsoleCommon?.chainConfigDefinitions[form.chainId]?.description ?? form.chainId)
+  chainConfigDefinitions[form.chainId]?.description ?? form.chainId)
 
 watch(() => form.chainId, async () => {
   if (!drawerOpen.value || editingId.value !== null) return

@@ -6,67 +6,6 @@
   <meta name="theme-color" content="#101828">
   <title th:text="${title}">AgentBridge 任务控制台</title>
   <link rel="stylesheet" href="/assets/console-app.css">
-  <style>.legacy-fallback{display:none!important}</style>
-  <script src="/js/console-common.js"></script>
   <script type="module" src="/assets/console-app.js"></script>
 </head>
-<body>
-<aside class="app-sidebar" th:fragment="sidebar(activeItem)">
-  <a class="brand" href="/" aria-label="AgentBridge 任务控制台首页">
-    <span class="brand-copy"><strong>AgentBridge</strong><small>任务控制台</small></span>
-  </a>
-  <nav class="side-navigation" aria-label="主导航">
-    <a th:replace="~{fragments/layout :: navigationItem('/', '运行概览', ${activeItem == 'dashboard'})}">运行概览</a>
-    <a th:replace="~{fragments/layout :: navigationItem('/runs/new', '新建运行', ${activeItem == 'new-run'})}">新建运行</a>
-    <a th:replace="~{fragments/layout :: navigationItem('/history', '运行历史', ${activeItem == 'history'})}">运行历史</a>
-    <a th:replace="~{fragments/layout :: navigationItem('/schedules', '定时任务', ${activeItem == 'schedules'})}">定时任务</a>
-  </nav>
-  <p class="sidebar-status">本地任务控制台</p>
-</aside>
-
-<svg th:fragment="icon(name)" class="c-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
-  <path d="M3 8h10M8 3v10" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
-</svg>
-
-<a th:fragment="navigationItem(href,label,active)" class="c-navigation-item" th:href="${href}"
-   th:classappend="${active} ? ' active'" th:text="${label}">导航</a>
-
-<button th:fragment="button(label,primary)" class="button c-button" type="button"
-        th:classappend="${primary} ? ' primary'" th:text="${label}">操作</button>
-
-<span th:fragment="statusBadge(label,tone)" class="status-badge c-status-badge" th:classappend="${tone}"
-      th:text="${label}">状态</span>
-
-<div th:fragment="alert(message,tone)" class="alert c-alert" role="alert" th:classappend="${tone}"
-     th:text="${message}">提示</div>
-
-<article th:fragment="metricCard(metric)" class="c-metric-card"
-         th:attr="aria-label=${metric.label + ': ' + metric.value},data-tone=${metric.tone}">
-  <span th:text="${metric.label}">指标</span>
-  <strong th:text="${metric.value}">0</strong>
-  <small class="c-metric-card-detail" th:text="${metric.detail}">说明</small>
-  <small class="c-metric-card-trend" th:if="${!metric.trend.isBlank()}"
-         th:attr="data-trend-tone=${metric.trendTone}" th:text="${metric.trend}">趋势</small>
-</article>
-
-<tr th:fragment="tableRow(run)" class="c-table-row">
-  <td><a th:href="@{/runs/{id}(id=${run.id})}" th:text="${run.id}">1</a></td>
-  <td th:text="${run.chainLabel}">链路</td>
-  <td th:text="${run.modeLabel}">全量</td>
-  <td><span th:replace="~{fragments/layout :: statusBadge(${run.stateLabel}, ${run.stateTone})}">排队中</span></td>
-  <td th:text="${run.createdAtLabel}">时间</td>
-  <td th:text="${run.durationLabel}">耗时</td>
-</tr>
-
-<div th:fragment="progress(value)" class="c-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
-     th:attr="aria-valuenow=${value}"><span th:style="'width:' + ${value} + '%'">0%</span></div>
-
-<header class="page-header" th:fragment="pageHeader(eyebrow,title,description)">
-  <div class="page-header-copy">
-    <p class="page-eyebrow" th:text="${eyebrow}">页面</p>
-    <h1 th:text="${title}">AgentBridge 任务控制台</h1>
-    <p class="page-description" th:text="${description}">页面说明</p>
-  </div>
-</header>
-</body>
 </html>

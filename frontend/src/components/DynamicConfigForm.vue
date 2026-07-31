@@ -2,6 +2,8 @@
 import { computed, reactive } from 'vue'
 import { CircleCheck, FolderOpened } from '@element-plus/icons-vue'
 import { inspectPath } from '@/api'
+import { chainConfigDefinitions, groupDefinitions } from '@/consoleConfig'
+import type { ConsoleFieldDefinition } from '@/consoleConfig'
 
 const props = defineProps<{
   chainId: string
@@ -12,9 +14,8 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, unknown>] }>()
 const preflight = reactive<Record<string, { loading: boolean; ok: boolean; message: string }>>({})
 
-const definition = computed(() => window.ConsoleCommon?.chainConfigDefinitions[props.chainId])
+const definition = computed(() => chainConfigDefinitions[props.chainId])
 const groups = computed(() => {
-  const groupDefinitions = window.ConsoleCommon?.groupDefinitions ?? []
   return groupDefinitions.map((group) => ({
     ...group,
     fields: definition.value?.fields.filter((field) => field.group === group.group) ?? []
