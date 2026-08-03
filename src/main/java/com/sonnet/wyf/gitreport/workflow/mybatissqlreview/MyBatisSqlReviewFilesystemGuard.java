@@ -9,8 +9,6 @@ import java.io.InputStream;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,8 +23,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     private final Path candidate;
     private final Path backupRoot;
     private final Map<Path, SnapshotEntry> snapshot;
-    private final Map<Path, Set<PosixFilePermission>> originalPermissions;
-    private final Map<Path, Set<PosixFilePermission>> guardedPermissions;
     private final RunProtection runProtection;
     private boolean closed;
 
@@ -34,16 +30,12 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             List<Path> protectedRoots,
             Path candidate,
             Path backupRoot,
-            Map<Path, SnapshotEntry> snapshot,
-            Map<Path, Set<PosixFilePermission>> originalPermissions,
-            Map<Path, Set<PosixFilePermission>> guardedPermissions
+            Map<Path, SnapshotEntry> snapshot
     ) {
         this.protectedRoots = List.copyOf(protectedRoots);
         this.candidate = candidate;
         this.backupRoot = backupRoot;
         this.snapshot = Map.copyOf(snapshot);
-        this.originalPermissions = Map.copyOf(originalPermissions);
-        this.guardedPermissions = Map.copyOf(guardedPermissions);
         this.runProtection = null;
     }
 
@@ -52,8 +44,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         this.candidate = null;
         this.backupRoot = runProtection.backupRoot;
         this.snapshot = Map.of();
-        this.originalPermissions = Map.of();
-        this.guardedPermissions = Map.of();
         this.runProtection = runProtection;
     }
 
@@ -72,48 +62,20 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         Path normalizedCandidate = normalizeDirectory(candidate, "candidate directory");
         requireCandidateContainment(normalizedStable, normalizedAttempt, normalizedCandidate);
         List<Path> roots = minimalRoots(List.of(normalizedRepository, normalizedStable));
-        requirePosix(roots, normalizedCandidate);
 
         Path backup = Files.createTempDirectory("mybatis-sql-review-protected-");
         Map<Path, SnapshotEntry> before;
-        Map<Path, Set<PosixFilePermission>> original = new LinkedHashMap<>();
-        Map<Path, Set<PosixFilePermission>> guarded = new LinkedHashMap<>();
         try {
             before = snapshot(roots, normalizedCandidate, backup);
-            for (Path path : before.keySet()) {
-                if (Files.isSymbolicLink(path)) {
-                    continue;
-                }
-                Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(
-                        path, LinkOption.NOFOLLOW_LINKS
-                );
-                original.put(path, Set.copyOf(permissions));
-                Set<PosixFilePermission> readOnly = withoutWrites(permissions);
-                Files.setPosixFilePermissions(path, readOnly);
-                guarded.put(path, Set.copyOf(readOnly));
-            }
-            Set<PosixFilePermission> candidatePermissions = Files.getPosixFilePermissions(
-                    normalizedCandidate, LinkOption.NOFOLLOW_LINKS
-            );
-            original.put(normalizedCandidate, Set.copyOf(candidatePermissions));
-            Set<PosixFilePermission> candidateWritable = EnumSet.copyOf(candidatePermissions);
-            candidateWritable.add(PosixFilePermission.OWNER_WRITE);
-            candidateWritable.add(PosixFilePermission.OWNER_EXECUTE);
-            Files.setPosixFilePermissions(normalizedCandidate, candidateWritable);
-            guarded.put(normalizedCandidate, Set.copyOf(candidateWritable));
         } catch (Exception setupFailure) {
-            IOException restoreFailure = restorePermissionsBestEffort(original);
             cleanupBestEffort(backup);
             IllegalStateException failure = new IllegalStateException(
-                    "failed to establish POSIX filesystem protection", setupFailure
+                    "failed to establish filesystem change detection", setupFailure
             );
-            if (restoreFailure != null) {
-                failure.addSuppressed(restoreFailure);
-            }
             throw failure;
         }
         return new MyBatisSqlReviewFilesystemGuard(
-                roots, normalizedCandidate, backup, before, original, guarded
+                roots, normalizedCandidate, backup, before
         );
     }
 
@@ -248,10 +210,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
 
         Throwable contentRestoreFailure = null;
         if (!violations.isEmpty()) {
-            IOException writableFailure = makeRestorationWritable();
-            if (writableFailure != null) {
-                contentRestoreFailure = writableFailure;
-            }
             try {
                 restoreSnapshot();
                 List<String> remaining = detectContentChanges(false);
@@ -266,19 +224,15 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
             }
         }
-        IOException permissionFailure = restorePermissionsBestEffort(originalPermissions);
         cleanupBestEffort(backupRoot);
 
-        if (!violations.isEmpty() || permissionFailure != null || contentRestoreFailure != null) {
+        if (!violations.isEmpty() || contentRestoreFailure != null) {
             String message = violations.isEmpty()
                     ? "filesystem protection restoration failed"
                     : "protected filesystem content changed: " + String.join("; ", violations);
             IllegalStateException failure = new IllegalStateException(message);
             if (detectionFailure != null) {
                 failure.addSuppressed(detectionFailure);
-            }
-            if (permissionFailure != null) {
-                failure.addSuppressed(permissionFailure);
             }
             if (contentRestoreFailure != null) {
                 failure.addSuppressed(contentRestoreFailure);
@@ -288,20 +242,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
     }
 
     private List<String> detectChanges() throws IOException {
-        List<String> changes = detectContentChanges(true);
-        for (Map.Entry<Path, Set<PosixFilePermission>> entry : guardedPermissions.entrySet()) {
-            Path path = entry.getKey();
-            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
-                continue;
-            }
-            Set<PosixFilePermission> actual = Files.getPosixFilePermissions(
-                    path, LinkOption.NOFOLLOW_LINKS
-            );
-            if (!actual.equals(entry.getValue())) {
-                changes.add(display(path) + " permissions changed");
-            }
-        }
-        return changes;
+        return detectContentChanges(true);
     }
 
     private List<String> detectContentChanges(boolean compareIdentity) throws IOException {
@@ -343,38 +284,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 .toList()) {
             Files.setLastModifiedTime(entry.path(), entry.lastModifiedTime());
         }
-    }
-
-    private IOException makeRestorationWritable() {
-        IOException failure = null;
-        for (Path path : originalPermissions.keySet().stream()
-                .sorted(Comparator.comparingInt(Path::getNameCount))
-                .toList()) {
-            try {
-                if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
-                    continue;
-                }
-                Set<PosixFilePermission> permissions = EnumSet.copyOf(
-                        Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS)
-                );
-                permissions.add(PosixFilePermission.OWNER_READ);
-                permissions.add(PosixFilePermission.OWNER_WRITE);
-                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-                    permissions.add(PosixFilePermission.OWNER_EXECUTE);
-                }
-                Files.setPosixFilePermissions(path, permissions);
-            } catch (IOException | RuntimeException exception) {
-                IOException current = exception instanceof IOException io
-                        ? io
-                        : new IOException("failed to prepare protected path for restoration: " + path, exception);
-                if (failure == null) {
-                    failure = current;
-                } else {
-                    failure.addSuppressed(current);
-                }
-            }
-        }
-        return failure;
     }
 
     private static void restoreEntry(SnapshotEntry entry) throws IOException {
@@ -522,20 +431,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         return List.copyOf(roots);
     }
 
-    private static void requirePosix(List<Path> roots, Path candidate) {
-        List<Path> paths = new ArrayList<>(roots);
-        paths.add(candidate);
-        for (Path path : paths) {
-            if (Files.getFileAttributeView(
-                    path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS
-            ) == null) {
-                throw new IllegalStateException(
-                        "POSIX permissions are required for MyBatis SQL review filesystem protection: " + path
-                );
-            }
-        }
-    }
-
     private static Path normalizeDirectory(Path path, String label) {
         Objects.requireNonNull(path, label);
         Path normalized = path.toAbsolutePath().normalize();
@@ -581,101 +476,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         return target.getRoot() == null
                 ? target.subpath(0, nextCount)
                 : target.getRoot().resolve(target.subpath(0, nextCount));
-    }
-
-    private static Set<PosixFilePermission> withoutWrites(Set<PosixFilePermission> permissions) {
-        Set<PosixFilePermission> result = EnumSet.copyOf(permissions);
-        result.remove(PosixFilePermission.OWNER_WRITE);
-        result.remove(PosixFilePermission.GROUP_WRITE);
-        result.remove(PosixFilePermission.OTHERS_WRITE);
-        return result;
-    }
-
-    private static IOException restorePermissionsBestEffort(
-            Map<Path, Set<PosixFilePermission>> permissions
-    ) {
-        List<Map.Entry<Path, Set<PosixFilePermission>>> ordered = permissions.entrySet().stream()
-                .sorted(Comparator.comparingInt(entry -> entry.getKey().getNameCount()))
-                .toList();
-        List<Map.Entry<Path, Set<PosixFilePermission>>> failed = new ArrayList<>();
-        IOException failure = restorePermissionEntries(ordered, failed);
-        if (!failed.isEmpty()) {
-            IOException traversalFailure = restoreTraversalPermissions(permissions);
-            List<Map.Entry<Path, Set<PosixFilePermission>>> retryFailed = new ArrayList<>();
-            IOException retryFailure = restorePermissionEntries(failed, retryFailed);
-            IOException finalDirectoryFailure = restorePermissionEntries(
-                    ordered.stream().filter(entry -> Files.isDirectory(
-                            entry.getKey(), LinkOption.NOFOLLOW_LINKS
-                    )).sorted(Comparator.comparingInt(
-                            (Map.Entry<Path, Set<PosixFilePermission>> entry) -> entry.getKey().getNameCount()
-                    ).reversed()).toList(),
-                    new ArrayList<>()
-            );
-            failure = combine(traversalFailure, retryFailure);
-            failure = combine(failure, finalDirectoryFailure);
-        }
-        return failure;
-    }
-
-    private static IOException restorePermissionEntries(
-            List<Map.Entry<Path, Set<PosixFilePermission>>> entries,
-            List<Map.Entry<Path, Set<PosixFilePermission>>> failed
-    ) {
-        IOException failure = null;
-        for (Map.Entry<Path, Set<PosixFilePermission>> entry : entries) {
-            try {
-                if (Files.exists(entry.getKey(), LinkOption.NOFOLLOW_LINKS)
-                        && !Files.isSymbolicLink(entry.getKey())) {
-                    Files.setPosixFilePermissions(entry.getKey(), entry.getValue());
-                }
-            } catch (IOException | RuntimeException exception) {
-                IOException current = exception instanceof IOException io
-                        ? io
-                        : new IOException("failed to restore POSIX permissions: " + entry.getKey(), exception);
-                if (failure == null) {
-                    failure = current;
-                } else {
-                    failure.addSuppressed(current);
-                }
-                failed.add(entry);
-            }
-        }
-        return failure;
-    }
-
-    private static IOException restoreTraversalPermissions(
-            Map<Path, Set<PosixFilePermission>> permissions
-    ) {
-        return restoreTraversalPermissions(permissions, permissions.keySet());
-    }
-
-    private static IOException restoreTraversalPermissions(
-            Map<Path, Set<PosixFilePermission>> permissions,
-            Iterable<Path> scope
-    ) {
-        Set<Path> selected = new LinkedHashSet<>();
-        scope.forEach(selected::add);
-        IOException failure = null;
-        for (Map.Entry<Path, Set<PosixFilePermission>> entry : permissions.entrySet().stream()
-                .filter(value -> selected.contains(value.getKey()))
-                .sorted(Comparator.comparingInt(value -> value.getKey().getNameCount()))
-                .toList()) {
-            Path path = entry.getKey();
-            try {
-                if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
-                        || Files.isSymbolicLink(path)) {
-                    continue;
-                }
-                Set<PosixFilePermission> traversal = EnumSet.copyOf(entry.getValue());
-                traversal.add(PosixFilePermission.OWNER_READ);
-                traversal.add(PosixFilePermission.OWNER_EXECUTE);
-                Files.setPosixFilePermissions(path, traversal);
-            } catch (IOException | RuntimeException exception) {
-                failure = combine(failure, exception instanceof IOException io
-                        ? io : new IOException("failed to restore traversal permission: " + path, exception));
-            }
-        }
-        return failure;
     }
 
     private static IOException combine(IOException first, IOException second) {
@@ -769,16 +569,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             @Override
             public void backedUp(Path path) {
             }
-
-            @Override
-            public void permissionProtected(Path path) {
-            }
         };
 
         void backedUp(Path path);
-
-        default void permissionProtected(Path path) {
-        }
 
         default void javaWritesSealed(List<Path> paths) {
         }
@@ -837,8 +630,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         private final AtomicLong conflictBytes = new AtomicLong();
         private final Map<Path, SnapshotEntry> protectedSnapshot = new LinkedHashMap<>();
         private final Map<Path, SnapshotEntry> currentRunSnapshot = new LinkedHashMap<>();
-        private final Map<Path, Set<PosixFilePermission>> originalPermissions = new LinkedHashMap<>();
-        private final Map<Path, Set<PosixFilePermission>> guardedPermissions = new LinkedHashMap<>();
         private Path activeCandidate;
         private boolean conflictDetected;
         private boolean closed;
@@ -951,20 +742,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             try {
                 result.capturePaths(wholeProtectedPaths, result.protectedSnapshot, true);
                 result.captureTree(normalizedCurrentRun, result.currentRunSnapshot, false);
-                result.protectPermissions(wholeProtectedPaths, true);
-                result.protectPermissions(result.currentRunSnapshot.keySet(), false);
                 return result;
             } catch (Exception setupFailure) {
-                IOException restoreFailure = restorePermissionsBestEffort(result.originalPermissions);
                 cleanupBestEffort(backup);
                 IllegalStateException failure = new IllegalStateException(
-                        "failed to establish run-level POSIX filesystem protection: "
+                        "failed to establish run-level filesystem change detection: "
                                 + concise(setupFailure),
                         setupFailure
                 );
-                if (restoreFailure != null) {
-                    failure.addSuppressed(restoreFailure);
-                }
                 throw failure;
             }
         }
@@ -999,7 +784,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 );
             }
             activeCandidate = normalizedCandidate;
-            makeOwnerWritable(normalizedCandidate);
             return new TaskScope(this, normalizedCandidate);
         }
 
@@ -1010,7 +794,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             List<String> violations = new ArrayList<>();
             Throwable failure = null;
             try {
-                applyGuardedPermission(candidate);
                 violations.addAll(protectedChanges(true));
                 violations.addAll(currentRunChanges(candidate, true));
                 if (!violations.isEmpty()) {
@@ -1091,9 +874,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                                 + "; recovery backup retained at " + backupRoot
                 );
             }
-            for (Path path : allowed) {
-                makeOwnerWritable(path);
-            }
             T value = null;
             Throwable operationFailure = null;
             try {
@@ -1106,9 +886,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             try {
                 observer.javaWritesCompletedBeforeSeal(allowed);
                 for (Path path : allowed) {
-                    applyGuardedPermission(path);
-                }
-                for (Path path : allowed) {
                     CurrentEntry entry = currentEntryOrNull(path, true);
                     if (entry == null || entry.kind() != Kind.REGULAR_FILE) {
                         throw new IllegalStateException("Java output disappeared before sealing: " + path);
@@ -1119,7 +896,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 for (Path path : allowed) {
                     adoptCurrentRunFile(path, sealed.get(path));
                 }
-                reapplyGuardedPermissions(currentRunSnapshot.keySet(), null);
                 List<String> protectedViolations = protectedChanges(true);
                 if (!protectedViolations.isEmpty()) {
                     conflictDetected = true;
@@ -1208,11 +984,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                     restorationFailure = exception;
                 }
             }
-            IOException permissionFailure = restorePermissionsBestEffort(originalPermissions);
-            if (!conflictDetected && restorationFailure == null && permissionFailure == null) {
+            if (!conflictDetected && restorationFailure == null) {
                 cleanupBestEffort(backupRoot);
             }
-            if (!violations.isEmpty() || restorationFailure != null || permissionFailure != null) {
+            if (!violations.isEmpty() || restorationFailure != null) {
                 String message = violations.isEmpty()
                         ? "run-level filesystem protection restoration failed"
                         : "protected filesystem content changed: " + String.join("; ", violations)
@@ -1223,9 +998,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 }
                 if (restorationFailure != null) {
                     exception.addSuppressed(restorationFailure);
-                }
-                if (permissionFailure != null) {
-                    exception.addSuppressed(permissionFailure);
                 }
                 throw exception;
             }
@@ -1309,38 +1081,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             );
         }
 
-        private void protectPermissions(Iterable<Path> paths, boolean notifyObserver) throws IOException {
-            // POSIX modes prevent ordinary writes, but a process running as the same owner can chmod them back.
-            // The no-follow hash/identity snapshot plus mandatory per-task restore is the authoritative boundary.
-            List<Path> ordered = new ArrayList<>();
-            paths.forEach(ordered::add);
-            for (Path path : ordered.stream()
-                    .distinct()
-                    .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
-                    .toList()) {
-                if (Files.isSymbolicLink(path)) {
-                    continue;
-                }
-                if (Files.getFileAttributeView(
-                        path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS
-                ) == null) {
-                    throw new IllegalStateException(
-                            "POSIX permissions are required for MyBatis SQL review filesystem protection: " + path
-                    );
-                }
-                Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(
-                        path, LinkOption.NOFOLLOW_LINKS
-                );
-                originalPermissions.putIfAbsent(path, Set.copyOf(permissions));
-                Set<PosixFilePermission> readOnly = withoutWrites(permissions);
-                Files.setPosixFilePermissions(path, readOnly);
-                guardedPermissions.put(path, Set.copyOf(readOnly));
-                if (notifyObserver) {
-                    observer.permissionProtected(path);
-                }
-            }
-        }
-
         private void adoptCurrentRunSubtree(Path root) throws IOException {
             Path normalized = root.toAbsolutePath().normalize();
             currentRunSnapshot.keySet().removeIf(path -> path.startsWith(normalized));
@@ -1349,10 +1089,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             }
             requireNoSymlinkPath(currentRun, normalized, "current run Java output");
             captureTree(normalized, currentRunSnapshot, false);
-            protectPermissions(
-                    currentRunSnapshot.keySet().stream().filter(path -> path.startsWith(normalized)).toList(),
-                    false
-            );
         }
 
         private void adoptCurrentRunFile(Path path, CurrentEntry sealed) throws IOException {
@@ -1363,7 +1099,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 throw new IllegalStateException("Java output changed between sealing and adoption: " + normalized);
             }
             currentRunSnapshot.put(normalized, captured);
-            protectPermissions(List.of(normalized), false);
             CurrentEntry after = currentEntryOrNull(normalized, true);
             if (after == null || !captured.sameContent(after, true)) {
                 throw new IllegalStateException("Java output changed after adoption: " + normalized);
@@ -1408,30 +1143,14 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 } else if (!expectedEntry.sameContent(actualEntry, compareIdentity)) {
                     changes.add(label + " " + display(path) + " changed");
                 }
-                if (actualEntry != null && guardedPermissions.containsKey(path)
-                        && !Files.isSymbolicLink(path)) {
-                    Set<PosixFilePermission> actualPermissions = Files.getPosixFilePermissions(
-                            path, LinkOption.NOFOLLOW_LINKS
-                    );
-                    if (!actualPermissions.equals(guardedPermissions.get(path))) {
-                        changes.add(label + " " + display(path) + " permissions changed");
-                    }
-                }
             }
             return changes;
         }
 
         private void restoreProtectedPaths() throws IOException {
-            IOException traversalFailure = restoreTraversalPermissions(
-                    originalPermissions, protectedSnapshot.keySet()
-            );
-            if (traversalFailure != null) {
-                throw traversalFailure;
-            }
             Map<Path, CurrentEntry> actual = currentProtectedTree();
             preserveConflictingRegularFiles(protectedSnapshot, actual, "protected");
             sanitizeSnapshotAncestors(protectedSnapshot);
-            makeRestorationWritable(protectedSnapshot.keySet());
             for (Path path : actual.keySet().stream()
                     .filter(value -> !protectedSnapshot.containsKey(value))
                     .sorted(Comparator.reverseOrder())
@@ -1440,7 +1159,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             }
             restoreEntries(protectedSnapshot, null);
             refreshRestoredIdentity(protectedSnapshot, null);
-            reapplyGuardedPermissions(protectedSnapshot.keySet(), null);
         }
 
         private Map<Path, CurrentEntry> currentProtectedTree() throws IOException {
@@ -1459,16 +1177,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         }
 
         private void restoreCurrentRun(Path excludedRoot) throws IOException {
-            IOException traversalFailure = restoreTraversalPermissions(
-                    originalPermissions, currentRunSnapshot.keySet()
-            );
-            if (traversalFailure != null) {
-                throw traversalFailure;
-            }
             Map<Path, CurrentEntry> actual = currentTree(currentRun, currentRunSnapshot);
             preserveConflictingRegularFiles(currentRunSnapshot, actual, "current-run");
             sanitizeSnapshotAncestors(currentRunSnapshot);
-            makeRestorationWritable(currentRunSnapshot.keySet());
             for (Path path : actual.keySet().stream()
                     .filter(path -> !currentRunSnapshot.containsKey(path))
                     .filter(path -> excludedRoot == null || !path.startsWith(excludedRoot))
@@ -1478,7 +1189,6 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             }
             restoreEntries(currentRunSnapshot, excludedRoot);
             refreshRestoredIdentity(currentRunSnapshot, excludedRoot);
-            reapplyGuardedPermissions(currentRunSnapshot.keySet(), excludedRoot);
         }
 
         private void preserveConflictingRegularFiles(
@@ -1609,11 +1319,9 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
                 if (parent == null) {
                     throw new IOException("cannot safely restore mismatched filesystem root: " + path);
                 }
-                makeOwnerWritable(parent);
                 deleteNoFollow(path);
                 if (expected.kind() == Kind.DIRECTORY) {
                     Files.createDirectory(path);
-                    makeOwnerWritable(path);
                 } else if (expected.kind() == Kind.SYMBOLIC_LINK) {
                     Files.createSymbolicLink(path, Path.of(expected.symbolicLinkTarget()));
                 }
@@ -1662,77 +1370,10 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             }
         }
 
-        private void makeRestorationWritable(Iterable<Path> paths) throws IOException {
-            IOException failure = null;
-            List<Path> ordered = new ArrayList<>();
-            paths.forEach(ordered::add);
-            for (Path path : ordered.stream()
-                    .distinct()
-                    .sorted(Comparator.comparingInt(Path::getNameCount))
-                    .toList()) {
-                try {
-                    if (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path)) {
-                        makeOwnerWritable(path);
-                    }
-                } catch (IOException | RuntimeException exception) {
-                    if (failure == null) {
-                        failure = exception instanceof IOException io ? io : new IOException(exception);
-                    } else {
-                        failure.addSuppressed(exception);
-                    }
-                }
-            }
-            if (failure != null) {
-                throw failure;
-            }
-        }
-
-        private void reapplyGuardedPermissions(Iterable<Path> paths, Path excludedRoot) throws IOException {
-            for (Path path : guardedPermissions.keySet().stream()
-                    .filter(value -> contains(paths, value))
-                    .filter(value -> excludedRoot == null || !value.startsWith(excludedRoot))
-                    .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
-                    .toList()) {
-                applyGuardedPermission(path);
-            }
-        }
-
-        private void makeOwnerWritable(Path path) throws IOException {
-            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
-                return;
-            }
-            Set<PosixFilePermission> permissions = EnumSet.copyOf(
-                    Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS)
-            );
-            permissions.add(PosixFilePermission.OWNER_READ);
-            permissions.add(PosixFilePermission.OWNER_WRITE);
-            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-                permissions.add(PosixFilePermission.OWNER_EXECUTE);
-            }
-            Files.setPosixFilePermissions(path, permissions);
-        }
-
-        private void applyGuardedPermission(Path path) throws IOException {
-            Set<PosixFilePermission> permissions = guardedPermissions.get(path);
-            if (permissions != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                    && !Files.isSymbolicLink(path)) {
-                Files.setPosixFilePermissions(path, permissions);
-            }
-        }
-
         private void requireOpen() {
             if (closed) {
                 throw new IllegalStateException("run-level filesystem protection is already closed");
             }
-        }
-
-        private static boolean contains(Iterable<Path> paths, Path expected) {
-            for (Path path : paths) {
-                if (path.equals(expected)) {
-                    return true;
-                }
-            }
-            return false;
         }
 
         private static Map<Path, CurrentEntry> currentTree(

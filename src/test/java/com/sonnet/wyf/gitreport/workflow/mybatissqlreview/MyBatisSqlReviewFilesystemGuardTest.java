@@ -28,32 +28,31 @@ class MyBatisSqlReviewFilesystemGuardTest {
     Path tempDir;
 
     @Test
-    void makesProtectedTreesReadOnlyButCandidateWritableAndRestoresExactPermissions() throws Exception {
+    void leavesRepositoryStableAndCandidatePermissionsUnchanged() throws Exception {
         assumePosix(tempDir);
         Layout layout = layout(false);
         Set<PosixFilePermission> repoPermissions = permissions("rwxr-x---");
         Set<PosixFilePermission> sourcePermissions = permissions("rw-r-----");
         Set<PosixFilePermission> stablePermissions = permissions("rw-rw----");
+        Set<PosixFilePermission> candidatePermissions = permissions("rwxr-x---");
         Files.setPosixFilePermissions(layout.repository(), repoPermissions);
         Files.setPosixFilePermissions(layout.source(), sourcePermissions);
         Files.setPosixFilePermissions(layout.stableFile(), stablePermissions);
+        Files.setPosixFilePermissions(layout.candidate(), candidatePermissions);
 
         try (MyBatisSqlReviewFilesystemGuard ignored = MyBatisSqlReviewFilesystemGuard.protect(
                 layout.repository(), layout.stableRoot(), layout.attemptRoot(), layout.candidate()
         )) {
-            assertThat(Files.getPosixFilePermissions(layout.repository()))
-                    .doesNotContain(PosixFilePermission.OWNER_WRITE);
-            assertThat(Files.getPosixFilePermissions(layout.source()))
-                    .doesNotContain(PosixFilePermission.OWNER_WRITE);
-            assertThat(Files.getPosixFilePermissions(layout.stableFile()))
-                    .doesNotContain(PosixFilePermission.OWNER_WRITE);
-            assertThat(Files.getPosixFilePermissions(layout.candidate()))
-                    .contains(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
+            assertThat(Files.getPosixFilePermissions(layout.repository())).isEqualTo(repoPermissions);
+            assertThat(Files.getPosixFilePermissions(layout.source())).isEqualTo(sourcePermissions);
+            assertThat(Files.getPosixFilePermissions(layout.stableFile())).isEqualTo(stablePermissions);
+            assertThat(Files.getPosixFilePermissions(layout.candidate())).isEqualTo(candidatePermissions);
         }
 
         assertThat(Files.getPosixFilePermissions(layout.repository())).isEqualTo(repoPermissions);
         assertThat(Files.getPosixFilePermissions(layout.source())).isEqualTo(sourcePermissions);
         assertThat(Files.getPosixFilePermissions(layout.stableFile())).isEqualTo(stablePermissions);
+        assertThat(Files.getPosixFilePermissions(layout.candidate())).isEqualTo(candidatePermissions);
     }
 
     @Test
@@ -68,10 +67,6 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 layout.repository(), layout.stableRoot(), layout.attemptRoot(), layout.candidate()
         );
 
-        makeWritable(layout.repository());
-        makeWritable(layout.source());
-        makeWritable(layout.stableRoot());
-        makeWritable(layout.attemptRoot());
         Files.writeString(layout.source(), "tampered source");
         Files.delete(layout.stableFile());
         Path sibling = layout.attemptRoot().resolve("agent-sibling.txt");
@@ -89,31 +84,19 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void restoresTamperedContentEvenWhenOriginalProtectedDirectoriesWereReadOnly() throws Exception {
+    void leavesPreexistingReadOnlyPermissionsUntouched() throws Exception {
         assumePosix(tempDir);
         Layout layout = layout(false);
         Set<PosixFilePermission> repositoryPermissions = permissions("r-xr-x---");
         Set<PosixFilePermission> stablePermissions = permissions("r-xr-x---");
         Files.setPosixFilePermissions(layout.repository(), repositoryPermissions);
         Files.setPosixFilePermissions(layout.stableRoot(), stablePermissions);
-        byte[] sourceBefore = Files.readAllBytes(layout.source());
-        byte[] stableBefore = Files.readAllBytes(layout.stableFile());
-        MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protect(
+        try (MyBatisSqlReviewFilesystemGuard ignored = MyBatisSqlReviewFilesystemGuard.protect(
                 layout.repository(), layout.stableRoot(), layout.attemptRoot(), layout.candidate()
-        );
-
-        makeWritable(layout.repository());
-        makeWritable(layout.source());
-        makeWritable(layout.stableRoot());
-        Files.writeString(layout.source(), "tampered source");
-        Files.delete(layout.stableFile());
-
-        assertThatThrownBy(guard::close)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("protected filesystem content changed")
-                .satisfies(exception -> assertThat(exception.getSuppressed()).isEmpty());
-        assertThat(Files.readAllBytes(layout.source())).isEqualTo(sourceBefore);
-        assertThat(Files.readAllBytes(layout.stableFile())).isEqualTo(stableBefore);
+        )) {
+            assertThat(Files.getPosixFilePermissions(layout.repository())).isEqualTo(repositoryPermissions);
+            assertThat(Files.getPosixFilePermissions(layout.stableRoot())).isEqualTo(stablePermissions);
+        }
         assertThat(Files.getPosixFilePermissions(layout.repository())).isEqualTo(repositoryPermissions);
         assertThat(Files.getPosixFilePermissions(layout.stableRoot())).isEqualTo(stablePermissions);
     }
@@ -135,7 +118,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void rejectsASymlinkedCandidateParentBeforeChangingPermissions() throws Exception {
+    void rejectsASymlinkedCandidateParentWithoutChangingPermissions() throws Exception {
         assumePosix(tempDir);
         Path repository = Files.createDirectories(tempDir.resolve("repo-symlink"));
         Path stable = Files.createDirectories(tempDir.resolve("stable-symlink"));
@@ -153,7 +136,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void failsClosedWhenTheFilesystemDoesNotExposePosixPermissions() throws Exception {
+    void supportsFilesystemsWithoutPosixPermissions() throws Exception {
         Path zip = tempDir.resolve("non-posix.zip");
         URI uri = URI.create("jar:" + zip.toUri());
         try (var fileSystem = FileSystems.newFileSystem(uri, Map.of("create", "true"))) {
@@ -162,10 +145,13 @@ class MyBatisSqlReviewFilesystemGuardTest {
             Path attempt = Files.createDirectories(stable.resolve("runs/run/tasks/task/attempts/001"));
             Path candidate = Files.createDirectories(attempt.resolve("candidate"));
 
-            assertThatThrownBy(() -> MyBatisSqlReviewFilesystemGuard.protect(
-                    repository, stable, attempt, candidate
-            )).isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("POSIX permissions are required");
+            assertThatCode(() -> {
+                try (MyBatisSqlReviewFilesystemGuard ignored = MyBatisSqlReviewFilesystemGuard.protect(
+                        repository, stable, attempt, candidate
+                )) {
+                    // Snapshot-only change detection must not depend on chmod support.
+                }
+            }).doesNotThrowAnyException();
         }
     }
 
@@ -185,6 +171,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         Set<PosixFilePermission> mapperOnePermissions = Files.getPosixFilePermissions(layout.mapperOne());
         Set<PosixFilePermission> mapperTwoPermissions = Files.getPosixFilePermissions(layout.mapperTwo());
         Set<PosixFilePermission> stableArtifactPermissions = Files.getPosixFilePermissions(layout.stableArtifact());
+        Set<PosixFilePermission> candidateOnePermissions = Files.getPosixFilePermissions(layout.candidateOne());
 
         try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
                 objectMapper,
@@ -197,6 +184,8 @@ class MyBatisSqlReviewFilesystemGuardTest {
                 observer
         )) {
             try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
+                assertThat(Files.getPosixFilePermissions(layout.candidateOne()))
+                        .isEqualTo(candidateOnePermissions);
                 Files.writeString(layout.candidateOne().resolve("report.md"), "first");
             }
             try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateTwo())) {
@@ -207,9 +196,6 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThat(observer.backups()).containsEntry(layout.mapperOne(), 1)
                 .containsEntry(layout.mapperTwo(), 1)
                 .containsEntry(layout.stableArtifact(), 1);
-        assertThat(observer.permissionChanges()).containsEntry(layout.mapperOne(), 1)
-                .containsEntry(layout.mapperTwo(), 1)
-                .containsEntry(layout.stableArtifact(), 1);
         assertThat(observer.observedPaths())
                 .noneMatch(path -> path.startsWith(layout.gitDirectory()))
                 .noneMatch(path -> path.startsWith(layout.buildDirectory()))
@@ -217,6 +203,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThat(Files.getPosixFilePermissions(layout.mapperOne())).isEqualTo(mapperOnePermissions);
         assertThat(Files.getPosixFilePermissions(layout.mapperTwo())).isEqualTo(mapperTwoPermissions);
         assertThat(Files.getPosixFilePermissions(layout.stableArtifact())).isEqualTo(stableArtifactPermissions);
+        assertThat(Files.getPosixFilePermissions(layout.candidateOne())).isEqualTo(candidateOnePermissions);
     }
 
     @Test
@@ -373,7 +360,7 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
-    void restoresAfterAProtectedDirectoryIsChangedToMode000() throws Exception {
+    void doesNotRewritePermissionsChangedByAnotherProcess() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();
         Path mapperDirectory = layout.mapperOne().getParent();
@@ -389,8 +376,8 @@ class MyBatisSqlReviewFilesystemGuardTest {
         assertThatThrownBy(guard::close)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("filesystem detection failed");
-        assertThat(Files.getPosixFilePermissions(mapperDirectory)).isEqualTo(original);
-        assertThat(layout.mapperOne()).isRegularFile();
+        assertThat(Files.getPosixFilePermissions(mapperDirectory)).isEmpty();
+        Files.setPosixFilePermissions(mapperDirectory, original);
     }
 
     @Test
@@ -664,18 +651,12 @@ class MyBatisSqlReviewFilesystemGuardTest {
     private static final class RecordingProtectionObserver
             implements MyBatisSqlReviewFilesystemGuard.ProtectionObserver {
         private final Map<Path, Integer> backups = new LinkedHashMap<>();
-        private final Map<Path, Integer> permissionChanges = new LinkedHashMap<>();
         private Runnable onJavaWritesSealed;
         private Runnable onJavaWritesCompletedBeforeSeal;
 
         @Override
         public void backedUp(Path path) {
             backups.merge(path, 1, Integer::sum);
-        }
-
-        @Override
-        public void permissionProtected(Path path) {
-            permissionChanges.merge(path, 1, Integer::sum);
         }
 
         @Override
@@ -696,14 +677,8 @@ class MyBatisSqlReviewFilesystemGuardTest {
             return backups;
         }
 
-        Map<Path, Integer> permissionChanges() {
-            return permissionChanges;
-        }
-
         Set<Path> observedPaths() {
-            Set<Path> paths = new java.util.LinkedHashSet<>(backups.keySet());
-            paths.addAll(permissionChanges.keySet());
-            return paths;
+            return new java.util.LinkedHashSet<>(backups.keySet());
         }
     }
 }
