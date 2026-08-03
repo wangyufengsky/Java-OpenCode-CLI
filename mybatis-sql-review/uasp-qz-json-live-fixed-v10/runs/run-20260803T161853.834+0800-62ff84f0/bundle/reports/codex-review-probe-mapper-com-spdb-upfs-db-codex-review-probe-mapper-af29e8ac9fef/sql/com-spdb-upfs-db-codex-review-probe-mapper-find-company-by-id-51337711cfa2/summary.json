@@ -1,0 +1,20 @@
+{
+  "schema_version" : "mybatis-sql-review-summary/v1",
+  "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace" : "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id" : "findCompanyById",
+  "status" : "no-findings",
+  "command_type" : "select",
+  "select_key" : false,
+  "risk_level" : "none",
+  "scenario_count" : 0,
+  "data_source" : "deepseek@localhost",
+  "catalog" : "deepseek",
+  "schema" : "deepseek",
+  "project" : "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope" : "ALL",
+  "evidence_file" : "database-evidence.json",
+  "report_file" : "report.md",
+  "findings" : [ ]
+}

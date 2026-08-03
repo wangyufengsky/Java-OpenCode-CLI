@@ -1,0 +1,43 @@
+{
+  "schema_version": "mybatis-sql-review-summary/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "findCompanyById",
+  "status": "reviewed",
+  "command_type": "select",
+  "select_key": false,
+  "risk_level": "low",
+  "scenario_count": 0,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "evidence_file": "database-evidence.json",
+  "report_file": "report.md",
+  "findings": [
+    {
+      "id": "F-01",
+      "severity": "low",
+      "category": "performance",
+      "title": "No LIMIT on the ID lookup; duplicate-ID risk",
+      "description": "The SELECT filters on ID without any row-count bound, and ID uniqueness is unverified (database_safety=unverified, zero-scenario review). If COMPANY.ID is not backed by a unique constraint, the CompanyResultMap mapping would fail with TooManyResultsException.",
+      "evidence_ids": [
+        "static-mapper-source"
+      ],
+      "recommendation": "Confirm COMPANY.ID is a primary key or uniquely indexed; optionally add LIMIT 1 to the normalized SQL."
+    },
+    {
+      "id": "F-02",
+      "severity": "info",
+      "category": "maintainability",
+      "title": "Column list sourced from shared include fragment",
+      "description": "The SELECT column list is provided by the CompanyColumns include fragment. Drift between that fragment and the CompanyResultMap columns would break column mapping at runtime.",
+      "evidence_ids": [
+        "static-mapper-source"
+      ],
+      "recommendation": "Keep the CompanyColumns fragment and CompanyResultMap in sync and add a mapping smoke test."
+    }
+  ]
+}

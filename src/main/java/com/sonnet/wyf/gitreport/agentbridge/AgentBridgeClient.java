@@ -633,6 +633,9 @@ public class AgentBridgeClient {
         if (value.isTextual() && value.textValue().isBlank() && isRunningHistory(item)) {
             return objectMapper.nullNode();
         }
+        if (value.isTextual() && value.textValue().isEmpty() && isVerifiedEmptyHistoryResult(item)) {
+            return value.deepCopy();
+        }
         if (!value.isTextual() || value.textValue().isBlank()) {
             throw new IllegalStateException("result must not be blank");
         }
@@ -645,6 +648,16 @@ public class AgentBridgeClient {
             // AgentBridge records plain-text outputs for successful non-data tools.
         }
         return value.deepCopy();
+    }
+
+    private boolean isVerifiedEmptyHistoryResult(JsonNode item) {
+        return item.has("argumentsTruncated")
+                && item.has("resultTruncated")
+                && !item.path("resultTruncated").asBoolean(true)
+                && item.path("resultBytes").isIntegralNumber()
+                && item.path("resultBytes").canConvertToLong()
+                && item.path("resultBytes").longValue() == 0
+                && sha256Utf8("").equals(item.path("resultSha256").asText(""));
     }
 
     private boolean isRunningHistory(JsonNode item) {

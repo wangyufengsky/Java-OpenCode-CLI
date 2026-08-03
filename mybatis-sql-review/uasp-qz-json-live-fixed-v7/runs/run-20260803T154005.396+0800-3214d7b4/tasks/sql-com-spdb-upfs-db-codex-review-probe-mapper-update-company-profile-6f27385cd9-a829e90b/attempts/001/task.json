@@ -1,0 +1,19 @@
+{
+  "schema_version" : "mybatis-sql-review-task-attempt/v1",
+  "task_key" : "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+  "attempt" : 1,
+  "mapper_key" : "codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef",
+  "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace" : "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id" : "updateCompanyProfile",
+  "command_type" : "update",
+  "select_key" : false,
+  "candidate_directory" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-fixed-v7/runs/run-20260803T154005.396+0800-3214d7b4/tasks/sql-com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd9-a829e90b/attempts/001/candidate",
+  "data_source" : "deepseek@localhost",
+  "catalog" : "deepseek",
+  "schema" : "deepseek",
+  "project" : "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope" : "ALL",
+  "safety_mode" : "connectivity-only",
+  "database_safety" : "unverified"
+}

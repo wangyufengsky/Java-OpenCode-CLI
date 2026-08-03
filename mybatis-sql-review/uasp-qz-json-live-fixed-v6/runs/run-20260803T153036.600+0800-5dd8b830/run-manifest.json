@@ -1,0 +1,14 @@
+{
+  "schemaVersion" : "workflow-run/v1",
+  "executionId" : "run-20260803T153036.600+0800-5dd8b830",
+  "consoleRunId" : 9,
+  "chainId" : "mybatis-sql-review",
+  "mode" : "full",
+  "rerunType" : "",
+  "rerunIds" : [ ],
+  "publicationGeneration" : 1,
+  "state" : "FAILED",
+  "message" : "MyBatis SQL review exhausted fresh sessions for task com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2: tool-call safety audit failed: tool call 785 rejected: new tool call is incomplete or not successful",
+  "stableRoot" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-fixed-v6",
+  "updatedAt" : "2026-08-03T15:36:50.239466+08:00"
+}

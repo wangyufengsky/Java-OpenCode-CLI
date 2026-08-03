@@ -251,6 +251,21 @@ public final class MyBatisSqlReviewTaskRunner {
                             exception
                     );
                 }
+                guard.withJavaWrites(
+                        List.of(
+                                layout.candidate().resolve("report.md"),
+                                layout.candidate().resolve("summary.json"),
+                                layout.candidate().resolve("database-evidence.json")
+                        ),
+                        () -> {
+                            outputValidator.normalizeReportMyBatisXmlProse(layout.candidate());
+                            outputValidator.normalizeSummarySemantics(layout.candidate());
+                            outputValidator.normalizeEmptyEvidenceCollections(
+                                    layout.candidate(), audit.auditedCallIds().isEmpty()
+                            );
+                            return null;
+                        }
+                );
                 MyBatisSqlOutputValidator.Result validation = outputValidator.validate(
                         layout.candidate(),
                         new MyBatisSqlOutputValidator.ExpectedTaskContext(

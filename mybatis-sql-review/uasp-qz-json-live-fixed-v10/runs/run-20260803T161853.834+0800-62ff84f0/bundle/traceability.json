@@ -1,0 +1,49 @@
+{
+  "schema_version" : "mybatis-sql-review-traceability/v1",
+  "statement_count" : 4,
+  "entries" : [ {
+    "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+    "mapper_key" : "codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef",
+    "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+    "source_start_line" : 81,
+    "source_end_line" : 85,
+    "source_sha256" : "ee666ae6145f90fa3312822dfef697d48b7b53a3e71385e110fa0d409ae79c1e",
+    "report" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/report.md",
+    "summary" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/summary.json",
+    "database_evidence" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/database-evidence.json",
+    "finding_ids" : [ "F-01", "F-02" ]
+  }, {
+    "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+    "mapper_key" : "codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef",
+    "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+    "source_start_line" : 34,
+    "source_end_line" : 40,
+    "source_sha256" : "ee666ae6145f90fa3312822dfef697d48b7b53a3e71385e110fa0d409ae79c1e",
+    "report" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/report.md",
+    "summary" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/summary.json",
+    "database_evidence" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/database-evidence.json",
+    "finding_ids" : [ ]
+  }, {
+    "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938",
+    "mapper_key" : "codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef",
+    "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+    "source_start_line" : 42,
+    "source_end_line" : 57,
+    "source_sha256" : "ee666ae6145f90fa3312822dfef697d48b7b53a3e71385e110fa0d409ae79c1e",
+    "report" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/report.md",
+    "summary" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/summary.json",
+    "database_evidence" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/database-evidence.json",
+    "finding_ids" : [ "F1", "F2", "F3" ]
+  }, {
+    "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+    "mapper_key" : "codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef",
+    "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+    "source_start_line" : 59,
+    "source_end_line" : 79,
+    "source_sha256" : "ee666ae6145f90fa3312822dfef697d48b7b53a3e71385e110fa0d409ae79c1e",
+    "report" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/report.md",
+    "summary" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/summary.json",
+    "database_evidence" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/database-evidence.json",
+    "finding_ids" : [ "F-1", "F-2", "F-3", "F-4" ]
+  } ]
+}

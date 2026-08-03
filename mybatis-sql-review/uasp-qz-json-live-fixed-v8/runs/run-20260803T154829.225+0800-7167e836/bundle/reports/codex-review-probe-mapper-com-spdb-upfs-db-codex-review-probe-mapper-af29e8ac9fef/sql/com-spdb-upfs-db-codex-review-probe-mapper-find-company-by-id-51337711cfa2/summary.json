@@ -1,0 +1,39 @@
+{
+  "schema_version": "mybatis-sql-review-summary/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "findCompanyById",
+  "status": "reviewed",
+  "command_type": "select",
+  "select_key": false,
+  "risk_level": "low",
+  "scenario_count": 0,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "evidence_file": "database-evidence.json",
+  "report_file": "report.md",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "low",
+      "category": "correctness",
+      "title": "Equality lookup without an explicit LIMIT assumes ID uniqueness",
+      "description": "WHERE ID = #{id,jdbcType=INTEGER} returns every row matching the value; if ID is not a primary key or unique column, more than one row can be returned even though the surrounding code may expect a single row. Whether a duplicate can actually occur is unverified (requires unique-constraint metadata).",
+      "evidence_ids": [],
+      "recommendation": "Confirm ID has a primary-key/unique constraint on COMPANY, or add LIMIT 1 (e.g. FETCH FIRST 1 ROWS ONLY) if the contract is a single row."
+    },
+    {
+      "id": "F2",
+      "severity": "info",
+      "category": "performance",
+      "title": "Index usage for the ID predicate is unverified",
+      "description": "A point lookup benefits from a unique index on ID; without one the plan may degrade to a scan. This is an unverified claim that requires index metadata or an explained plan.",
+      "evidence_ids": [],
+      "recommendation": "Verify the unique index on ID via database metadata or EXPLAIN tooling outside this review; this does not require executing the reviewed statement."
+    }
+  ]
+}

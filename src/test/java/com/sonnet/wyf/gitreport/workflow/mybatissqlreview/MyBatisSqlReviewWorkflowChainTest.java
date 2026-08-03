@@ -589,6 +589,8 @@ class MyBatisSqlReviewWorkflowChainTest {
                 [reference][local-reference]
                 [multiline-reference][local-multiline-reference]
 
+                Inline MyBatis `<include refid="Columns"/>` is literal code.
+
                 [local-reference]: local.md
                 [local-multiline-reference]:
                   local.md
@@ -600,6 +602,12 @@ class MyBatisSqlReviewWorkflowChainTest {
                 [external-reference]: https://sql.example
                 [external-multiline-reference]:
                   https://sql.example
+                ```
+
+                ```xml
+                <select id="findById">
+                  <include refid="Columns"/>
+                </select>
                 ```
                 """);
         assertThatCode(() -> MyBatisSqlReviewWorkflowChain.validateMarkdownLinks(root))

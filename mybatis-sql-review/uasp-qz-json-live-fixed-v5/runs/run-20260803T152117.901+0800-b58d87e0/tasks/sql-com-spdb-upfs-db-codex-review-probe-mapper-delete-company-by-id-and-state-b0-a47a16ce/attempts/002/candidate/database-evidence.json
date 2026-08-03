@@ -1,0 +1,218 @@
+{
+  "schema_version": "database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "deleteCompanyByIdAndState",
+  "command_type": "delete",
+  "select_key": false,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "safety_mode": "connectivity-only",
+  "database_safety": "unverified",
+  "tool_call_ids": [
+    "cmcp_db_database_list_datasources#1",
+    "cmcp_db_database_list_databases#1",
+    "cmcp_db_database_list_table_schema#1",
+    "cmcp_db_database_list_table_schema#2"
+  ],
+  "metadata": [
+    {
+      "id": "meta-datasources",
+      "tool_call_id": "cmcp_db_database_list_datasources#1",
+      "tool_name": "cmcp_db_database_list_datasources",
+      "args": {
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL"
+      },
+      "result": [
+        {
+          "driverClass": "com.mysql.cj.jdbc.Driver",
+          "projectPath": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+          "scope": "PROJECT",
+          "name": "deepseek@localhost",
+          "project": "uasp-qz-json",
+          "type": "MySQL",
+          "version": "9.2.0",
+          "url": "jdbc:mysql://localhost:3306/deepseek"
+        }
+      ]
+    },
+    {
+      "id": "meta-databases",
+      "tool_call_id": "cmcp_db_database_list_databases#1",
+      "tool_name": "cmcp_db_database_list_databases",
+      "args": {
+        "dataSource": "deepseek@localhost",
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL"
+      },
+      "result": [
+        {
+          "name": "deepseek",
+          "type": "CATALOG"
+        },
+        {
+          "name": "information_schema",
+          "type": "CATALOG"
+        },
+        {
+          "name": "mydatabase",
+          "type": "CATALOG"
+        },
+        {
+          "name": "mysql",
+          "type": "CATALOG"
+        },
+        {
+          "name": "performance_schema",
+          "type": "CATALOG"
+        },
+        {
+          "name": "sys",
+          "type": "CATALOG"
+        }
+      ]
+    },
+    {
+      "id": "meta-company-schema",
+      "tool_call_id": "cmcp_db_database_list_table_schema#1",
+      "tool_name": "cmcp_db_database_list_table_schema",
+      "args": {
+        "dataSource": "deepseek@localhost",
+        "catalog": "deepseek",
+        "schema": "deepseek",
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL",
+        "keywords": [
+          "company"
+        ]
+      },
+      "result": {
+        "totalTablesFound": 4,
+        "sampledCount": 4,
+        "tables": [
+          {
+            "tableName": "COMPANY",
+            "comment": "游戏公司表",
+            "relevanceScore": 30,
+            "columnCount": 6
+          },
+          {
+            "tableName": "GAME",
+            "comment": "游戏表",
+            "relevanceScore": 5,
+            "columnCount": 5
+          },
+          {
+            "tableName": "PLAYER",
+            "comment": "玩家表",
+            "relevanceScore": 0,
+            "columnCount": 2
+          },
+          {
+            "tableName": "PLAYER_GAME",
+            "comment": "玩家游玩游戏记录表",
+            "relevanceScore": 0,
+            "columnCount": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "meta-company-schema-columns",
+      "tool_call_id": "cmcp_db_database_list_table_schema#2",
+      "tool_name": "cmcp_db_database_list_table_schema",
+      "args": {
+        "dataSource": "deepseek@localhost",
+        "catalog": "deepseek",
+        "schema": "deepseek",
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL",
+        "includeColumns": true,
+        "includeIndexes": true,
+        "tablePrefix": "COMPANY"
+      },
+      "result": {
+        "totalTablesFound": 1,
+        "sampledCount": 1,
+        "tables": [
+          {
+            "tableName": "COMPANY",
+            "comment": "游戏公司表",
+            "relevanceScore": 15,
+            "columnCount": 6,
+            "columns": [
+              {
+                "name": "ID",
+                "type": "INT",
+                "size": 10,
+                "nullable": false,
+                "defaultValue": "",
+                "comment": ""
+              },
+              {
+                "name": "COMPANY_NAME",
+                "type": "VARCHAR",
+                "size": 255,
+                "nullable": true,
+                "defaultValue": "",
+                "comment": ""
+              },
+              {
+                "name": "COMPANY_STATE",
+                "type": "VARCHAR",
+                "size": 255,
+                "nullable": true,
+                "defaultValue": "",
+                "comment": ""
+              },
+              {
+                "name": "COMPANY_CITY",
+                "type": "VARCHAR",
+                "size": 255,
+                "nullable": true,
+                "defaultValue": "",
+                "comment": ""
+              },
+              {
+                "name": "EMPLOYEE",
+                "type": "INT",
+                "size": 10,
+                "nullable": true,
+                "defaultValue": "",
+                "comment": ""
+              },
+              {
+                "name": "COMPANY_CREATE_YEAR",
+                "type": "INT",
+                "size": 10,
+                "nullable": true,
+                "defaultValue": "",
+                "comment": ""
+              }
+            ],
+            "indexes": [
+              {
+                "indexName": "PRIMARY",
+                "unique": true,
+                "columns": [
+                  "ID"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "scenarios": [],
+  "limitations": [
+    "command_type is delete, so per the contract no query was executed; scenarios is empty and no connection probe was repeated.",
+    "safety_mode=connectivity-only and database_safety=unverified: row-security, function-execution, and timeout properties were neither asserted nor verified.",
+    "Metadata reflects the catalog at review time only and is representative evidence, not proof of production cardinality, selectivity, or plan stability."
+  ]
+}

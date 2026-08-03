@@ -31,6 +31,69 @@ class MyBatisSqlOutputValidatorTest {
     }
 
     @Test
+    void deterministicallyNormalizesStatusAndRiskFromFindings() throws Exception {
+        Path candidates = candidates();
+        ObjectNode summary = summary(candidates);
+        summary.put("status", "no-findings");
+        summary.put("risk_level", "low");
+        writeSummary(candidates, summary);
+
+        validator.normalizeSummarySemantics(candidates);
+
+        JsonNode normalized = objectMapper.readTree(candidates.resolve("summary.json").toFile());
+        assertThat(normalized.path("status").asText()).isEqualTo("reviewed");
+        assertThat(normalized.path("risk_level").asText()).isEqualTo("medium");
+        assertThat(validate(candidates).scenarioCount()).isEqualTo(1);
+    }
+
+    @Test
+    void normalizesEmptyEvidenceObjectsOnlyWithoutAuditedDatabaseCalls() throws Exception {
+        Path candidates = candidates();
+        ObjectNode evidence = (ObjectNode) objectMapper.readTree(
+                candidates.resolve("database-evidence.json").toFile()
+        );
+        evidence.withObject("audit").putArray("tool_call_ids").removeAll();
+        evidence.set("metadata", objectMapper.createObjectNode());
+        evidence.set("scenarios", objectMapper.createObjectNode());
+        write(candidates, evidence);
+
+        validator.normalizeEmptyEvidenceCollections(candidates, true);
+
+        JsonNode normalized = objectMapper.readTree(candidates.resolve("database-evidence.json").toFile());
+        assertThat(normalized.path("metadata").isArray()).isTrue();
+        assertThat(normalized.path("scenarios").isArray()).isTrue();
+
+        evidence.set("metadata", objectMapper.createObjectNode());
+        write(candidates, evidence);
+        validator.normalizeEmptyEvidenceCollections(candidates, false);
+        assertThat(objectMapper.readTree(candidates.resolve("database-evidence.json").toFile())
+                .path("metadata").isObject()).isTrue();
+    }
+
+    @Test
+    void escapesMyBatisXmlInProseButPreservesInlineAndFencedCode() throws Exception {
+        Path candidates = candidates();
+        Path report = candidates.resolve("report.md");
+        Files.writeString(report, """
+                Prose <include refid="CompanyColumns"/> remains visible.
+                Inline `<if test="value != null">` remains code.
+
+                ```xml
+                <set>
+                  <if test="value != null">VALUE = #{value}</if>
+                </set>
+                ```
+                """);
+
+        validator.normalizeReportMyBatisXmlProse(candidates);
+
+        assertThat(Files.readString(report))
+                .contains("Prose &lt;include refid=\"CompanyColumns\"/&gt; remains visible.")
+                .contains("Inline `<if test=\"value != null\">` remains code.")
+                .contains("<set>\n  <if test=\"value != null\">VALUE = #{value}</if>\n</set>");
+    }
+
+    @Test
     void rejectsEverySummaryBindingFieldThatDoesNotMatchOnlineDatabaseOrOfflineEvidence() throws Exception {
         for (String field : bindingFields()) {
             Path onlineCandidates = candidates();
@@ -264,6 +327,20 @@ class MyBatisSqlOutputValidatorTest {
 
         candidates = candidates(); Files.writeString(candidates.resolve("extra.txt"), "extra");
         assertInvalid(candidates, "exactly three candidate files");
+    }
+
+    @Test
+    void acceptsPlaceholderAsOrdinaryTechnicalProse() throws Exception {
+        Path candidates = candidates();
+        Files.writeString(
+                candidates.resolve("report.md"),
+                report(candidates).replace(
+                        "## Static Analysis",
+                        "## Static Analysis\n\nThe query uses a bound placeholder for the identifier."
+                )
+        );
+
+        assertThat(validate(candidates).scenarioCount()).isEqualTo(1);
     }
 
     private MyBatisSqlOutputValidator.ExpectedTaskContext expected() {

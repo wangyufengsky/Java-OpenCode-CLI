@@ -207,6 +207,37 @@ class MyBatisSqlReviewFilesystemGuardTest {
     }
 
     @Test
+    void laterTaskIgnoresDelayedWritesInsideDiscardedCandidate() throws Exception {
+        assumePosix(tempDir);
+        RunLayout layout = runLayout();
+
+        try (MyBatisSqlReviewFilesystemGuard guard = MyBatisSqlReviewFilesystemGuard.protectRun(
+                objectMapper,
+                layout.repository(),
+                layout.stableRoot(),
+                layout.currentRun(),
+                List.of(layout.mapperOne().getParent()),
+                List.of(layout.mapperOne(), layout.mapperTwo()),
+                List.of(layout.candidateOne(), layout.candidateTwo())
+        )) {
+            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateOne())) {
+                Files.writeString(layout.candidateOne().resolve("report.md"), "first write");
+            }
+
+            // IDE inspections and formatters can finish saving a rejected candidate after the
+            // fresh-session retry has already started. Rejected candidates are never published.
+            Files.writeString(layout.candidateOne().resolve("report.md"), "delayed IDE save");
+
+            try (MyBatisSqlReviewFilesystemGuard.TaskScope ignored = guard.protectTask(layout.candidateTwo())) {
+                Files.writeString(layout.candidateTwo().resolve("report.md"), "second write");
+            }
+        }
+
+        assertThat(layout.candidateOne().resolve("report.md")).hasContent("delayed IDE save");
+        assertThat(layout.candidateTwo().resolve("report.md")).hasContent("second write");
+    }
+
+    @Test
     void lightweightTaskScopeDetectsAndRestoresCandidateSiblingWritesBeforeJavaDiagnostics() throws Exception {
         assumePosix(tempDir);
         RunLayout layout = runLayout();

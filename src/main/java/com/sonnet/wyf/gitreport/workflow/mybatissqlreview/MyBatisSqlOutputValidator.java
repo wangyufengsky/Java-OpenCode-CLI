@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.workflow.mybatissqlreview;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class MyBatisSqlOutputValidator {
@@ -38,10 +40,15 @@ public final class MyBatisSqlOutputValidator {
             "enum", "minLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems", "items"
     );
     private static final Pattern UNRESOLVED_PLACEHOLDER = Pattern.compile(
-            "(?is)\\{\\{[^}]+}}|<<[^>]+>>|\\b(?:TODO|TBD|FIXME|PLACEHOLDER)\\b"
+            "(?s)\\{\\{[^}]+}}|<<[^>]+>>|\\b(?:TODO|TBD|FIXME|PLACEHOLDER)\\b"
     );
     private static final Pattern DATABASE_EVIDENCE_SECTION = Pattern.compile(
             "(?ms)^## Database Evidence[ \\t]*\\R(.*?)(?=^##[ \\t]+|\\z)"
+    );
+    private static final Pattern MYBATIS_XML_TAG = Pattern.compile(
+            "(?i)</?(?:mapper|select|insert|update|delete|sql|include|resultMap|result|id|association|"
+                    + "collection|constructor|arg|idArg|discriminator|case|cache|cache-ref|parameterMap|"
+                    + "parameter|if|choose|when|otherwise|trim|where|set|foreach|bind)\\b[^>]*>"
     );
     private static final String DATABASE_EVIDENCE_LINK =
             "[database-evidence.json](database-evidence.json)";
@@ -60,6 +67,126 @@ public final class MyBatisSqlOutputValidator {
         JsonNode selectedSchema = summarySchema == null ? readSchema() : summarySchema.deepCopy();
         requireSupportedSchema(selectedSchema, "$schema");
         this.summarySchema = selectedSchema;
+    }
+
+    void normalizeSummarySemantics(Path candidateDirectory) throws IOException {
+        Path summaryPath = candidateDirectory.resolve("summary.json");
+        JsonNode summary = objectMapper.readTree(summaryPath.toFile());
+        if (!(summary instanceof ObjectNode object) || !summary.path("findings").isArray()) {
+            return;
+        }
+        String risk = "none";
+        for (JsonNode finding : summary.path("findings")) {
+            String severity = finding.path("severity").asText("");
+            String candidateRisk = switch (severity) {
+                case "critical" -> "critical";
+                case "high" -> "high";
+                case "medium" -> "medium";
+                case "low", "info" -> "low";
+                default -> null;
+            };
+            if (candidateRisk == null) {
+                return;
+            }
+            if (riskRank(candidateRisk) > riskRank(risk)) {
+                risk = candidateRisk;
+            }
+        }
+        object.put("status", summary.path("findings").isEmpty() ? "no-findings" : "reviewed");
+        object.put("risk_level", risk);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(summaryPath.toFile(), object);
+    }
+
+    void normalizeEmptyEvidenceCollections(Path candidateDirectory, boolean noAuditedDatabaseCalls)
+            throws IOException {
+        if (!noAuditedDatabaseCalls) {
+            return;
+        }
+        Path evidencePath = candidateDirectory.resolve("database-evidence.json");
+        JsonNode evidence = objectMapper.readTree(evidencePath.toFile());
+        if (!(evidence instanceof ObjectNode object)
+                || !evidence.at("/audit/tool_call_ids").isArray()
+                || !evidence.at("/audit/tool_call_ids").isEmpty()) {
+            return;
+        }
+        boolean changed = false;
+        for (String field : List.of("metadata", "scenarios")) {
+            JsonNode value = object.path(field);
+            if (value.isObject() && value.isEmpty()) {
+                object.putArray(field);
+                changed = true;
+            }
+        }
+        if (changed) {
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(evidencePath.toFile(), object);
+        }
+    }
+
+    void normalizeReportMyBatisXmlProse(Path candidateDirectory) throws IOException {
+        Path reportPath = candidateDirectory.resolve("report.md");
+        String report = Files.readString(reportPath, StandardCharsets.UTF_8);
+        StringBuilder normalized = new StringBuilder(report.length());
+        boolean fenced = false;
+        char fenceCharacter = 0;
+        for (String line : report.split("\\R", -1)) {
+            String stripped = line.stripLeading();
+            boolean marker = stripped.startsWith("```") || stripped.startsWith("~~~");
+            if (marker && (!fenced || stripped.charAt(0) == fenceCharacter)) {
+                fenced = !fenced;
+                fenceCharacter = fenced ? stripped.charAt(0) : 0;
+                normalized.append(line).append('\n');
+            } else if (fenced) {
+                normalized.append(line).append('\n');
+            } else {
+                normalized.append(escapeMyBatisXmlOutsideInlineCode(line)).append('\n');
+            }
+        }
+        if (!report.endsWith("\n") && !normalized.isEmpty()) {
+            normalized.setLength(normalized.length() - 1);
+        }
+        String result = normalized.toString();
+        if (!result.equals(report)) {
+            Files.writeString(reportPath, result, StandardCharsets.UTF_8);
+        }
+    }
+
+    private static String escapeMyBatisXmlOutsideInlineCode(String line) {
+        Matcher matcher = MYBATIS_XML_TAG.matcher(line);
+        StringBuilder escaped = new StringBuilder(line.length());
+        int offset = 0;
+        while (matcher.find()) {
+            if (insideInlineCode(line, matcher.start())) {
+                continue;
+            }
+            escaped.append(line, offset, matcher.start());
+            escaped.append(matcher.group().replace("<", "&lt;").replace(">", "&gt;"));
+            offset = matcher.end();
+        }
+        if (offset == 0) {
+            return line;
+        }
+        return escaped.append(line, offset, line.length()).toString();
+    }
+
+    private static boolean insideInlineCode(String line, int endExclusive) {
+        boolean inside = false;
+        for (int i = 0; i < endExclusive; i++) {
+            if (line.charAt(i) == '`' && (i == 0 || line.charAt(i - 1) != '\\')) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    private static int riskRank(String risk) {
+        return switch (risk) {
+            case "none" -> 0;
+            case "low" -> 1;
+            case "medium" -> 2;
+            case "high" -> 3;
+            case "critical" -> 4;
+            default -> -1;
+        };
     }
 
     public Result validate(

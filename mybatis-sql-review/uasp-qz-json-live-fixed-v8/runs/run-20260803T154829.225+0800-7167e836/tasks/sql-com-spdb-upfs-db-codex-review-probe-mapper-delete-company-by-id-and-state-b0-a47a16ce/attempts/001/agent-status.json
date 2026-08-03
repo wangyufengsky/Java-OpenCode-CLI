@@ -1,0 +1,10 @@
+{
+  "schema_version" : "mybatis-sql-review-agent-status/v1",
+  "task_key" : "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+  "attempt" : 1,
+  "state" : "FAILED",
+  "phase" : "session_failed",
+  "candidate_directory" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-fixed-v8/runs/run-20260803T154829.225+0800-7167e836/tasks/sql-com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b0-a47a16ce/attempts/001/candidate",
+  "error" : "summary schema validation failed: $ contains unknown field $schema; $ contains unknown field $id",
+  "updated_at" : "2026-08-03T15:50:25.000682+08:00"
+}

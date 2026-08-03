@@ -93,9 +93,10 @@ public class WorkflowExecutionService implements WorkflowRunSubmitter, AutoClose
             }
             repository.markSucceeded(runId);
             eventSink.emit(runId, "SUCCEEDED", "运行已完成");
-        } catch (Exception exception) {
-            repository.markFailed(runId, exception.getMessage());
-            eventSink.emit(runId, "FAILED", exception.getMessage() == null ? exception.toString() : exception.getMessage());
+        } catch (Throwable failure) {
+            String message = failure.getMessage() == null ? failure.toString() : failure.getMessage();
+            repository.markFailed(runId, message);
+            eventSink.emit(runId, "FAILED", message);
         }
     }
 

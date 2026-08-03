@@ -1,0 +1,36 @@
+{
+  "schema_version" : "mybatis-sql-review-summary/v1",
+  "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+  "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace" : "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id" : "updateCompanyProfile",
+  "status" : "reviewed",
+  "command_type" : "update",
+  "select_key" : false,
+  "risk_level" : "low",
+  "scenario_count" : 0,
+  "data_source" : "deepseek@localhost",
+  "catalog" : "deepseek",
+  "schema" : "deepseek",
+  "project" : "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope" : "ALL",
+  "evidence_file" : "database-evidence.json",
+  "report_file" : "report.md",
+  "findings" : [ {
+    "id" : "F-1",
+    "severity" : "low",
+    "category" : "concurrency",
+    "title" : "No optimistic locking on COMPANY updates",
+    "description" : "The UPDATE filters only on ID and overwrites the provided columns unconditionally. Concurrent transactions that read the same row and then update it can overwrite each other's changes (lost update). Static observation; concurrent write patterns were not confirmed by runtime evidence.",
+    "evidence_ids" : [ ],
+    "recommendation" : "Add a VERSION column compared in the WHERE clause (e.g., WHERE ID = #{id} AND VERSION = #{expectedVersion}), increment it in the SET clause, and inspect the affected-row count to detect stale updates; alternatively serialize conflicting writes at the application level."
+  }, {
+    "id" : "F-2",
+    "severity" : "info",
+    "category" : "correctness",
+    "title" : "Empty dynamic SET produces invalid SQL",
+    "description" : "If all five guarded columns are null, the <set> body renders empty and MyBatis emits 'UPDATE COMPANY WHERE ID = ?', which fails on most engines. The failure is safe (it does not update all rows) but is uncontrolled. Static observation; the runtime outcome was not executed or confirmed.",
+    "evidence_ids" : [ ],
+    "recommendation" : "Guard the whole update so it is skipped when no column is present, e.g., <choose><when test=\"companyName != null or companyState != null or companyCity != null or employee != null or companyCreateYear != null\">...</when></choose>, or fail fast with a clear message before executing the update."
+  } ]
+}

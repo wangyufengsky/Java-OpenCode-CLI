@@ -1,0 +1,57 @@
+{
+  "schema_version": "mybatis-sql-review-summary/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "updateCompanyProfile",
+  "status": "reviewed",
+  "command_type": "update",
+  "select_key": false,
+  "risk_level": "low",
+  "scenario_count": 0,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "evidence_file": "database-evidence.json",
+  "report_file": "report.md",
+  "findings": [
+    {
+      "id": "F-01",
+      "severity": "medium",
+      "category": "robustness",
+      "title": "Empty <set> yields an UPDATE without assignments",
+      "description": "When every <if> guard in the <set> block evaluates false, the emitted SQL becomes 'UPDATE COMPANY WHERE ID = ?' with no SET clause. Whether the target DBMS treats this as a no-op or as a syntax error is DBMS-dependent and was not confirmed.",
+      "evidence_ids": [],
+      "recommendation": "Ensure at least one updatable column is non-null before invocation, or handle the empty-<set> case explicitly so the emitted SQL always carries a SET clause."
+    },
+    {
+      "id": "F-02",
+      "severity": "low",
+      "category": "concurrency",
+      "title": "No optimistic-locking predicate",
+      "description": "The WHERE clause contains only ID; there is no version or update-time check, so concurrent updates last-write-wins without lost-update detection.",
+      "evidence_ids": [],
+      "recommendation": "Add a version or update_time condition to the WHERE clause and return the affected-row count to detect concurrent modification."
+    },
+    {
+      "id": "F-03",
+      "severity": "low",
+      "category": "correctness",
+      "title": "Null id silently matches zero rows",
+      "description": "If the caller passes a null id, 'ID = NULL' is never true under standard SQL semantics and the update silently affects zero rows.",
+      "evidence_ids": [],
+      "recommendation": "Validate that id is non-null before invocation and treat a zero affected-row result as an error condition."
+    },
+    {
+      "id": "F-04",
+      "severity": "info",
+      "category": "maintainability",
+      "title": "No update-time metadata column maintained",
+      "description": "The assignment list does not maintain any updated_at/update_time metadata column, so audit-trail and schema-drift risks exist.",
+      "evidence_ids": [],
+      "recommendation": "Consider maintaining an update_time column and deriving the assignment list from the mapped entity to avoid hard-coded column drift."
+    }
+  ]
+}

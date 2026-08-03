@@ -1,0 +1,27 @@
+{
+  "schema_version": "mybatis-sql-review-database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "findCompanyById",
+  "command_type": "select",
+  "select_key": false,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "audit": {
+    "post_hoc": true,
+    "permission_to_execute_original_dml": false,
+    "tool_call_ids": []
+  },
+  "metadata": [],
+  "scenarios": [],
+  "limitations": [
+    "No concrete bounded scenario query was supplied in the runtime task context, so the Agent session made zero Database MCP calls.",
+    "safety_mode=connectivity-only and database_safety=unverified: connection, row-security, and timeout properties were not re-verified in the Agent session.",
+    "No representative rows, cardinality, or plan evidence exists for COMPANY; findings rely on static analysis only and therefore use empty evidence_ids.",
+    "The CompanyColumns include fragment and CompanyResultMap definitions are outside the reviewed raw mapper XML and could not be confirmed."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "mybatis-sql-review-database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "findCompanyById",
+  "command_type": "select",
+  "select_key": false,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "audit": {
+    "post_hoc": true,
+    "permission_to_execute_original_dml": false,
+    "tool_call_ids": []
+  },
+  "metadata": [],
+  "scenarios": [],
+  "limitations": [
+    "Zero Agent-session Database MCP calls were made: the runtime task context supplied no concrete bounded scenario query, so metadata and query tools were not invoked.",
+    "Connection safety was not re-verified by the Agent session; runtime safety_mode=connectivity-only and database_safety=unverified per Java preflight.",
+    "No representative rows were collected; row cardinality, selectivity, index usage, and plan stability for COMPANY.ID remain unverified.",
+    "The primary-key and row-uniqueness assumptions for COMPANY.ID are static observations only and were not confirmed against runtime schema metadata."
+  ]
+}

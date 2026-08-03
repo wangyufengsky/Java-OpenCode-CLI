@@ -1,0 +1,10 @@
+{
+  "schema_version" : "mybatis-sql-review-agent-status/v1",
+  "task_key" : "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
+  "attempt" : 1,
+  "state" : "SUCCEEDED",
+  "phase" : "completed_by_output",
+  "candidate_directory" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-fixed-v8/runs/run-20260803T154829.225+0800-7167e836/tasks/sql-com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2-9ed4d13c/attempts/001/candidate",
+  "error" : "",
+  "updated_at" : "2026-08-03T15:55:01.840712+08:00"
+}

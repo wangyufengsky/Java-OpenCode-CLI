@@ -1,0 +1,101 @@
+{
+  "schema_version": "mybatis-sql-review-database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "deleteCompanyByIdAndState",
+  "command_type": "delete",
+  "select_key": false,
+  "source_start_line": 81,
+  "source_end_line": 85,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "safety_mode": "connectivity-only",
+  "database_safety": "unverified",
+  "query_execution": {
+    "count": 0,
+    "reason": "Static-review-only DELETE statement; the contract prohibits cmcp_db_database_execute_sql_query for DELETE statements."
+  },
+  "evidence": [
+    {
+      "id": "db-meta-001",
+      "native_tool_name": "cmcp_db_database_list_datasources",
+      "audited_tool_call_id": "not-provided:host-rejected",
+      "normalized_arguments": {
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL"
+      },
+      "result": {
+        "status": "rejected",
+        "message": "user rejected MCP tool call"
+      },
+      "limitation": "The host rejected the metadata call, so data-source discovery was not independently confirmed."
+    },
+    {
+      "id": "db-meta-002",
+      "native_tool_name": "cmcp_db_database_list_databases",
+      "audited_tool_call_id": "not-provided:host-rejected",
+      "normalized_arguments": {
+        "dataSource": "deepseek@localhost",
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL"
+      },
+      "result": {
+        "status": "rejected",
+        "message": "user rejected MCP tool call"
+      },
+      "limitation": "The host rejected the metadata call, so catalog/schema availability was not independently confirmed."
+    },
+    {
+      "id": "db-meta-003",
+      "native_tool_name": "cmcp_db_database_list_table_schema",
+      "audited_tool_call_id": "not-provided:host-rejected",
+      "normalized_arguments": {
+        "dataSource": "deepseek@localhost",
+        "catalog": "deepseek",
+        "schema": "deepseek",
+        "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+        "scope": "ALL",
+        "keywords": [
+          "COMPANY"
+        ],
+        "includeColumns": true,
+        "includeIndexes": true,
+        "maxTables": 20
+      },
+      "result": {
+        "status": "rejected",
+        "message": "user rejected MCP tool call"
+      },
+      "limitation": "The host rejected the metadata call, so COMPANY columns, constraints, and indexes were not independently confirmed."
+    },
+    {
+      "id": "static-source-001",
+      "native_tool_name": "static-mapper-analysis",
+      "audited_tool_call_id": "not-applicable",
+      "normalized_arguments": {
+        "source_start_line": 81,
+        "source_end_line": 85
+      },
+      "result": {
+        "raw_mapper_xml": "<delete id=\"deleteCompanyByIdAndState\" parameterType=\"java.util.Map\">\n        DELETE FROM COMPANY\n        WHERE ID = #{id,jdbcType=INTEGER}\n          AND COMPANY_STATE = #{companyState,jdbcType=VARCHAR}\n    </delete>",
+        "normalized_sql": "DELETE FROM COMPANY\n        WHERE ID = #{id,jdbcType=INTEGER}\n          AND COMPANY_STATE = #{companyState,jdbcType=VARCHAR}",
+        "dynamic_nodes": [],
+        "parameter_placeholders": [
+          "#{id,jdbcType=INTEGER}",
+          "#{companyState,jdbcType=VARCHAR}"
+        ]
+      },
+      "limitation": "Static source establishes mapper text only; it cannot confirm schema, indexes, affected-row behavior, transaction boundaries, or production data characteristics."
+    }
+  ],
+  "limitations": [
+    "No Database MCP metadata result was available because the host rejected all three metadata calls.",
+    "No query was executed because this is a static-review-only DELETE statement.",
+    "Runtime safety mode is connectivity-only and database_safety is unverified.",
+    "No representative rows, cardinality, selectivity, plan, constraint, or transaction evidence is available."
+  ]
+}

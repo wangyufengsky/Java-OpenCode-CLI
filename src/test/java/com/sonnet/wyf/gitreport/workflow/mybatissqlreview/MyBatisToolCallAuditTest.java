@@ -6,11 +6,15 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -22,6 +26,7 @@ class MyBatisToolCallAuditTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final MyBatisToolCallAudit audit = new MyBatisToolCallAudit(objectMapper);
     private final MyBatisDatabasePreflight.Result database = VerifiedMyBatisDatabaseFixture.verified(objectMapper);
+    @TempDir Path tempDir;
 
     @Test
     void acceptsBoundedNativeQueryCall() {
@@ -198,6 +203,39 @@ class MyBatisToolCallAuditTest {
     }
 
     @Test
+    void recoversEdtTimedOutWriteOnlyWhenExactRequestedContentReachedCandidate() throws Exception {
+        Path candidateDirectory = Files.createDirectories(tempDir.resolve("candidate"));
+        Path report = candidateDirectory.resolve("report.md");
+        Files.writeString(report, "complete review");
+        ObjectNode arguments = objectMapper.createObjectNode()
+                .put("path", report.toString())
+                .put("content", "complete review");
+        AgentBridgeClient.ToolCallRecord timedOutWrite = new AgentBridgeClient.ToolCallRecord(
+                "write-timeout", "Write File", "write_file", "edit", "error",
+                STARTED_AT.plusSeconds(1), arguments,
+                objectMapper.getNodeFactory().textNode("Error: EDT operation timed out after 30s."),
+                30_001L, objectMapper.createObjectNode()
+        );
+
+        MyBatisToolCallAudit.Result result = audit.audit(
+                List.of(timedOutWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, candidateDirectory
+                )
+        );
+
+        assertThat(result.auditedCallIds()).isEmpty();
+
+        Files.writeString(report, "different content");
+        assertThatThrownBy(() -> audit.audit(
+                List.of(timedOutWrite), boundary(), database,
+                new MyBatisToolCallAudit.StatementContext(
+                        "delete-order", "delete", false, candidateDirectory
+                )
+        )).hasMessageContaining("not successful");
+    }
+
+    @Test
     void rejectsCompleteLongReportWriteOutsideTheCandidateDirectory() {
         AgentBridgeClient.ToolCallRecord wrongWrite = call(
                 "write-long-elsewhere",
@@ -282,6 +320,21 @@ class MyBatisToolCallAuditTest {
                 nativeQueryArguments("SELECT id FROM orders LIMIT 2"), rows(1))), boundary(), database,
                 new MyBatisToolCallAudit.StatementContext("select-key", "select", true)))
                 .hasMessageContaining("selectKey");
+    }
+
+    @Test
+    void rejectsAgentConnectionProbeForStaticReviewDml() {
+        assertThatThrownBy(() -> audit.audit(
+                List.of(call(
+                        "redundant-connection-probe",
+                        DatabaseMcpContract.EXECUTE_QUERY,
+                        nativeQueryArguments("SELECT 1 AS contract_probe"),
+                        rows(1)
+                )),
+                boundary(),
+                database,
+                new MyBatisToolCallAudit.StatementContext("delete-order", "delete", false)
+        )).hasMessageContaining("DML tasks must not call the database query tool");
     }
 
     @Test
@@ -445,6 +498,46 @@ class MyBatisToolCallAuditTest {
                 .allMatch(constructor -> java.lang.reflect.Modifier.isPrivate(constructor.getModifiers()));
     }
 
+    @Test
+    void acceptsOnlyOldestFirstRolloverOfFullAgentBridgeHistoryWindow() {
+        Set<String> boundaryIds = new LinkedHashSet<>();
+        List<AgentBridgeClient.ToolCallRecord> current = new ArrayList<>();
+        for (int id = 1; id <= 200; id++) {
+            boundaryIds.add(Integer.toString(id));
+            if (id >= 4) {
+                current.add(oldCall(Integer.toString(id)));
+            }
+        }
+        for (int id = 201; id <= 203; id++) {
+            current.add(call(Integer.toString(id), DatabaseMcpContract.LIST_DATASOURCES,
+                    commonArguments(), objectMapper.createArrayNode()));
+        }
+
+        MyBatisToolCallAudit.Result result = audit.audit(current,
+                new MyBatisToolCallAudit.Boundary(STARTED_AT, boundaryIds), database, selectStatement());
+
+        assertThat(result.auditedCallIds()).containsExactly("201", "202", "203");
+    }
+
+    @Test
+    void rejectsMiddleGapDisguisedAsAFullHistoryWindowRollover() {
+        Set<String> boundaryIds = new LinkedHashSet<>();
+        List<AgentBridgeClient.ToolCallRecord> current = new ArrayList<>();
+        for (int id = 1; id <= 200; id++) {
+            boundaryIds.add(Integer.toString(id));
+            if (id != 100) {
+                current.add(oldCall(Integer.toString(id)));
+            }
+        }
+        current.add(call("201", DatabaseMcpContract.LIST_DATASOURCES,
+                commonArguments(), objectMapper.createArrayNode()));
+
+        assertThatThrownBy(() -> audit.audit(current,
+                new MyBatisToolCallAudit.Boundary(STARTED_AT, boundaryIds), database, selectStatement()))
+                .hasMessageContaining("missing preexisting")
+                .hasMessageContaining("100");
+    }
+
     private MyBatisToolCallAudit.Boundary boundary() {
         return new MyBatisToolCallAudit.Boundary(STARTED_AT, Set.of());
     }
@@ -484,6 +577,12 @@ class MyBatisToolCallAuditTest {
     private AgentBridgeClient.ToolCallRecord call(String id, String toolName, JsonNode arguments, JsonNode result) {
         return new AgentBridgeClient.ToolCallRecord(id, toolName, toolName, "mcp", "success",
                 STARTED_AT.plusSeconds(1), arguments, result, 10L, objectMapper.createObjectNode());
+    }
+
+    private AgentBridgeClient.ToolCallRecord oldCall(String id) {
+        return new AgentBridgeClient.ToolCallRecord(id, "old", DatabaseMcpContract.LIST_DATASOURCES,
+                "mcp", "success", STARTED_AT.minusSeconds(1), commonArguments(),
+                objectMapper.createArrayNode(), 0L, objectMapper.createObjectNode());
     }
 
     private AgentBridgeClient.ToolCallRecord callWithStatus(String id, String status, JsonNode result) {

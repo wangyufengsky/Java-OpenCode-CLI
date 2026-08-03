@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sonnet.wyf.gitreport.agentbridge.AgentBridgeClient;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ public final class MyBatisToolCallAudit {
     public static final int MAX_ROWS_PER_CALL = DatabaseMcpContract.MAX_ROWS;
     public static final long MAX_QUERY_DURATION_MS = 30_000L;
     public static final int MAX_TOOL_RESULT_BYTES = 262_144;
+    private static final int AGENTBRIDGE_HISTORY_WINDOW_SIZE = 200;
     private static final String REPORT_WRITE_TOOL = String.join("", "write", "_file");
 
     private final ObjectMapper objectMapper;
@@ -69,7 +72,10 @@ public final class MyBatisToolCallAudit {
                 continue;
             }
             if (call.timestamp().isBefore(boundary.startedAt())) throw violation(call, "incomplete pre-task id snapshot contains an unknown old call");
-            requireSuccessful(call);
+            boolean recoveredTimedOutWrite = isRecoveredTimedOutCandidateWrite(call, statement);
+            if (!recoveredTimedOutWrite) {
+                requireSuccessful(call);
+            }
             if (REPORT_WRITE_TOOL.equals(call.toolName())) {
                 requireCandidateReportWrite(call, statement);
                 continue;
@@ -98,9 +104,58 @@ public final class MyBatisToolCallAudit {
         }
         if (!old.containsAll(boundary.preexistingCallIds())) {
             Set<String> missing = new LinkedHashSet<>(boundary.preexistingCallIds()); missing.removeAll(old);
-            throw new IllegalStateException("incomplete tool-call history; missing preexisting call ids: " + missing);
+            if (!isOldestFirstHistoryWindowRollover(history, boundary, old, missing)) {
+                throw new IllegalStateException("incomplete tool-call history; missing preexisting call ids: " + missing);
+            }
         }
         return new Result(facts, statement, database);
+    }
+
+    private static boolean isOldestFirstHistoryWindowRollover(
+            List<AgentBridgeClient.ToolCallRecord> history,
+            Boundary boundary,
+            Set<String> retainedPreexistingIds,
+            Set<String> missingPreexistingIds
+    ) {
+        if (history.size() != AGENTBRIDGE_HISTORY_WINDOW_SIZE
+                || boundary.preexistingCallIds().size() != AGENTBRIDGE_HISTORY_WINDOW_SIZE
+                || retainedPreexistingIds.isEmpty()
+                || missingPreexistingIds.isEmpty()
+                || history.size() - retainedPreexistingIds.size() != missingPreexistingIds.size()) {
+            return false;
+        }
+        try {
+            long newestBoundaryId = boundary.preexistingCallIds().stream()
+                    .mapToLong(MyBatisToolCallAudit::positiveDecimalCallId)
+                    .max()
+                    .orElseThrow();
+            long oldestRetainedId = retainedPreexistingIds.stream()
+                    .mapToLong(MyBatisToolCallAudit::positiveDecimalCallId)
+                    .min()
+                    .orElseThrow();
+            long newestMissingId = missingPreexistingIds.stream()
+                    .mapToLong(MyBatisToolCallAudit::positiveDecimalCallId)
+                    .max()
+                    .orElseThrow();
+            boolean allNewIdsFollowBoundary = history.stream()
+                    .filter(call -> !boundary.preexistingCallIds().contains(call.id()))
+                    .mapToLong(call -> positiveDecimalCallId(call.id()))
+                    .allMatch(id -> id > newestBoundaryId);
+            return newestMissingId < oldestRetainedId && allNewIdsFollowBoundary;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private static long positiveDecimalCallId(String id) {
+        if (id == null || !id.matches("[1-9][0-9]*")) {
+            throw new IllegalArgumentException("tool-call id must be a positive decimal");
+        }
+        try {
+            return Long.parseLong(id);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("tool-call id exceeds long range", exception);
+        }
     }
 
     private static void requireCandidateReportWrite(
@@ -134,6 +189,43 @@ public final class MyBatisToolCallAudit {
         );
         if (!allowed.contains(target.normalize())) {
             throw violation(call, "report write must target a candidate output path");
+        }
+    }
+
+    private static boolean isRecoveredTimedOutCandidateWrite(
+            AgentBridgeClient.ToolCallRecord call,
+            StatementContext statement
+    ) {
+        if (!REPORT_WRITE_TOOL.equals(call.toolName())
+                || call.status() == null
+                || !"error".equalsIgnoreCase(call.status())
+                || call.result() == null
+                || !call.result().isTextual()
+                || !call.result().asText().matches("Error: EDT operation timed out after \\d+s\\.")
+                || call.arguments() == null
+                || !call.arguments().isObject()
+                || !call.arguments().path("content").isTextual()
+                || statement.candidateDirectory() == null) {
+            return false;
+        }
+        String path = call.arguments().path("path").asText("").strip();
+        if (path.isEmpty()) {
+            path = call.arguments().path("file").asText("").strip();
+        }
+        try {
+            Path target = Path.of(path).toAbsolutePath().normalize();
+            Path candidate = statement.candidateDirectory().toAbsolutePath().normalize();
+            Set<Path> allowed = Set.of(
+                    candidate.resolve("report.md"),
+                    candidate.resolve("summary.json"),
+                    candidate.resolve("database-evidence.json")
+            );
+            return allowed.contains(target)
+                    && !Files.isSymbolicLink(target)
+                    && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                    && Files.readString(target).equals(call.arguments().path("content").asText());
+        } catch (IOException | RuntimeException exception) {
+            return false;
         }
     }
 

@@ -1,0 +1,10 @@
+{
+  "schema_version" : "mybatis-sql-review-agent-status/v1",
+  "task_key" : "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+  "attempt" : 2,
+  "state" : "QUEUED",
+  "phase" : "created",
+  "candidate_directory" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-fixed-v5/runs/run-20260803T152117.901+0800-b58d87e0/tasks/sql-com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd9-a829e90b/attempts/002/candidate",
+  "error" : "",
+  "updated_at" : "2026-08-03T15:21:18.137366+08:00"
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion" : "workflow-run/v1",
+  "executionId" : "run-20260803T141733.637+0800-4c9a117b",
+  "consoleRunId" : 3,
+  "chainId" : "mybatis-sql-review",
+  "mode" : "full",
+  "rerunType" : "",
+  "rerunIds" : [ ],
+  "publicationGeneration" : 1,
+  "state" : "FAILED",
+  "message" : "MyBatis SQL review exhausted fresh sessions for task com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412: result must not be blank",
+  "stableRoot" : "/Users/wangyufeng/IdeaProjects/Java-OpenCode-CLI/mybatis-sql-review/uasp-qz-json-live-core",
+  "updatedAt" : "2026-08-03T14:18:50.013055+08:00"
+}

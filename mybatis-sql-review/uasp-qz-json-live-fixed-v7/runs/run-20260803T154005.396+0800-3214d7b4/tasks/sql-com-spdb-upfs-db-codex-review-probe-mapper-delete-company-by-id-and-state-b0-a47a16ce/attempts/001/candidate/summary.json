@@ -1,0 +1,54 @@
+{
+  "schema_version": "mybatis-sql-review-summary/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "deleteCompanyByIdAndState",
+  "status": "reviewed",
+  "command_type": "delete",
+  "select_key": false,
+  "risk_level": "low",
+  "scenario_count": 0,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "evidence_file": "database-evidence.json",
+  "report_file": "report.md",
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "low",
+      "category": "performance",
+      "title": "Indexed access for ID/COMPANY_STATE predicate unverified",
+      "description": "Whether COMPANY has an index on ID or (ID, COMPANY_STATE) is unconfirmed from static review.",
+      "evidence_ids": [
+        "static:CodexReviewProbeMapper.xml:81-85"
+      ],
+      "recommendation": "Confirm an index on COMPANY(ID) or (ID, COMPANY_STATE) for keyed single-row deletes."
+    },
+    {
+      "id": "F-2",
+      "severity": "info",
+      "category": "concurrency/transaction",
+      "title": "No transaction boundary in mapper",
+      "description": "Atomicity and rollback of the delete depend entirely on the caller-provided transaction.",
+      "evidence_ids": [
+        "static:CodexReviewProbeMapper.xml:81-85"
+      ],
+      "recommendation": "Wrap the delete in an explicit transaction at the service layer."
+    },
+    {
+      "id": "F-3",
+      "severity": "info",
+      "category": "maintainability",
+      "title": "Affected-row count not surfaced",
+      "description": "Callers cannot distinguish a successful delete from a no-match delete because the return value is not consumed.",
+      "evidence_ids": [
+        "static:CodexReviewProbeMapper.xml:81-85"
+      ],
+      "recommendation": "Consume the mapper return value and treat zero affected rows as a no-match case."
+    }
+  ]
+}

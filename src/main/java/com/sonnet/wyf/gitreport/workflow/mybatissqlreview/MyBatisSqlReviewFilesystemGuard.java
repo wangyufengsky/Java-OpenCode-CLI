@@ -1107,14 +1107,18 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
 
         private List<String> currentRunChanges(Path excludedRoot, boolean compareIdentity) throws IOException {
             Map<Path, CurrentEntry> actual = currentTree(currentRun, currentRunSnapshot);
-            return changes(currentRunSnapshot, actual, excludedRoot, compareIdentity, "current run");
+            Set<Path> excludedRoots = new LinkedHashSet<>(candidates);
+            if (excludedRoot != null) {
+                excludedRoots.add(excludedRoot);
+            }
+            return changes(currentRunSnapshot, actual, excludedRoots, compareIdentity, "current run");
         }
 
         private List<String> protectedChanges(boolean compareIdentity) throws IOException {
             return changes(
                     protectedSnapshot,
                     currentProtectedTree(),
-                    null,
+                    Set.of(),
                     compareIdentity,
                     "protected repository/stable"
             );
@@ -1123,7 +1127,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
         private List<String> changes(
                 Map<Path, SnapshotEntry> expected,
                 Map<Path, CurrentEntry> actual,
-                Path excludedRoot,
+                Set<Path> excludedRoots,
                 boolean compareIdentity,
                 String label
         ) throws IOException {
@@ -1131,7 +1135,7 @@ final class MyBatisSqlReviewFilesystemGuard implements AutoCloseable {
             Set<Path> all = new LinkedHashSet<>(expected.keySet());
             all.addAll(actual.keySet());
             for (Path path : all.stream().sorted().toList()) {
-                if (excludedRoot != null && path.startsWith(excludedRoot)) {
+                if (excludedRoots.stream().anyMatch(path::startsWith)) {
                     continue;
                 }
                 SnapshotEntry expectedEntry = expected.get(path);

@@ -50,6 +50,9 @@ class MyBatisSqlPromptBuilderTest {
                 "/mybatis-sql-review-prompt-pack/schemas/sql-summary.schema.json");
         JsonNode embeddedSchema = extractJsonFenceAfter(prompt, "## Complete summary JSON schema");
         assertThat(embeddedSchema).isEqualTo(objectMapper.readTree(schemaText));
+        assertThat(embeddedSchema.at("/properties/findings/items/properties/evidence_ids/minItems").isMissingNode())
+                .as("static-only findings may use an empty evidence_ids array")
+                .isTrue();
         assertThat(prompt).contains(
                 "mapper-order-find-open",
                 "mappers/OrderMapper.xml",
@@ -74,6 +77,9 @@ class MyBatisSqlPromptBuilderTest {
                 .contains("only these four read-oriented tools")
                 .contains("DML, DDL, NoSQL, or unknown tools")
                 .contains("`<selectKey>` statements are static-review-only")
+                .contains("do not call `cmcp_db_database_execute_sql_query` at all")
+                .contains("Java preflight has already run the bounded `SELECT 1` connection probe")
+                .contains("Do not repeat that probe in the Agent session")
                 .contains("exact absolute output paths")
                 .contains("Database Evidence section contains exactly")
                 .contains("[database-evidence.json](database-evidence.json)");

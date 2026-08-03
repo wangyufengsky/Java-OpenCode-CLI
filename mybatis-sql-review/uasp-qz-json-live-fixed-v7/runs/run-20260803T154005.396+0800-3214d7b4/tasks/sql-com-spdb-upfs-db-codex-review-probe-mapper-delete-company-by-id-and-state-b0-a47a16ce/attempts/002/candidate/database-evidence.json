@@ -1,0 +1,26 @@
+{
+  "schema_version": "mybatis-sql-review-database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "deleteCompanyByIdAndState",
+  "command_type": "delete",
+  "select_key": false,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "audit": {
+    "post_hoc": true,
+    "permission_to_execute_original_dml": false,
+    "tool_call_ids": []
+  },
+  "metadata": [],
+  "scenarios": [],
+  "limitations": [
+    "Command type is delete, a static-review-only statement: per the contract no Database MCP query was executed, no connection probe was repeated, and no runtime rows were collected.",
+    "database_safety is unverified (safety_mode connectivity-only); no claims about row-security, function-execution, or timeout enforcement are made.",
+    "Representative-row evidence is not applicable because zero scenario queries ran; production cardinality, selectivity, index availability, and plan stability remain unverified."
+  ]
+}

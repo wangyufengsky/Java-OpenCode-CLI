@@ -172,6 +172,32 @@ class WorkflowExecutionServiceTest {
     }
 
     @Test
+    void marksRunFailedWhenBackgroundChainThrowsAnError() throws Exception {
+        WorkflowChain chain = new WorkflowChain() {
+            @Override
+            public String id() {
+                return "demo-chain";
+            }
+
+            @Override
+            public void run(WorkflowRunRequest request) {
+                throw new AssertionError("simulated background linkage failure");
+            }
+        };
+        Fixture fixture = fixture(List.of(chain));
+
+        long runId = fixture.service.submit(new WorkflowRunSubmission(
+                "demo-chain", "full", null, null, null, Map.of("value", "demo"), null));
+
+        awaitState(fixture.repository, runId, RunState.FAILED);
+        WorkflowRunRecord run = fixture.repository.findRun(runId).orElseThrow();
+        assertThat(run.failureMessage()).isEqualTo("simulated background linkage failure");
+        assertThat(fixture.repository.listEvents(runId))
+                .extracting(WorkflowRunEvent::eventType)
+                .contains("FAILED");
+    }
+
+    @Test
     void workflowEventsAreLoggedToConsole(CapturedOutput output) throws Exception {
         Fixture fixture = fixture(List.of(blockingChain(new CountDownLatch(0), new CountDownLatch(0))));
         long runId = fixture.repository.createRun(new WorkflowRunSubmission(

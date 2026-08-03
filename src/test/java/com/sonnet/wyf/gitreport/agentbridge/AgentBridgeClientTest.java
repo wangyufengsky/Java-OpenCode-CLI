@@ -826,6 +826,47 @@ class AgentBridgeClientTest {
     }
 
     @Test
+    void acceptsVerifiedEmptySuccessfulToolCallResult() throws Exception {
+        HistoryFixture fixture = historyFixture(
+                "19",
+                "git_diff",
+                "{\"path\":\"/workspace/example\"}",
+                ""
+        );
+        HttpServer server = historyServer(fixture, 500, new AtomicInteger());
+
+        AgentBridgeClient.ToolCallRecord call = client.getToolCalls(baseUri(server)).getFirst();
+
+        assertThat(call.status()).isEqualTo("success");
+        assertThat(call.result().isTextual()).isTrue();
+        assertThat(call.result().asText()).isEmpty();
+    }
+
+    @Test
+    void rejectsLegacyEmptySuccessfulToolCallResultWithoutIntegrityMetadata() throws Exception {
+        HttpServer server = server();
+        nativeInfo(server);
+        ObjectNode call = objectMapper.createObjectNode()
+                .put("id", "20")
+                .put("title", "Git Diff")
+                .put("toolName", "git_diff")
+                .put("kind", "read")
+                .put("status", "success")
+                .put("timestamp", "2026-07-23T00:00:02Z")
+                .put("arguments", "{\"path\":\"/workspace/example\"}")
+                .put("result", "")
+                .put("durationMs", 5);
+        server.createContext("/tool-calls", exchange -> respond(exchange, 200,
+                objectMapper.createObjectNode()
+                        .set("items", objectMapper.createArrayNode().add(call))
+                        .toString()));
+        server.start();
+
+        assertThatThrownBy(() -> client.getToolCalls(baseUri(server)))
+                .hasMessageContaining("result must not be blank");
+    }
+
+    @Test
     void untruncatedToolCallDoesNotFetchAvailableDetail() throws Exception {
         String arguments = "{\"sql\":\"SELECT 1\"}";
         String result = "{\"rows\":[]}";

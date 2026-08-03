@@ -1,0 +1,28 @@
+{
+  "schema_version": "mybatis-sql-review-database-evidence/v1",
+  "statement_key": "com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921",
+  "mapper_relative_path": "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace": "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id": "updateCompanyProfile",
+  "command_type": "update",
+  "select_key": false,
+  "data_source": "deepseek@localhost",
+  "catalog": "deepseek",
+  "schema": "deepseek",
+  "project": "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope": "ALL",
+  "audit": {
+    "post_hoc": true,
+    "permission_to_execute_original_dml": false,
+    "tool_call_ids": []
+  },
+  "metadata": [],
+  "scenarios": [],
+  "limitations": [
+    "No Database MCP query was executed: the reviewed statement is an <update> (selectKey=false) and is static-review-only per the contract; executing the mapped DML is not permitted.",
+    "No bounded scenario SQL was supplied in the runtime task context, so no agent-session Database MCP tool call was made.",
+    "safety_mode is connectivity-only (test environment) and database_safety is unverified; row-security, function-execution, and timeout assertions were not re-verified in this session.",
+    "The relation inventory was not queried in this session, so table/column metadata for COMPANY was not independently confirmed.",
+    "Static observations (concurrency, empty-SET behavior, index use) are unconfirmed by representative rows; finding severities reflect static analysis only."
+  ]
+}

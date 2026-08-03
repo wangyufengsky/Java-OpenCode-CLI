@@ -687,7 +687,7 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
                 invalid.add(relative(root, markdown) + " -> unsafe Markdown file");
                 continue;
             }
-            String prose = withoutFencedCode(Files.readString(markdown));
+            String prose = withoutInlineCode(withoutFencedCode(Files.readString(markdown)));
             Matcher autolink = AUTOLINK.matcher(prose);
             while (autolink.find()) {
                 invalid.add(relative(root, markdown) + " -> external autolink " + autolink.group());
@@ -765,6 +765,53 @@ public final class MyBatisSqlReviewWorkflowChain implements WorkflowChain {
             }
         }
         return prose.toString();
+    }
+
+    private static String withoutInlineCode(String markdown) {
+        StringBuilder prose = new StringBuilder(markdown);
+        int index = 0;
+        while (index < prose.length()) {
+            if (prose.charAt(index) != '`') {
+                index++;
+                continue;
+            }
+            int openingEnd = index;
+            while (openingEnd < prose.length() && prose.charAt(openingEnd) == '`') {
+                openingEnd++;
+            }
+            int runLength = openingEnd - index;
+            int closing = findClosingBackticks(prose, openingEnd, runLength);
+            if (closing < 0) {
+                index = openingEnd;
+                continue;
+            }
+            int closingEnd = closing + runLength;
+            for (int i = index; i < closingEnd; i++) {
+                if (prose.charAt(i) != '\n' && prose.charAt(i) != '\r') {
+                    prose.setCharAt(i, ' ');
+                }
+            }
+            index = closingEnd;
+        }
+        return prose.toString();
+    }
+
+    private static int findClosingBackticks(CharSequence markdown, int fromIndex, int runLength) {
+        for (int index = fromIndex; index < markdown.length(); index++) {
+            if (markdown.charAt(index) != '`'
+                    || (index > 0 && markdown.charAt(index - 1) == '`')) {
+                continue;
+            }
+            int end = index;
+            while (end < markdown.length() && markdown.charAt(end) == '`') {
+                end++;
+            }
+            if (end - index == runLength) {
+                return index;
+            }
+            index = end - 1;
+        }
+        return -1;
     }
 
     private void requireSerialSettings(AgentBridgeSettings settings) {

@@ -1,0 +1,66 @@
+{
+  "schemaVersion" : "workflow-publication/v1",
+  "chainId" : "mybatis-sql-review",
+  "executionId" : "run-20260803T163234.161+0800-7a43fe69",
+  "publicationGeneration" : 1,
+  "mainArtifact" : "mybatis-sql-review-report.md",
+  "publishedAt" : "2026-08-03T16:39:51.290881+08:00",
+  "artifacts" : [ {
+    "path" : "data-quality.md",
+    "sha256" : "6be99e2e994732b87e67c6aad4619077723a6b6af93351649391c85e28ee1a54"
+  }, {
+    "path" : "mybatis-sql-review-report.md",
+    "sha256" : "158451dccefc58e0ffe5b54ba2da0c9b1ece2808656fa5b069f8723b65a97951"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/index.md",
+    "sha256" : "ecccebbc29d19d3f70ae5afc1a41a7463f1e569b7ed7e4e99c415de39eb19352"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/database-evidence.json",
+    "sha256" : "3d17951a333059bd567847660537df7e3b7c45120dc6c0683e9f0bd0cfd8a7a8"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/report.md",
+    "sha256" : "465d10e6f6b16e699c9e1f9ec8ff1f155b867c379aa3ac1007dafd02601f38de"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-delete-company-by-id-and-state-b01871f17412/summary.json",
+    "sha256" : "8531480ce7869f6220128d01ae6a73e817edb5c916b16315415e0a73137b8421"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/database-evidence.json",
+    "sha256" : "121fec295a626c28e7a82b77f3e8edb5665e955f483f9a11833c4e08698274ee"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/report.md",
+    "sha256" : "f9203e9d2695e4da756ed2ae93ec18bab76b4b3f2fe389f1b3c9a5d0245294fb"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2/summary.json",
+    "sha256" : "bd3b60f1064edad75c61b051f88b23bed35e4a61346264c8110aeb922ede1985"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/database-evidence.json",
+    "sha256" : "1e4f3226b1c50f41af353020271109a9885f5cd71c7881089a8aad0b5ff23ed2"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/report.md",
+    "sha256" : "216d3fa8af72a5e9c0b6984ac61e0b58754a932c8e9103e4f13f4334636c7afa"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938/summary.json",
+    "sha256" : "dae4deb35482a8d86177aefec1c2194a9a0d3c4d3059a179955911ae05f9944d"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/database-evidence.json",
+    "sha256" : "dd976fe7b83e2ee814ea20e12c1f3887b14cee2460c994ccc5c67e16aef0af8f"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/report.md",
+    "sha256" : "1799a1692edd867fd5722df509a1be3abc8c7d1e9a442bda7f760ad5d754b14c"
+  }, {
+    "path" : "reports/codex-review-probe-mapper-com-spdb-upfs-db-codex-review-probe-mapper-af29e8ac9fef/sql/com-spdb-upfs-db-codex-review-probe-mapper-update-company-profile-6f27385cd921/summary.json",
+    "sha256" : "7fdcd999e7365231e1ba0734ec15293162e3e14ec5551bcf5525ba9336d00465"
+  }, {
+    "path" : "source-contract.json",
+    "sha256" : "9dccbed89278fef531eb821efc604a7f2417f19b2e3db2029c43de65fac78e93"
+  }, {
+    "path" : "sql-inventory.json",
+    "sha256" : "015fe22b7ab8708216e3aee0df3d9a13548e5d53d74e84421f51f6f01e09eabc"
+  }, {
+    "path" : "sql-tasks.json",
+    "sha256" : "69593c17dfebd32abdaacc34bf33027f7fe2c42af86eb11915586ab46403b048"
+  }, {
+    "path" : "traceability.json",
+    "sha256" : "61bc769153cbad9a22aa005c6ccfbb642ffa04b03376a48ec00703daf3a6b62b"
+  } ]
+}

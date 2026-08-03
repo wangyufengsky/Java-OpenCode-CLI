@@ -1,0 +1,52 @@
+{
+  "schema_version" : "mybatis-sql-review-summary/v1",
+  "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-insert-company-9f7f553cf938",
+  "mapper_relative_path" : "src/test/resources/mapper/CodexReviewProbeMapper.xml",
+  "namespace" : "com.spdb.upfs.db.CodexReviewProbeMapper",
+  "statement_id" : "insertCompany",
+  "status" : "reviewed",
+  "command_type" : "insert",
+  "select_key" : false,
+  "risk_level" : "medium",
+  "scenario_count" : 0,
+  "data_source" : "deepseek@localhost",
+  "catalog" : "deepseek",
+  "schema" : "deepseek",
+  "project" : "/Users/wangyufeng/IdeaProjects/uasp-qz-json",
+  "scope" : "ALL",
+  "evidence_file" : "database-evidence.json",
+  "report_file" : "report.md",
+  "findings" : [ {
+    "id" : "F-01",
+    "severity" : "medium",
+    "category" : "generated-keys",
+    "title" : "useGeneratedKeys depends on JDBC driver getGeneratedKeys support",
+    "description" : "The statement uses useGeneratedKeys=\"true\" with keyProperty=\"id\" and keyColumn=\"ID\". Population of the generated id relies on the JDBC driver implementing Statement.getGeneratedKeys. On engines/driver combinations that do not support it (commonly reported for GaussDB and some PostgreSQL driver versions), the id property is left null and subsequent use of the entity id fails. The actual engine and driver behavior were not confirmed at runtime (database_safety unverified, no metadata calls), so this risk is unverified but concrete.",
+    "evidence_ids" : [ ],
+    "recommendation" : "Confirm driver-level support for getGeneratedKeys on the target engine. If unsupported, replace useGeneratedKeys with a <selectKey keyProperty=\"id\" order=\"AFTER\"> that selects the generated key, or use an INSERT ... RETURNING id and read the id from the returned row."
+  }, {
+    "id" : "F-02",
+    "severity" : "low",
+    "category" : "type-safety",
+    "title" : "Map-based parameters bypass compile-time key and type checks",
+    "description" : "parameterType=\"java.util.Map\" means placeholder keys are only resolved at runtime. A misspelled key (e.g. #{companyNam,jdbcType=VARCHAR}) becomes a NULL value instead of a compile error, silently corrupting data. Integer-valued keys carry jdbcType=INTEGER but no range or null handling is enforced.",
+    "evidence_ids" : [ ],
+    "recommendation" : "Use a typed parameter object (DTO/POJO) with explicit fields, or add null/empty validation before invoking the mapper so required columns are never silently bound as NULL."
+  }, {
+    "id" : "F-03",
+    "severity" : "low",
+    "category" : "data-integrity",
+    "title" : "Required-column completeness is not guaranteed",
+    "description" : "COMPANY_NAME, COMPANY_STATE, COMPANY_CITY, EMPLOYEE and COMPANY_CREATE_YEAR are inserted without any null handling. Whether these columns are NOT NULL and whether values must be validated is unknown because the COMPANY table schema was not confirmed at runtime (unverified).",
+    "evidence_ids" : [ ],
+    "recommendation" : "Inspect the COMPANY DDL (constraints, defaults, unique indexes) and add validation or COALESCE/defaults for columns that cannot accept NULL; consider unique-constraint conflict handling for company names."
+  }, {
+    "id" : "F-04",
+    "severity" : "info",
+    "category" : "performance",
+    "title" : "Single-row insert; no batching for bulk loads",
+    "description" : "The statement inserts one row per call with no batch execution. If invoked in a loop (e.g. per entity in a list), each call is a separate round trip; no MyBatis BATCH executor or batching pattern is used. Volume impact is unknown without call-site evidence.",
+    "evidence_ids" : [ ],
+    "recommendation" : "For bulk loading, use a SqlSessionTemplate with executor-type BATCH or the <foreach> batching pattern and commit in bounded batches; for low-volume single inserts this is not required."
+  } ]
+}
