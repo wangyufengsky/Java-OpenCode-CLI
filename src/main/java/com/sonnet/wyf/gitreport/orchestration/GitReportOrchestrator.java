@@ -249,11 +249,9 @@ public class GitReportOrchestrator {
 
     private void runAuthorTasks(GitReportProperties properties, Path out, Map<String, Object> indexInputs) throws Exception {
         List<Map<String, Object>> tasks = listOfMaps(indexInputs.get("tasks"));
-        int concurrency = Math.max(1, Math.min(properties.getAgentbridge().getConcurrency(), properties.getAgentbridge().getMaxConcurrency()));
-        concurrentTaskRunner.run(
+        concurrentTaskRunner.runSerialFailFast(
                 "git-report author",
                 tasks,
-                concurrency,
                 task -> task.get("author_key").toString(),
                 task -> authorCallable(properties, out, task)
         );
@@ -294,7 +292,7 @@ public class GitReportOrchestrator {
                             properties.getAgentbridge().getPollMillis(),
                             properties.getAgentbridge().getTimeoutMinutes(),
                             properties.getAgentbridge().getValidationSettleSeconds(),
-                            0,
+                            properties.getAgentbridge().getValidationMaxCorrections(),
                             java.net.URI.create(properties.getAgentbridge().getWebBaseUrl())
                     ));
                     timedOut = runResult.timedOut();

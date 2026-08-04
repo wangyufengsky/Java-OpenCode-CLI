@@ -71,7 +71,23 @@ class AgentBridgeClientTest {
 
         assertThat(promptBodies).hasSize(1);
         assertThat(objectMapper.readTree(promptBodies.get(0)).path("text").asText()).isEqualTo("write report");
-        assertThat(infoCalls.get()).isEqualTo(2);
+        assertThat(infoCalls.get()).isEqualTo(4);
+    }
+
+    @Test
+    void ignoresTransientIdleBetweenRunningPolls() throws Exception {
+        AtomicInteger infoCalls = new AtomicInteger();
+        boolean[] states = {true, false, true, false, false, false};
+        HttpServer server = server();
+        server.createContext("/info", exchange -> {
+            int index = Math.min(infoCalls.getAndIncrement(), states.length - 1);
+            respond(exchange, 200, "{\"running\":" + states[index] + "}");
+        });
+        server.start();
+
+        client.waitUntilIdle(baseUri(server), Duration.ofSeconds(2), Duration.ofMillis(1));
+
+        assertThat(infoCalls.get()).isEqualTo(states.length);
     }
 
     @Test

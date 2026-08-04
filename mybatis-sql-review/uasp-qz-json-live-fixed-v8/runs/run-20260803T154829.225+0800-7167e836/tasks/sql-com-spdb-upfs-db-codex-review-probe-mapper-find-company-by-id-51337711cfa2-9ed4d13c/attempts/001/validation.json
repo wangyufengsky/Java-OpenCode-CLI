@@ -1,8 +1,0 @@
-{
-  "schema_version" : "mybatis-sql-review-validation/v1",
-  "status" : "accepted",
-  "statement_key" : "com-spdb-upfs-db-codex-review-probe-mapper-find-company-by-id-51337711cfa2",
-  "scenario_count" : 0,
-  "evidence_bytes" : 1289,
-  "audited_call_ids" : [ ]
-}

@@ -37,6 +37,7 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
 public class AgentBridgeClient {
+    private static final int REQUIRED_CONSECUTIVE_IDLE_POLLS = 3;
     private static final String MCP_CLIENT_PROTOCOL_VERSION = "2025-03-26";
     public static final String DATABASE_MCP_MINIMUM_AGENTBRIDGE_VERSION = "1.202.1";
     private static final int SMALL_JSON_RESPONSE_BYTES = 64 * 1024;
@@ -77,12 +78,17 @@ public class AgentBridgeClient {
         long startupGraceNanos = Math.min(Duration.ofSeconds(30).toNanos(), timeout.toNanos());
         long startedWaiting = System.nanoTime();
         boolean observedRunning = false;
+        int consecutiveIdlePolls = 0;
         while (true) {
             boolean running = isRunning(webBaseUrl);
             if (running) {
                 observedRunning = true;
+                consecutiveIdlePolls = 0;
             } else if (observedRunning || System.nanoTime() - startedWaiting >= startupGraceNanos) {
-                return;
+                consecutiveIdlePolls++;
+                if (consecutiveIdlePolls >= REQUIRED_CONSECUTIVE_IDLE_POLLS) {
+                    return;
+                }
             }
             if (System.nanoTime() >= deadline) {
                 throw new AgentBridgeTimeoutException(

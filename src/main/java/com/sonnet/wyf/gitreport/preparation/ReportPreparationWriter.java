@@ -2,6 +2,7 @@ package com.sonnet.wyf.gitreport.preparation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.GitReportProperties;
+import com.sonnet.wyf.gitreport.core.GitReportConstants;
 import com.sonnet.wyf.gitreport.util.JsonMaps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,26 +23,6 @@ public class ReportPreparationWriter {
     private static final Logger log = LoggerFactory.getLogger(ReportPreparationWriter.class);
     private static final String PERSON_REPORT_TEMPLATE = "git-report-prompt-pack/templates/person-code-contribution-report.md";
     private static final String FINAL_REPORT_TEMPLATE = "git-report-prompt-pack/templates/code-contribution-report.md";
-    private static final List<String> PERSON_REPORT_PLACEHOLDERS = List.of(
-            "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
-            "{{TOP_FILES_ROWS}}",
-            "{{EXTENSION_ROWS}}",
-            "{{COMMIT_ROWS}}",
-            "{{BIAS_NOTES}}",
-            "{{QUALITY_FINDING_ROWS}}",
-            "{{POSITIVE_SIGNALS}}",
-            "{{RISK_SIGNALS}}",
-            "{{LOW_QUALITY_SNIPPETS}}",
-            "{{UNVERIFIED_ITEMS}}"
-    );
-    private static final List<String> FINAL_REPORT_PLACEHOLDERS = List.of(
-            "{{RANKING_ROWS}}",
-            "{{AI_ANALYSIS}}",
-            "{{PERSON_REPORT_LINK_ROWS}}",
-            "{{INCOMPLETE_REPORT_ROWS}}",
-            "{{RISK_AND_BIAS}}",
-            "{{LOW_QUALITY_SNIPPETS}}"
-    );
 
     private final ObjectMapper objectMapper;
 
@@ -79,7 +60,7 @@ public class ReportPreparationWriter {
             author.put("quality_summary_json", qualitySummaryJson.toString());
             author.put("person_report_relative_path", relativePath);
             author.put("person_report_markdown_link", markdownLink);
-            author.put("person_report_placeholders", PERSON_REPORT_PLACEHOLDERS);
+            author.put("person_report_placeholders", GitReportConstants.PERSON_REPORT_PLACEHOLDERS);
             List<Map<String, Object>> worklist = buildExecutionWorklist(detailJson, reportMd, qualitySummaryJson);
             author.put("execution_worklist", worklist);
             Map<String, Object> task = new LinkedHashMap<>();
@@ -91,7 +72,7 @@ public class ReportPreparationWriter {
             task.put("quality_summary_json", qualitySummaryJson.toString());
             task.put("report_relative_path", relativePath);
             task.put("report_markdown_link", markdownLink);
-            task.put("report_placeholders", PERSON_REPORT_PLACEHOLDERS);
+            task.put("report_placeholders", GitReportConstants.PERSON_REPORT_PLACEHOLDERS);
             task.put("quality_summary_required_status", "completed");
             task.put("execution_worklist", worklist);
             tasks.add(task);
@@ -122,7 +103,7 @@ public class ReportPreparationWriter {
                     "quality_summary_json", author.get("quality_summary_json"),
                     "person_report_relative_path", author.get("person_report_relative_path"),
                     "person_report_markdown_link", author.get("person_report_markdown_link"),
-                    "report_placeholders", PERSON_REPORT_PLACEHOLDERS,
+                    "report_placeholders", GitReportConstants.PERSON_REPORT_PLACEHOLDERS,
                     "quality_summary_status_required", "completed"
             ));
             writeJson(detailPath, detail);
@@ -145,7 +126,7 @@ public class ReportPreparationWriter {
         indexInputs.put("metadata", data.get("metadata"));
         indexInputs.put("totals", data.get("totals"));
         indexInputs.put("final_report", ((Map<?, ?>) data.get("metadata")).get("final_report"));
-        indexInputs.put("final_report_placeholders", FINAL_REPORT_PLACEHOLDERS);
+        indexInputs.put("final_report_placeholders", GitReportConstants.FINAL_REPORT_PLACEHOLDERS);
         indexInputs.put("tasks", data.get("tasks"));
         return indexInputs;
     }
@@ -181,7 +162,7 @@ public class ReportPreparationWriter {
                 step(5, "draft_quality_summary", qualitySummaryJson),
                 step(6, "replace_quality_summary_json_fields", qualitySummaryJson),
                 step(7, "draft_person_report", reportMd),
-                stepWithPlaceholders(8, "replace_person_report_placeholders", reportMd, PERSON_REPORT_PLACEHOLDERS),
+                stepWithPlaceholders(8, "replace_person_report_placeholders", reportMd, GitReportConstants.PERSON_REPORT_PLACEHOLDERS),
                 Map.of("step", 9, "action", "verify_outputs", "required", true, "required_paths", List.of(reportMd.toString(), qualitySummaryJson.toString()), "status", "pending"),
                 Map.of("step", 10, "action", "final_response", "required", true, "allowed", List.of("简短完成信息；Java 会校验输出文件", "简短失败说明；Java 会根据校验结果决定是否纠正"), "status", "pending")
         );
@@ -241,7 +222,7 @@ public class ReportPreparationWriter {
         quality.put("risk_signals", List.of());
         quality.put("code_snippets", List.of());
         quality.put("unverified", List.of());
-        quality.put("summary", "{{QUALITY_SUMMARY}}");
+        quality.put("summary", GitReportConstants.QUALITY_SUMMARY_PLACEHOLDER);
         return quality;
     }
 

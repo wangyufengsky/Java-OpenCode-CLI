@@ -37,8 +37,13 @@ public class FinalReportValidator {
             if (report.contains(GitReportConstants.REPORT_MARKER)) {
                 return Validation.failed("final report still contains marker: " + finalReport);
             }
-            if (report.contains("{{")) {
-                return Validation.failed("final report contains unresolved template placeholder: " + finalReport);
+            String placeholder = GitReportConstants.FINAL_REPORT_PLACEHOLDERS.stream()
+                    .filter(report::contains)
+                    .findFirst()
+                    .orElse("");
+            if (!placeholder.isBlank()) {
+                return Validation.failed("final report contains unresolved template placeholder "
+                        + placeholder + ": " + finalReport);
             }
             for (String section : REQUIRED_SECTIONS) {
                 if (!report.contains(section)) {

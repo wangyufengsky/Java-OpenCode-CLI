@@ -59,7 +59,7 @@ class ArtifactCompletenessValidatorTest {
     }
 
     @Test
-    void reportsGenericTemplatePlaceholderResidue() throws Exception {
+    void acceptsUnlistedDoubleBracesAsReportContent() throws Exception {
         Path report = tempDir.resolve("generic.md");
         Files.writeString(report, "# report\n{{UNLISTED}}\n");
 
@@ -69,8 +69,8 @@ class ArtifactCompletenessValidatorTest {
                 List.of("{{BODY}}")
         );
 
-        assertThat(validation.ok()).isFalse();
-        assertThat(validation.error()).contains("unresolved template placeholder");
+        assertThat(validation.ok()).isTrue();
+        assertThat(validation.error()).isBlank();
     }
 
     @Test

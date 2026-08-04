@@ -153,15 +153,20 @@ public class AgentBridgeTaskRunner {
             AgentBridgeRunMonitor monitor,
             int correctionRound
     ) throws Exception {
-        client.waitUntilIdle(
-                spec.webBaseUrl(),
-                Duration.ofMinutes(spec.timeoutMinutes()),
-                Duration.ofMillis(Math.max(50, spec.pollMillis()))
-        );
+        Duration timeout = Duration.ofMinutes(spec.timeoutMinutes());
+        Duration pollInterval = Duration.ofMillis(Math.max(50, spec.pollMillis()));
+        while (true) {
+            client.waitUntilIdle(spec.webBaseUrl(), timeout, pollInterval);
+            settle(spec.validationSettleSeconds());
+            if (!client.isRunning(spec.webBaseUrl())) {
+                break;
+            }
+            log.info("AgentBridge resumed during validation settle window; waiting again: taskId={}, title={}",
+                    monitor.taskId(), spec.title());
+        }
 
         int pollCount = monitor.recordPoll("idle");
         monitor.logHeartbeat("idle", pollCount);
-        settle(spec.validationSettleSeconds());
         ValidationCheck validation = validate(spec.validationProbe(), spec.runDir());
         if (validation.ok()) {
             monitor.write("completed_by_output", "idle", false, correctionRound, "");

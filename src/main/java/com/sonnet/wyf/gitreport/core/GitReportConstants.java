@@ -6,6 +6,27 @@ public final class GitReportConstants {
     public static final String REPORT_MARKER = "<!-- CODE_CONTRIBUTION_REPORT_CONTENT -->";
     public static final String AUTHOR_REPORT_MARKER = "<!-- AUTHOR_CODE_CONTRIBUTION_REPORT_CONTENT -->";
     public static final String QUALITY_SUMMARY_MARKER = "\"__QUALITY_SUMMARY_JSON_CONTENT__\"";
+    public static final String QUALITY_SUMMARY_PLACEHOLDER = "{{QUALITY_SUMMARY}}";
+    public static final List<String> PERSON_REPORT_PLACEHOLDERS = List.of(
+            "{{WORKLOAD_STRUCTURE_ANALYSIS}}",
+            "{{TOP_FILES_ROWS}}",
+            "{{EXTENSION_ROWS}}",
+            "{{COMMIT_ROWS}}",
+            "{{BIAS_NOTES}}",
+            "{{QUALITY_FINDING_ROWS}}",
+            "{{POSITIVE_SIGNALS}}",
+            "{{RISK_SIGNALS}}",
+            "{{LOW_QUALITY_SNIPPETS}}",
+            "{{UNVERIFIED_ITEMS}}"
+    );
+    public static final List<String> FINAL_REPORT_PLACEHOLDERS = List.of(
+            "{{RANKING_ROWS}}",
+            "{{AI_ANALYSIS}}",
+            "{{PERSON_REPORT_LINK_ROWS}}",
+            "{{INCOMPLETE_REPORT_ROWS}}",
+            "{{RISK_AND_BIAS}}",
+            "{{LOW_QUALITY_SNIPPETS}}"
+    );
     public static final List<String> DEFAULT_INCLUDE_PATTERNS = List.of(
             "*.java", "*.kt", "*.kts", "*.scala", "*.groovy", "*.gradle", "*.py", "*.rb", "*.sh", "*.bash",
             "*.zsh", "*.ps1", "*.bat", "*.cmd", "*.js", "*.jsx", "*.ts", "*.tsx", "*.mjs", "*.cjs",

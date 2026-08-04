@@ -87,6 +87,41 @@ public class ConcurrentWorkflowTaskRunner {
         return results;
     }
 
+    public <T> List<TaskRunResult> runSerialFailFast(
+            String workflowName,
+            List<T> tasks,
+            Function<T, String> taskKey,
+            Function<T, Callable<TaskRunResult>> taskFactory
+    ) throws Exception {
+        log.info("Starting serial fail-fast workflow tasks: workflow={}, taskCount={}", workflowName, tasks.size());
+        eventSink.emitCurrent("TASK_GROUP_STARTED", workflowName + "，任务数=" + tasks.size());
+        List<TaskRunResult> results = new ArrayList<>();
+        Semaphore semaphore = new Semaphore(1);
+        Long runId = WorkflowRunContext.currentRunId();
+        WorkflowArtifactWorkspace artifactWorkspace = WorkflowArtifactContext.currentOrNull();
+        for (T task : tasks) {
+            TaskRunResult result = limitedCallable(
+                    semaphore,
+                    task,
+                    taskKey,
+                    taskFactory,
+                    runId,
+                    artifactWorkspace
+            ).call();
+            results.add(result);
+            publishTaskResult(workflowName, result);
+            if (!result.success()) {
+                String summary = failureSummary(result);
+                log.warn("{} stopped after task failure: {}", workflowName, summary);
+                eventSink.emitCurrent("TASK_GROUP_FAILED", workflowName + "，" + summary);
+                throw new IllegalStateException(workflowName + " stopped after task failure: " + summary);
+            }
+        }
+        log.info("Workflow tasks completed successfully: workflow={}", workflowName);
+        eventSink.emitCurrent("TASK_GROUP_SUCCEEDED", workflowName);
+        return results;
+    }
+
     private <T> Callable<TaskRunResult> limitedCallable(
             Semaphore semaphore,
             T task,
@@ -123,5 +158,26 @@ public class ConcurrentWorkflowTaskRunner {
 
     private String sanitize(Exception exception) {
         return exception.getClass().getName() + ": " + (exception.getMessage() == null ? "" : exception.getMessage());
+    }
+
+    private void publishTaskResult(String workflowName, TaskRunResult result) {
+        eventSink.taskStatusCurrent(
+                result.taskKey(),
+                result.taskName(),
+                result.success() ? "SUCCEEDED" : "FAILED",
+                workflowName,
+                result.statusPath() == null ? "" : result.statusPath().toString(),
+                result.error()
+        );
+    }
+
+    private String failureSummary(TaskRunResult result) {
+        return result.taskKey()
+                + " ("
+                + result.taskName()
+                + "), status="
+                + (result.statusPath() == null ? "" : result.statusPath())
+                + ", error="
+                + result.error();
     }
 }

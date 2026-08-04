@@ -133,6 +133,29 @@ class AuthorOutputValidatorAndQualityScoresTest {
     }
 
     @Test
+    void validatorAcceptsUnlistedDoubleBracesInCompletedReport() throws Exception {
+        Path report = tempDir.resolve("person-report.md");
+        Path quality = tempDir.resolve("quality-summary.json");
+        Files.writeString(report, "个人报告内容，模板示例：`{{customerName}}`\n");
+        Files.writeString(quality, """
+                {
+                  "author": "Alice <alice@example.com>",
+                  "status": "completed",
+                  "findings": [],
+                  "positive_signals": [],
+                  "risk_signals": [],
+                  "code_snippets": [],
+                  "unverified": [],
+                  "summary": "正常模板代码 {{customerName}}"
+                }
+                """);
+
+        AuthorValidationResult result = new AuthorOutputValidator(objectMapper).validate(report, quality);
+
+        assertThat(result.ok()).isTrue();
+    }
+
+    @Test
     void validatorRejectsUnredactedSensitiveSnippetAndSnippetWithoutNegativeFinding() throws Exception {
         Path report = tempDir.resolve("person-report.md");
         Path quality = tempDir.resolve("quality-summary.json");

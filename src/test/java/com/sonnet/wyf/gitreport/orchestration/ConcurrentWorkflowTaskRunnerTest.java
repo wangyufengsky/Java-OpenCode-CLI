@@ -94,6 +94,29 @@ class ConcurrentWorkflowTaskRunnerTest {
                 .satisfies(result -> assertThat(result.error()).contains("IllegalStateException: boom"));
     }
 
+    @Test
+    void serialFailFastStopsBeforeNextTask() {
+        ConcurrentWorkflowTaskRunner runner = new ConcurrentWorkflowTaskRunner(executor(2));
+        ConcurrentLinkedQueue<String> executed = new ConcurrentLinkedQueue<>();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> runner.runSerialFailFast(
+                        "test workflow",
+                        List.of("bad", "must-not-run"),
+                        item -> item,
+                        item -> () -> {
+                            executed.add(item);
+                            return "bad".equals(item)
+                                    ? TaskRunResult.failed(item, item, Path.of("bad-status.json"), "validation failed")
+                                    : TaskRunResult.success(item, item, Path.of("ok-status.json"));
+                        }
+                ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stopped after task failure")
+                .hasMessageContaining("validation failed");
+
+        assertThat(executed).containsExactly("bad");
+    }
+
     private ThreadPoolTaskExecutor executor(int concurrency) {
         executor = new ThreadPoolTaskExecutor();
         executor.setThreadNamePrefix("test-workflow-task-");

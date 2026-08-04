@@ -140,7 +140,7 @@ class GitReportOrchestratorIntegrationTest {
     }
 
     @Test
-    void rerunsIncompleteAuthorOutputsBeforeSynthesis() throws Exception {
+    void stopsCurrentAuthorAfterConfiguredCorrectionBudgetBeforeSynthesis() throws Exception {
         Path repo = tempDir.resolve("repo-no-auto-retry-after-submit");
         Path out = tempDir.resolve("out-no-auto-retry-after-submit");
         Files.createDirectories(repo);
@@ -158,29 +158,27 @@ class GitReportOrchestratorIntegrationTest {
         properties.getPaths().setOut(out);
         properties.getAgentbridge().setWebBaseUrl(agentbridgeWebBaseUrl());
         properties.getAgentbridge().setValidationSettleSeconds(0);
-        properties.getAgentbridge().setTimeoutMinutes(0);
-        properties.getAgentbridge().setValidationSettleSeconds(0);
+        properties.getAgentbridge().setTimeoutMinutes(1);
+        properties.getAgentbridge().setPollMillis(1);
         properties.getGit().setSince(LocalDate.of(2000, 1, 1));
         properties.getGit().setUntil(LocalDate.of(2099, 12, 31));
 
         assertThatThrownBy(() -> orchestrator().run(properties))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("git-report author outputs incomplete after 5 rerun rounds")
+                .hasMessageContaining("git-report author stopped after task failure")
                 .hasMessageContaining("author-001-alice-alice-example-com");
 
-        assertThat(sessions).hasValue(6);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(6);
-        assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("Java 产物校验失败"));
+        assertThat(sessions).hasValue(3);
+        assertThat(prompts)
+                .filteredOn(prompt -> prompt.contains("detail_json:") && !prompt.contains("Java 产物校验失败"))
+                .hasSize(1);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).hasSize(2);
         assertThat(prompts).noneSatisfy(prompt -> assertThat(prompt).contains("synthesis_inputs_json:"));
-        assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
-                .contains("\"state\" : \"failed\"")
-                .contains("\"rerunRounds\" : 5")
-                .contains("author-001-alice-alice-example-com")
-                .contains("person report contains unresolved template placeholder");
+        assertThat(out.resolve("runs/incomplete-reports.json")).doesNotExist();
     }
 
     @Test
-    void rerunsInvalidAuthorOutputInFreshSessionWithoutSameSessionCorrection() throws Exception {
+    void correctsInvalidAuthorBeforeStartingSynthesis() throws Exception {
         Path repo = tempDir.resolve("repo-fresh-rerun-correction");
         Path out = tempDir.resolve("out-fresh-rerun-correction");
         Files.createDirectories(repo);
@@ -206,12 +204,12 @@ class GitReportOrchestratorIntegrationTest {
         orchestrator().run(properties);
 
         assertThat(sessions).hasValue(3);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(2);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).isEmpty();
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(1);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).hasSize(1);
         assertThat(prompts).filteredOn(prompt -> prompt.contains("synthesis_inputs_json:")).hasSize(1);
         assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
                 .contains("\"state\" : \"completed\"")
-                .contains("\"rerunRounds\" : 1");
+                .contains("\"rerunRounds\" : 0");
         JsonNode authorStatus = objectMapper.readTree(out.resolve("runs/author-001-alice-alice-example-com/agent-status.json").toFile());
         assertThat(authorStatus.path("attempt").asInt()).isEqualTo(1);
         assertThat(authorStatus.path("taskId").asText()).startsWith("git-report-author-001-alice-alice-example-com-");
@@ -741,6 +739,11 @@ class GitReportOrchestratorIntegrationTest {
                     } else {
                         writeValidAuthorOutput(detailPath);
                     }
+                } else if (prompt.contains("Java 产物校验失败")) {
+                    Path originalPrompt = Path.of(extractPath(prompt, "原 prompt 文件："));
+                    Path detailPath = Path.of(extractPath(Files.readString(originalPrompt), "detail_json:"));
+                    authorRuns.incrementAndGet();
+                    writeValidAuthorOutput(detailPath);
                 } else if (prompt.contains("synthesis_inputs_json:")) {
                     writeFakeAgentBridgeOutput(prompt);
                 }
@@ -774,6 +777,11 @@ class GitReportOrchestratorIntegrationTest {
                         } else {
                             writeValidAuthorOutput(detailPath);
                         }
+                    } else if (prompt.contains("Java 产物校验失败")) {
+                        Path originalPrompt = Path.of(extractPath(prompt, "原 prompt 文件："));
+                        Path detailPath = Path.of(extractPath(Files.readString(originalPrompt), "detail_json:"));
+                        authorRuns.incrementAndGet();
+                        writeValidAuthorOutput(detailPath);
                     } else if (prompt.contains("synthesis_inputs_json:")) {
                         writeFakeAgentBridgeOutput(prompt);
                     }
@@ -811,7 +819,8 @@ class GitReportOrchestratorIntegrationTest {
 
     private void writeInvalidAuthorOutput(Path detailPath) throws IOException {
         JsonNode detail = objectMapper.readTree(detailPath.toFile());
-        Files.writeString(Path.of(detail.at("/output/person_report_md").asText()), "个人报告内容 {{UNFINISHED}}\n");
+        Files.writeString(Path.of(detail.at("/output/person_report_md").asText()),
+                "个人报告内容 {{WORKLOAD_STRUCTURE_ANALYSIS}}\n");
         objectMapper.writeValue(Path.of(detail.at("/output/quality_summary_json").asText()).toFile(), Map.of(
                 "author", detail.path("author").asText(),
                 "status", "completed",

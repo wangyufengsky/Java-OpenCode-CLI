@@ -43,7 +43,7 @@ class FinalReportValidatorTest {
     @Test
     void acceptsFinalReportWithRequiredSectionsAndRelativeLinks() throws Exception {
         Path report = tempDir.resolve("code-contribution-report.md");
-        Files.writeString(report, validReport());
+        Files.writeString(report, validReport() + "\n正常模板代码：`{{runtimeValue}}`\n");
 
         FinalReportValidator.Validation validation = new FinalReportValidator().validate(report);
 

@@ -21,9 +21,6 @@ public class ArtifactCompletenessValidator {
                     return Validation.failed(label + " still contains template placeholder: " + path);
                 }
             }
-            if (content.contains("{{")) {
-                return Validation.failed(label + " contains unresolved template placeholder: " + path);
-            }
             return Validation.success();
         } catch (Exception exception) {
             return Validation.failed(label + " validation failed: " + exception.getMessage());

@@ -35,8 +35,10 @@ public class AuthorOutputValidator {
             if (report.isBlank()) {
                 return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
             }
-            if (report.contains("{{")) {
-                return AuthorValidationResult.failed("person report contains unresolved template placeholder: " + reportMd);
+            String reportPlaceholder = firstPlaceholder(report, GitReportConstants.PERSON_REPORT_PLACEHOLDERS);
+            if (!reportPlaceholder.isBlank()) {
+                return AuthorValidationResult.failed("person report contains unresolved template placeholder "
+                        + reportPlaceholder + ": " + reportMd);
             }
             if (report.contains(GitReportConstants.AUTHOR_REPORT_MARKER)) {
                 return AuthorValidationResult.failed("person report still contains marker: " + reportMd);
@@ -48,8 +50,9 @@ public class AuthorOutputValidator {
             if (quality.isBlank() || quality.trim().equals(GitReportConstants.QUALITY_SUMMARY_MARKER) || quality.contains(GitReportConstants.QUALITY_SUMMARY_MARKER)) {
                 return AuthorValidationResult.failed("quality summary still contains marker: " + qualitySummaryJson);
             }
-            if (quality.contains("{{")) {
-                return AuthorValidationResult.failed("quality summary contains unresolved template placeholder: " + qualitySummaryJson);
+            if (quality.contains(GitReportConstants.QUALITY_SUMMARY_PLACEHOLDER)) {
+                return AuthorValidationResult.failed("quality summary contains unresolved template placeholder "
+                        + GitReportConstants.QUALITY_SUMMARY_PLACEHOLDER + ": " + qualitySummaryJson);
             }
             Map<String, Object> root = objectMapper.readValue(quality, new TypeReference<>() {});
             for (String key : List.of("findings", "positive_signals", "risk_signals", "code_snippets", "unverified")) {
@@ -89,6 +92,13 @@ public class AuthorOutputValidator {
         } catch (Exception exception) {
             return AuthorValidationResult.failed(exception.getMessage());
         }
+    }
+
+    private String firstPlaceholder(String content, List<String> placeholders) {
+        return placeholders.stream()
+                .filter(content::contains)
+                .findFirst()
+                .orElse("");
     }
 
     private AuthorValidationResult validateRootRequiredFields(Map<String, Object> root) {

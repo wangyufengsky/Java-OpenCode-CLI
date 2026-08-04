@@ -122,6 +122,25 @@ class AgentBridgeTaskRunnerTest {
     }
 
     @Test
+    void waitsAgainWhenAgentResumesDuringValidationSettleWindow() throws Exception {
+        Path promptFile = writePrompt("PROMPT");
+        RecordingClient client = new RecordingClient();
+        client.resumeOnceAfterIdle = true;
+        AgentBridgeTaskRunner runner = runner(client);
+
+        AgentBridgeRunResult result = runner.runUntilValidated(spec(
+                promptFile,
+                "MESSAGE",
+                ValidationCheck::success,
+                0
+        ));
+
+        assertThat(result.validationOk()).isTrue();
+        assertThat(client.waits).isEqualTo(2);
+        assertThat(client.runningChecks).isEqualTo(2);
+    }
+
+    @Test
     void preservesTimeoutStateAfterFreshSessionBudgetIsExhausted() throws Exception {
         Path promptFile = writePrompt("PROMPT");
         RecordingClient client = new RecordingClient();
@@ -183,7 +202,9 @@ class AgentBridgeTaskRunnerTest {
         private final List<String> prompts = new ArrayList<>();
         private boolean failFirstWait;
         private boolean timeoutEveryWait;
+        private boolean resumeOnceAfterIdle;
         private int waits;
+        private int runningChecks;
 
         RecordingClient() {
             super(new ObjectMapper());
@@ -196,12 +217,19 @@ class AgentBridgeTaskRunnerTest {
 
         @Override
         public void waitUntilIdle(URI webBaseUrl, Duration timeout, Duration pollInterval) {
+            waits++;
             if (timeoutEveryWait) {
                 throw new AgentBridgeTimeoutException("AgentBridge agent did not finish within 1 minutes");
             }
-            if (failFirstWait && ++waits == 1) {
+            if (failFirstWait && waits == 1) {
                 throw new IllegalStateException("temporary AgentBridge failure");
             }
+        }
+
+        @Override
+        public boolean isRunning(URI webBaseUrl) {
+            runningChecks++;
+            return resumeOnceAfterIdle && runningChecks == 1;
         }
     }
 }
