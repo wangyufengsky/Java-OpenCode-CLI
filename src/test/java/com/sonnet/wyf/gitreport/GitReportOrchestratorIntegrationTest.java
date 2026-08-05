@@ -204,8 +204,12 @@ class GitReportOrchestratorIntegrationTest {
         orchestrator().run(properties);
 
         assertThat(sessions).hasValue(3);
-        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(1);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("detail_json:")).hasSize(2);
         assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败")).hasSize(1);
+        assertThat(prompts).filteredOn(prompt -> prompt.contains("Java 产物校验失败"))
+                .allSatisfy(prompt -> assertThat(prompt)
+                        .contains("## 内嵌个人明细 JSON")
+                        .contains("不要读取原 prompt 文件"));
         assertThat(prompts).filteredOn(prompt -> prompt.contains("synthesis_inputs_json:")).hasSize(1);
         assertThat(Files.readString(out.resolve("runs/incomplete-reports.json")))
                 .contains("\"state\" : \"completed\"")
@@ -469,7 +473,7 @@ class GitReportOrchestratorIntegrationTest {
         return new GitReportOrchestrator(
                 preparation,
                 objectMapper,
-                new PromptBuilder(new DefaultResourceLoader()),
+                new PromptBuilder(new DefaultResourceLoader(), objectMapper),
                 new AgentBridgeTaskRunner(client, scheduledProbeWaiter, new WorkflowEventSink(), objectMapper),
                 new AuthorOutputValidator(objectMapper),
                 new FinalReportValidator(),

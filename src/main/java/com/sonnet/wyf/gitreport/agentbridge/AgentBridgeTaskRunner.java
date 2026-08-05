@@ -87,7 +87,13 @@ public class AgentBridgeTaskRunner {
                         result.validationError()
                 );
                 correctionRound++;
-                sessionMessage = correctionMessage(spec.promptFile(), result.validationError(), correctionRound, maxCorrections);
+                sessionMessage = correctionMessage(
+                        spec.promptFile(),
+                        text,
+                        result.validationError(),
+                        correctionRound,
+                        maxCorrections
+                );
                 monitor.write("session_failed_retrying", result.agentState(), false, correctionRound, result.validationError());
                 log.warn("AgentBridge session validation failed; starting a fresh session: taskId={}, title={}, correctionRound={}/{}, reason=\"{}\"",
                         monitor.taskId(), spec.title(), correctionRound, maxCorrections, result.validationError());
@@ -201,8 +207,20 @@ public class AgentBridgeTaskRunner {
         }
     }
 
-    private String correctionMessage(Path promptFile, String validationError, int correctionRound, int maxCorrections) {
+    private String correctionMessage(
+            Path promptFile,
+            String originalTask,
+            String validationError,
+            int correctionRound,
+            int maxCorrections
+    ) {
         return """
+                以下已重新附上首轮会话的完整原任务内容。不要读取原 prompt 文件，直接基于本消息中的完整内容继续。
+
+                ===== ORIGINAL TASK BEGIN =====
+                %s
+                ===== ORIGINAL TASK END =====
+
                 Java 产物校验失败，请继续完成同一个 AgentBridge 任务，不要只回复说明。
 
                 要求：
@@ -213,7 +231,15 @@ public class AgentBridgeTaskRunner {
                 原 prompt 文件：%s
                 纠正轮次：%d/%d
                 校验错误：%s
-                """.formatted(promptFile, correctionRound, maxCorrections, validationError == null || validationError.isBlank() ? "unknown validation failure" : validationError);
+                """.formatted(
+                        originalTask,
+                        promptFile,
+                        correctionRound,
+                        maxCorrections,
+                        validationError == null || validationError.isBlank()
+                                ? "unknown validation failure"
+                                : validationError
+                );
     }
 
     private void recordSessionFailure(

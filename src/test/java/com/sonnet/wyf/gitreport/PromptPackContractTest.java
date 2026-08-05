@@ -1,7 +1,9 @@
 package com.sonnet.wyf.gitreport;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonnet.wyf.gitreport.prompt.PromptBuilder;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Files;
@@ -10,6 +12,9 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PromptPackContractTest {
+    @TempDir
+    Path tempDir;
+
     @Test
     void myBatisPromptPackUsesNativeDatabaseMcpVocabulary() throws Exception {
         String prompt = Files.readString(Path.of(
@@ -137,7 +142,8 @@ class PromptPackContractTest {
                 "路径载荷指定文件"
         );
         assertThat(worker).contains(
-                "读取 `detail_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入",
+                "Java 会把该文件的完整 JSON 无损紧凑化后内嵌到本 prompt 的 `detail_json_content` 中",
+                "不得调用任何文件读取工具、Task/子任务或其他能力重新读取 `detail_json`",
                 "写入个人报告和质量摘要时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件",
                 "所有文件写入都必须分段执行",
                 "单次写入不超过 6000 字符、120 行",
@@ -356,11 +362,21 @@ class PromptPackContractTest {
 
     @Test
     void promptBuilderLoadsClasspathResourcesAndEmbedsTemplates() throws Exception {
-        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
+        Path detailJson = tempDir.resolve("author-001.json");
+        Files.writeString(detailJson, """
+                {
+                  "metadata": {"project_id": "demo"},
+                  "changed_regions": [{"file": "Demo.java", "hunk": "+int value = 1;"}]
+                }
+                """);
+        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader(), new ObjectMapper());
 
-        String prompt = builder.buildWorkerPrompt(Path.of("D:/out/details/author-001.json"));
+        String prompt = builder.buildWorkerPrompt(detailJson);
 
-        assertThat(prompt).contains("detail_json: D:/out/details/author-001.json");
+        assertThat(prompt).contains("detail_json: " + detailJson);
+        assertThat(prompt).contains("## 内嵌个人明细 JSON");
+        assertThat(prompt).contains("{\"metadata\":{\"project_id\":\"demo\"},\"changed_regions\":[{\"file\":\"Demo.java\",\"hunk\":\"+int value = 1;\"}]}");
+        assertThat(prompt).contains("不得调用任何文件读取工具、Task/子任务或其他能力重新读取 `detail_json`");
         assertThat(prompt).contains("## 个人报告模板");
         assertThat(prompt).contains("个人代码提交量报告");
         assertThat(prompt).contains("{{WORKLOAD_STRUCTURE_ANALYSIS}}");
@@ -368,8 +384,27 @@ class PromptPackContractTest {
     }
 
     @Test
+    void workerPromptEmbedsOversizedDetailWithoutToolOutputTruncation() throws Exception {
+        String oversizedHunk = "HUNK-BEGIN-" + "x".repeat(120_000) + "-HUNK-END";
+        Path detailJson = tempDir.resolve("oversized-author.json");
+        new ObjectMapper().writeValue(detailJson.toFile(), java.util.Map.of(
+                "metadata", java.util.Map.of("project_id", "oversized-demo"),
+                "changed_regions", java.util.List.of(java.util.Map.of("hunk", oversizedHunk))
+        ));
+        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader(), new ObjectMapper());
+
+        String prompt = builder.buildWorkerPrompt(detailJson);
+
+        assertThat(prompt)
+                .contains("HUNK-BEGIN-")
+                .contains("-HUNK-END")
+                .contains(oversizedHunk)
+                .doesNotContain("[…truncated]", "[...truncated]");
+    }
+
+    @Test
     void synthesisPromptUsesBoundedSynthesisInputs() {
-        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader());
+        PromptBuilder builder = new PromptBuilder(new DefaultResourceLoader(), new ObjectMapper());
 
         String prompt = builder.buildSynthesisPrompt(Path.of("D:/out/runs/synthesis/synthesis-inputs.json"));
 

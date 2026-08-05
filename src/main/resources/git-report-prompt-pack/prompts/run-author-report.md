@@ -2,17 +2,17 @@
 
 ## 输入
 
-Java 调度器会在本 prompt 后追加以下路径载荷：
+Java 调度器会在本 prompt 后追加明细原始路径和完整内容：
 
 ```text
 detail_json: <path>
 ```
 
-`detail_json` 是 Java 已生成的个人明细 JSON 文件。读取后，将 JSON 内容对象称为 `detail`。项目标识使用 `detail.metadata.project_id`，项目名称使用 `detail.metadata.project_name`，本次运行标识使用 `detail.metadata.run_id`；不要从 AgentBridge 会话或 MCP 上下文推断项目。个人报告模板会以内嵌 Markdown 形式追加在本 prompt 后面，不需要再读取外部模板文件。
+`detail_json` 只是 Java 已生成明细文件的溯源路径。Java 会把该文件的完整 JSON 无损紧凑化后内嵌到本 prompt 的 `detail_json_content` 中；直接将内嵌 JSON 对象称为 `detail`，不得再读取 `detail_json` 路径。项目标识使用 `detail.metadata.project_id`，项目名称使用 `detail.metadata.project_name`，本次运行标识使用 `detail.metadata.run_id`；不要从 AgentBridge 会话或 MCP 上下文推断项目。个人报告模板会以内嵌 Markdown 形式追加在本 prompt 后面，不需要再读取外部模板文件。
 
 ## 严格边界
 
-- 只读取输入的 `detail_json`；质量分析只能基于 `detail.changed_regions` 中 Java 从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
+- 只使用内嵌的 `detail_json_content`；质量分析只能基于 `detail.changed_regions` 中 Java 从该人员提交提取出的 hunk，不得打开或通读 `detail.top_files[].path` 对应的完整文件。
 - `detail.top_files` 只作为统计表和工作量结构输入，不作为质量分析代码来源。
 - `detail.changed_regions` 是 Java 已按配置裁剪后的主要提交区域；每个区域的 `file`、`line_start`、`line_end` 和 `hunk` 才是该人员本次提交的可分析代码边界。
 - `detail.commits` 是 Java 已裁剪后的主要提交列表，不要要求或推断完整提交列表。
@@ -29,7 +29,7 @@ detail_json: <path>
 
 ## 受控读写与取证规则
 
-- 读取 `detail_json` 时，使用当前 AgentBridge 环境可用能力读取任务输入。
+- `detail_json_content` 已在会话中完整提供；不得调用任何文件读取工具、Task/子任务或其他能力重新读取 `detail_json`。
 - 写入个人报告和质量摘要时，使用当前 AgentBridge 环境可用能力写入路径载荷指定文件。
 - 所有文件写入都必须分段执行，优先按 JSON 字段、Markdown 标题、表格行或模板占位符拆分。
 - 单次写入不超过 6000 字符、120 行；不要一次性重写完整大文件。
@@ -49,7 +49,7 @@ detail_json: <path>
 
 ## 写入规则
 
-- 必须立即调用 `AgentBridge` MCP 工具完成读写：读取输入，写入输出；不要只回复计划、摘要或“准备写入”。
+- 必须立即基于内嵌 `detail` 调用 `AgentBridge` MCP 写入工具完成输出；不要只回复计划、摘要或“准备写入”。
 - 个人 Markdown 单次写入不超过 6000 字符、120 行；长表格分块写。
 - 个人报告必须保留 Java 预创建的所有一级、二级、三级标题；只替换 `detail.output.report_placeholders` 中列出的占位符。
 - `quality-summary.json` 必须保持合法 JSON object，并将 `status` 改为 `completed`。

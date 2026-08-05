@@ -155,7 +155,7 @@ public class ReportPreparationWriter {
 
     private List<Map<String, Object>> buildExecutionWorklist(Path detailJson, Path reportMd, Path qualitySummaryJson) {
         return List.of(
-                step(1, "read_detail_json", detailJson),
+                step(1, "use_embedded_detail_json", null),
                 step(2, "read_embedded_person_report_template", null),
                 step(3, "inspect_changed_regions", null),
                 step(4, "collect_call_evidence", null),

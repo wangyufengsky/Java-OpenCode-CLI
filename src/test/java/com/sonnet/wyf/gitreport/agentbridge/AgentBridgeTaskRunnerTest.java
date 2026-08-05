@@ -67,12 +67,40 @@ class AgentBridgeTaskRunnerTest {
         assertThat(client.prompts.get(3))
                 .contains("summary missing")
                 .contains("原 prompt 文件：" + promptFile)
+                .contains("===== ORIGINAL TASK BEGIN =====")
+                .contains("MESSAGE\n\nPROMPT")
+                .contains("不要读取原 prompt 文件")
                 .contains("AgentBridge 任务")
                 .doesNotContain("OpenCode");
         assertThat(tempDir.resolve("run/session-attempts/001/session-failure.json")).content()
                 .contains("\"scope\" : \"SESSION\"")
                 .contains("\"category\" : \"OUTPUT_VALIDATION\"")
                 .contains("summary missing");
+    }
+
+    @Test
+    void correctionPromptCarriesOversizedOriginalTaskWithoutTruncation() throws Exception {
+        String oversizedPrompt = "PROMPT-BEGIN-" + "x".repeat(120_000) + "-PROMPT-END";
+        Path promptFile = writePrompt(oversizedPrompt);
+        RecordingClient client = new RecordingClient();
+        AtomicInteger validations = new AtomicInteger();
+        AgentBridgeTaskRunner runner = runner(client);
+
+        AgentBridgeRunResult result = runner.runUntilValidated(spec(
+                promptFile,
+                "MESSAGE",
+                () -> validations.getAndIncrement() == 0
+                        ? ValidationCheck.failed("retry oversized prompt")
+                        : ValidationCheck.success(),
+                1
+        ));
+
+        assertThat(result.validationOk()).isTrue();
+        assertThat(client.prompts.get(3))
+                .contains(oversizedPrompt)
+                .contains("PROMPT-BEGIN-")
+                .contains("-PROMPT-END")
+                .doesNotContain("[…truncated]", "[...truncated]");
     }
 
     @Test
